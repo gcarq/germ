@@ -143,6 +143,7 @@ impl EnvValue {
 
     /// Expands and returns a string value by substituting variables from the given context.
     /// The passed context must be in the original order.
+    /// TODO: Add env.d to context for expansion.
     #[must_use = "this returns the expanded value as a new allocation"]
     pub fn expand(&self, context: &[(String, EnvValue)]) -> EnvValue {
         let value = match self {

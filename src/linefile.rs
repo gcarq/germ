@@ -19,6 +19,10 @@ impl LineBasedFile {
     pub fn contains(&self, line: &str) -> bool {
         self.iter().any(|l| l == line)
     }
+
+    pub fn to_vec(&self) -> Vec<String> {
+        self.lines.clone()
+    }
 }
 
 impl FileFromPath for LineBasedFile {

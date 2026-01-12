@@ -1,6 +1,11 @@
+mod desc;
+
 use crate::r#const::SUPPORTED_EAPI;
+use crate::linefile::LineBasedFile;
 use crate::package::PackageVersion;
 use crate::package::{Package, PackageVersionSuffix};
+use crate::repository::desc::ProfileDescription;
+use crate::utils::FileFromPath;
 use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -25,7 +30,9 @@ pub struct Repository {
     pub name: String,
     pub eapi: usize,
     pub packages: HashSet<Package>,
-    pub arch_list: Vec<String>,
+    pub package_mask: LineBasedFile,
+    pub arch_list: LineBasedFile,
+    pub profiles_desc: Vec<ProfileDescription>,
 }
 
 impl Repository {
@@ -33,13 +40,7 @@ impl Repository {
     pub fn build_main_repo_from_path(path: PathBuf) -> Result<Self> {
         Self::validate_repository(&path)?;
         let categories = Self::collect_categories(&path)?;
-        Ok(Self {
-            name: Self::read_repo_name(&path)?,
-            eapi: Self::read_eapi(&path)?,
-            packages: Self::collect_packages(&path, &categories)?,
-            arch_list: Self::read_arch_list(&path)?,
-            path,
-        })
+        Self::with_categories(path, &categories)
     }
 
     /// Builds an overlay repository from the given path and main [`Repository`].
@@ -49,12 +50,44 @@ impl Repository {
             .into_iter()
             .chain(Self::collect_categories(&main_repo.path)?)
             .collect::<Vec<String>>();
+        Self::with_categories(path, &categories)
+    }
+
+    /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
+    /// The repository location prefix must be stripped from the passed `profile_path` string
+    /// e.g.: default/linux/23.0
+    pub fn is_known_profile(&self, arch: &str, profile_path: &str) -> bool {
+        self.profiles_desc
+            .iter()
+            .any(|desc| desc.keyword == arch && desc.profile_path == profile_path)
+    }
+
+    /// Builds a new [`Repository`] with the given categories.
+    fn with_categories(path: PathBuf, categories: &[String]) -> Result<Self> {
+        let eapi = Self::read_eapi(&path)?;
         Ok(Self {
             name: Self::read_repo_name(&path)?,
-            eapi: Self::read_eapi(&path)?,
-            packages: Self::collect_packages(&path, &categories)?,
-            arch_list: Vec::new(),
+            packages: Self::collect_packages(&path, categories)?,
+            package_mask: LineBasedFile::from_path(
+                &path.join("profiles").join("package.mask"),
+                eapi > 6,
+                true,
+            )?,
+            arch_list: LineBasedFile::from_path(
+                &path.join("profiles").join("arch.list"),
+                false,
+                true,
+            )?,
+            profiles_desc: LineBasedFile::from_path(
+                &path.join("profiles").join("profiles.desc"),
+                false,
+                true,
+            )?
+            .iter()
+            .map(|line| ProfileDescription::from_line(line))
+            .collect::<Result<Vec<ProfileDescription>>>()?,
             path,
+            eapi,
         })
     }
 
@@ -138,23 +171,6 @@ impl Repository {
             ));
         }
         Ok(eapi)
-    }
-
-    /// Reads the arch.list file from the given repository path.
-    /// Returns an empty Vec if arch.list file doesn't exist.
-    fn read_arch_list(path: &Path) -> Result<Vec<String>> {
-        let arch_list_path = path.join("profiles").join("arch.list");
-        if !fs::exists(&arch_list_path)? {
-            return Ok(Vec::new());
-        }
-        let content = fs::read_to_string(&arch_list_path)
-            .with_context(|| "Unable to read content of arch.list file")?;
-        let archs = content
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .collect::<Vec<String>>();
-        Ok(archs)
     }
 
     /// Collects all categories from the given repository path.

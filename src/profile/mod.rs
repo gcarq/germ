@@ -1,11 +1,10 @@
 mod deprecation;
-mod linefile;
 
 use crate::conf::repos::ReposConf;
 use crate::r#const::SUPPORTED_EAPI;
+use crate::linefile::LineBasedFile;
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
-use crate::profile::linefile::LineBasedFile;
 use crate::utils::FileFromPath;
 use anyhow::{Context, Result, anyhow};
 use std::fs;
@@ -68,6 +67,7 @@ impl Profile {
             path.canonicalize()?.display(),
             eapi
         );
+
         let mut profile = Self {
             eapi,
             make_defaults: MakeEnv::from_path(&path.join("make.defaults"), false, true)?,
@@ -112,33 +112,13 @@ impl Profile {
             profile.inherit_from(&parent)
         }
 
-        profile
-            .validate_profile(repos)
-            .with_context(|| "Profile validation failed")?;
-
-        Ok(profile)
-    }
-
-    /// Validates the profile configuration or if its deprecated.
-    fn validate_profile(&self, repos: &ReposConf) -> Result<()> {
-        // Check if the profile is deprecated
-        if let Some(deprecation) = &self.deprecated {
+        if let Some(deprecation) = &profile.deprecated {
             eprintln!(
                 "This profile is deprecated. The recommended profile to upgrade to is {}\n\n{}",
                 deprecation.recommended_profile, deprecation.info
             );
         }
-        // Validate that make.defaults contains a valid arch
-        if let Some(arch) = self.make_defaults.get("ARCH") {
-            let main_repo = repos.main_repo();
-            if !main_repo.arch_list.contains(&arch.to_string()) {
-                return Err(anyhow!(
-                    "Invalid ARCH value '{arch}' in make.defaults. Valid values are: {}",
-                    main_repo.arch_list.join(", ")
-                ));
-            }
-        }
-        Ok(())
+        Ok(profile)
     }
 
     /// Takes a path to a profile directory and resolves all profiles listed in the parent file.

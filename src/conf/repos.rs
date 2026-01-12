@@ -1,4 +1,4 @@
-use crate::tree::Repository;
+use crate::repository::Repository;
 use anyhow::{Context, Result, anyhow};
 use ini::Ini;
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ use std::{fmt, fs};
 #[derive(Debug)]
 pub struct ReposConf {
     main_repo_name: String,
-    pub repos: HashMap<String, Repository>,
+    repos: HashMap<String, Repository>,
 }
 
 impl ReposConf {
@@ -50,6 +50,10 @@ impl ReposConf {
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Repository)> {
         self.repos.iter()
+    }
+
+    pub fn repositories(&self) -> Vec<&Repository> {
+        self.repos.values().collect()
     }
 
     /// Loads the repos.conf configuration from the given path.

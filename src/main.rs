@@ -1,19 +1,19 @@
 use crate::conf::PortageConf;
 use crate::r#const::DEFAULT_USE_PORTAGE_CONF_PATH;
-use crate::vdb::Vdb;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
 use makenv::EnvValue;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 
 mod conf;
 mod r#const;
+mod linefile;
 pub mod makenv;
 pub mod package;
 mod profile;
-mod tree;
+mod repository;
 mod utils;
 mod vdb;
 
@@ -36,7 +36,16 @@ fn main() -> Result<()> {
 
     if args.info {
         info(&conf);
+    } else {
+        for (name, repo) in conf.repos.iter() {
+            println!(
+                "{}: {:?}",
+                name,
+                repo.package_mask.iter().collect::<Vec<&String>>()
+            );
+        }
     }
+
     Ok(())
 
     // let vdb =
