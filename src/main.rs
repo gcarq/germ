@@ -1,5 +1,5 @@
 use crate::conf::PortageConf;
-use crate::r#const::DEFAULT_PORTAGE_CONF_PATH;
+use crate::r#const::DEFAULT_USE_PORTAGE_CONF_PATH;
 use crate::vdb::Vdb;
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -32,7 +32,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let conf = PortageConf::new(Path::new(DEFAULT_PORTAGE_CONF_PATH))?;
+    let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH))?;
 
     if args.info {
         info(&conf);

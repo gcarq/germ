@@ -133,8 +133,7 @@ impl Profile {
             let main_repo = repos.main_repo();
             if !main_repo.arch_list.contains(&arch.to_string()) {
                 return Err(anyhow!(
-                    "Invalid ARCH value '{}' in make.defaults. Valid values are: {}",
-                    arch.to_string(),
+                    "Invalid ARCH value '{arch}' in make.defaults. Valid values are: {}",
                     main_repo.arch_list.join(", ")
                 ));
             }
