@@ -137,17 +137,6 @@ impl EnvValue {
         }
     }
 
-    /// Returns the string representation of the value.
-    /// For Literal values the original value is returned,
-    /// while Incremental values are sorted and deduplicated.
-    pub fn value(&self) -> String {
-        match self {
-            EnvValue::Literal(values) => values,
-            EnvValue::Incremental(values) => values,
-        }
-        .join(" ")
-    }
-
     pub fn is_incremental(&self) -> bool {
         matches!(self, EnvValue::Incremental(_))
     }
@@ -177,7 +166,12 @@ impl EnvValue {
 
 impl fmt::Display for EnvValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.value())
+        let value = match self {
+            EnvValue::Literal(values) => values,
+            EnvValue::Incremental(values) => values,
+        }
+        .join(" ");
+        write!(f, "{value}")
     }
 }
 
@@ -235,11 +229,11 @@ USE="${USE} seccomp branding -cet"
     }
 
     #[test]
-    fn test_env_value_value() {
+    fn test_env_value_to_string() {
         let literal = EnvValue::new("value1 value2".into(), false);
-        assert_eq!(literal.value(), "value1 value2");
+        assert_eq!(literal.to_string(), "value1 value2");
 
         let incremental = EnvValue::new("value1 value2".into(), true);
-        assert_eq!(incremental.value(), "value1 value2");
+        assert_eq!(incremental.to_string(), "value1 value2");
     }
 }

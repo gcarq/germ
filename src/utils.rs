@@ -1,6 +1,4 @@
-use crate::makenv::EnvValue;
 use anyhow::{Context, Result, anyhow};
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -73,7 +71,7 @@ pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
         .into_iter()
         .map(
             |line| match line.splitn(2, '=').collect::<Vec<&str>>().as_slice() {
-                [key, value] => Ok((key.to_string(), value.replace("\n", " "))),
+                [key, value] => Ok((key.to_string(), value.to_string())),
                 _ => Err(anyhow!("syntax error in file: {line}")),
             },
         )

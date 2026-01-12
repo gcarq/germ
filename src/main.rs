@@ -2,6 +2,7 @@ use crate::conf::PortageConf;
 use crate::r#const::DEFAULT_PORTAGE_CONF_PATH;
 use crate::vdb::Vdb;
 use anyhow::{Context, Result};
+use clap::Parser;
 use colored::Colorize;
 use makenv::EnvValue;
 use std::path::{Path, PathBuf};
@@ -16,31 +17,40 @@ mod tree;
 mod utils;
 mod vdb;
 
+/// Package management tool for Gentoo-like systems.
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Provides information about the system, useful for troubleshooting
+    #[arg(long)]
+    info: bool,
+
+    /// Increases verbosity
+    #[arg(short, long)]
+    verbose: bool,
+}
+
 fn main() -> Result<()> {
+    let args = Args::parse();
     let conf = PortageConf::new(Path::new(DEFAULT_PORTAGE_CONF_PATH))?;
+
+    if args.info {
+        info(&conf);
+    }
+    Ok(())
+
+    // let vdb =
+    //     Vdb::from_path(PathBuf::from_str("/var/db/pkg")?).with_context(|| "Unable to build VDB")?;
+    // show_updates(repo, vdb);
+    // Ok(())
+}
+
+/// Prints information about the current portage configuration.
+fn info(conf: &PortageConf) {
     println!("Repositories:\n\n{}", conf.repos);
     let mut make_env = conf.make_env.iter().collect::<Vec<(&String, &EnvValue)>>();
     make_env.sort_by_key(|(name, _)| *name);
     for (key, value) in make_env {
         println!("{key}=\"{value}\"");
     }
-
-    let vdb =
-        Vdb::from_path(PathBuf::from_str("/var/db/pkg")?).with_context(|| "Unable to build VDB")?;
-    //show_updates(repo, vdb);
-    Ok(())
 }
-
-/*fn show_updates(repos: ReposConf, vdb: Vdb) {
-    for local_pkg in vdb.packages {
-        if let Some(repo_pkg) = repo.packages.get(&local_pkg)
-            && repo_pkg.latest_version() != local_pkg.latest_version()
-        {
-            println!(
-                "{} {}",
-                format!("{}-{}", local_pkg, repo_pkg.latest_version()).green(),
-                format!("[{}]", local_pkg.latest_version()).bold().blue(),
-            );
-        }
-    }
-}*/

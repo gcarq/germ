@@ -33,7 +33,7 @@ pub struct Profile {
     // USE flags that must never be enabled in this profile
     use_mask: LineBasedFile,
     // USE flags that must always be enabled in this profile
-    pub use_force: LineBasedFile,
+    use_force: LineBasedFile,
     // Same as above but for merged packages due to a stable keyword
     use_stable_mask: LineBasedFile,
     use_stable_force: LineBasedFile,
@@ -131,10 +131,10 @@ impl Profile {
         // Validate that make.defaults contains a valid arch
         if let Some(arch) = self.make_defaults.get("ARCH") {
             let main_repo = repos.main_repo();
-            if !main_repo.arch_list.contains(&arch.value()) {
+            if !main_repo.arch_list.contains(&arch.to_string()) {
                 return Err(anyhow!(
                     "Invalid ARCH value '{}' in make.defaults. Valid values are: {}",
-                    arch.value(),
+                    arch.to_string(),
                     main_repo.arch_list.join(", ")
                 ));
             }
