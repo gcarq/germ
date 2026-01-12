@@ -1,48 +1,56 @@
+mod manager;
 pub mod repos;
 
 use crate::conf::repos::ReposConf;
 use crate::r#const::DEFAULT_PORTAGE_CONF_PATH;
+use crate::linefile::LineBasedFile;
 use crate::makenv::MakeEnv;
-use crate::profile::{InheritFrom, Profile};
+use crate::profile::Profile;
 use crate::repository::Repository;
-use crate::utils::FileFromPath;
+use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
-use std::collections::HashMap;
+use manager::MaskManager;
 use std::path::Path;
 
 /// Holds the portage configuration that usually resides in /etc/portage.
 #[derive(Debug)]
 pub struct PortageConf {
     pub make_env: MakeEnv,
-    pub repos: ReposConf,
-    pub use_manager: UseManager,
+    pub repos_conf: ReposConf,
     profile: Profile,
+    package_mask: LineBasedFile,
+    pub mask_manager: MaskManager,
 }
 
 impl PortageConf {
     /// Builds a [`PortageConf`] from the given portage configuration path.
     pub fn new(path: &Path) -> Result<Self> {
-        let repos = ReposConf::new(&path.join("repos.conf"))
+        let repos_conf = ReposConf::new(&path.join("repos.conf"))
             .with_context(|| "Unable to process repos.conf")?;
 
         let profile_path = path.join("make.profile");
-        let profile = Profile::new(&profile_path, &repos)
+        let profile = Profile::new(&profile_path, &repos_conf)
             .with_context(|| "Unable to build profile from make.profile")?;
 
         let make_env = Self::init_make_env(path, &profile)?;
 
+        let repos = repos_conf.repositories();
         let arch = make_env
             .get("ARCH")
             .with_context(|| "Missing ARCH variable")?
             .to_string();
-        Self::validate_arch(&arch, &repos.repositories())?;
-        Self::validate_profile(&profile_path, &arch, &repos.repositories())?;
+        Self::validate_arch(&arch, &repos)?;
+        Self::validate_profile(&profile_path, &arch, &repos)?;
+
+        let package_mask = LineBasedFile::from_path(&path.join("package.mask"), true, true)?;
+        let mask_manager = MaskManager::new(&repos, &profile, &package_mask);
 
         Ok(PortageConf {
-            use_manager: UseManager::new(&profile, &repos.repositories()),
             make_env,
-            repos,
+            repos_conf,
             profile,
+            package_mask,
+            mask_manager,
         })
     }
 
@@ -52,12 +60,15 @@ impl PortageConf {
         let globals_path = Path::new(DEFAULT_PORTAGE_CONF_PATH).join("make.globals");
         let make_globals = MakeEnv::from_path(&globals_path, true, false)
             .with_context(|| "Unable to process make.globals")?;
-        // TODO: Treat variables with __ prefix as local
-        let mut make_conf = MakeEnv::from_path(&path.join("make.conf"), true, false)
+        // TODO: make.conf: Variables prefixed with __ are local should not be propagated.
+        let make_conf = MakeEnv::from_path(&path.join("make.conf"), true, false)
             .with_context(|| "Unable to process make.conf")?;
-        make_conf.inherit_from(&make_globals);
-        make_conf.inherit_from(&profile.make_defaults);
-        Ok(make_conf)
+
+        let mut make_env = MakeEnv::default();
+        make_env.inherit_from(&make_globals);
+        make_env.inherit_from(&profile.make_defaults);
+        make_env.inherit_from(&make_conf);
+        Ok(make_env)
     }
 
     /// Sanity check to ensure the given ARCH is supported by at least one repository.
@@ -84,23 +95,5 @@ impl PortageConf {
         Err(anyhow!(
             "Profile at {profile_path} is not valid for any configured repository"
         ))
-    }
-}
-
-#[derive(Debug)]
-pub struct UseManager {
-    // Holds the USE masks for each repository
-    repo_use_mask: HashMap<String, Vec<String>>,
-}
-
-impl UseManager {
-    pub fn new(profile: &Profile, repos: &[&Repository]) -> Self {
-        let use_mask = repos
-            .iter()
-            .map(|repo| (repo.name.clone(), repo.package_mask.to_vec()))
-            .collect();
-        Self {
-            repo_use_mask: use_mask,
-        }
     }
 }

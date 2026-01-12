@@ -5,15 +5,10 @@ use crate::r#const::SUPPORTED_EAPI;
 use crate::linefile::LineBasedFile;
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
-use crate::utils::FileFromPath;
+use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use std::fs;
 use std::path::Path;
-
-/// Trait for inheriting configurations from another instance.
-pub trait InheritFrom {
-    fn inherit_from(&mut self, parent: &Self);
-}
 
 /// Represents a profile outlined in PMS section 5.
 #[derive(Debug)]
@@ -25,7 +20,7 @@ pub struct Profile {
 
     packages: LineBasedFile,
     // Prevents packages from being installed in this profile
-    package_mask: LineBasedFile,
+    pub package_mask: LineBasedFile,
     // Override the default USE flags specified by make.defaults on a per-package basis
     package_use: LineBasedFile,
 
@@ -171,7 +166,7 @@ impl Profile {
     }
 }
 
-impl InheritFrom for Profile {
+impl Inherit for Profile {
     /// Inherits relevant configurations from the given parent profile.
     fn inherit_from(&mut self, parent: &Profile) {
         self.make_defaults.inherit_from(&parent.make_defaults);

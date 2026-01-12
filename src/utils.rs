@@ -2,6 +2,23 @@ use anyhow::{Context, Result, anyhow};
 use std::fs;
 use std::path::Path;
 
+/// Trait for inheriting configurations from another instance.
+pub trait Inherit {
+    fn inherit_from(&mut self, parent: &Self);
+
+    /// Inherits the configuration of the given parent into self and returns the result as a new
+    /// instance.
+    #[must_use = "this returns the inherited instance as a new allocation"]
+    fn inherit(&self, parent: &Self) -> Self
+    where
+        Self: Sized + Clone,
+    {
+        let mut child = self.clone();
+        child.inherit_from(parent);
+        child
+    }
+}
+
 /// Trait for types that can be constructed from file(s) at a given path.
 /// The path can point to a single file or a directory containing multiple files.
 /// If the path is a directory and `recursive` is true, all files in the directory

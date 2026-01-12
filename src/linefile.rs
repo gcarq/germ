@@ -1,5 +1,4 @@
-use crate::profile::InheritFrom;
-use crate::utils::FileFromPath;
+use crate::utils::{FileFromPath, Inherit};
 use anyhow::Result;
 
 /// Represents a one-item-per-line file.
@@ -16,12 +15,12 @@ impl LineBasedFile {
         self.lines.iter()
     }
 
-    pub fn contains(&self, line: &str) -> bool {
-        self.iter().any(|l| l == line)
+    pub fn into_iter(self) -> impl Iterator<Item = String> {
+        self.lines.into_iter()
     }
 
-    pub fn to_vec(&self) -> Vec<String> {
-        self.lines.clone()
+    pub fn contains(&self, line: &str) -> bool {
+        self.iter().any(|l| l == line)
     }
 }
 
@@ -40,14 +39,15 @@ impl FileFromPath for LineBasedFile {
     }
 }
 
-impl InheritFrom for LineBasedFile {
+impl Inherit for LineBasedFile {
     fn inherit_from(&mut self, parent: &LineBasedFile) {
         let mut lines = parent.lines.clone();
         for line in &self.lines {
             if line.starts_with('-') {
                 lines.retain(|l| l != &line[1..]);
+            } else if !lines.contains(line) {
+                lines.push(line.clone());
             }
-            lines.push(line.clone());
         }
         self.lines = lines;
     }
@@ -77,5 +77,28 @@ mod tests {
                 "app-arch/zstd abi_x86_32 abi_x86_64"
             ]
         );
+    }
+
+    #[test]
+    fn test_inherit_from() {
+        let parent = LineBasedFile::from_file_content(
+            "
+            dev-libs/libffi
+            app-arch/xz-utils
+            app-arch/zstd
+            "
+            .into(),
+        )
+        .unwrap();
+        let mut child = LineBasedFile::from_file_content(
+            "
+            -app-arch/xz-utils
+            app-arch/zstd
+            "
+            .into(),
+        )
+        .unwrap();
+        child.inherit_from(&parent);
+        assert_eq!(child.lines, vec!["dev-libs/libffi", "app-arch/zstd"]);
     }
 }

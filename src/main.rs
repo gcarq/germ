@@ -37,12 +37,8 @@ fn main() -> Result<()> {
     if args.info {
         info(&conf);
     } else {
-        for (name, repo) in conf.repos.iter() {
-            println!(
-                "{}: {:?}",
-                name,
-                repo.package_mask.iter().collect::<Vec<&String>>()
-            );
+        for atom in conf.mask_manager.iter() {
+            println!("{atom}");
         }
     }
 
@@ -56,7 +52,7 @@ fn main() -> Result<()> {
 
 /// Prints information about the current portage configuration.
 fn info(conf: &PortageConf) {
-    println!("Repositories:\n\n{}", conf.repos);
+    println!("Repositories:\n\n{}", conf.repos_conf);
     let mut make_env = conf.make_env.iter().collect::<Vec<(&String, &EnvValue)>>();
     make_env.sort_by_key(|(name, _)| *name);
     for (key, value) in make_env {

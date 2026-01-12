@@ -1,6 +1,5 @@
-use crate::profile::InheritFrom;
 use crate::utils;
-use crate::utils::FileFromPath;
+use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -33,7 +32,7 @@ const INCREMENTAL_VARIABLES: [&str; 14] = [
 ];
 
 /// Holds all environment variables defined in a make.conf or make.defaults file.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MakeEnv {
     vars: HashMap<String, EnvValue>,
 }
@@ -80,7 +79,7 @@ impl FileFromPath for MakeEnv {
     }
 }
 
-impl InheritFrom for MakeEnv {
+impl Inherit for MakeEnv {
     fn inherit_from(&mut self, parent: &MakeEnv) {
         let parent_ctx = Vec::from_iter(parent.vars.iter().map(|(k, v)| (k.clone(), v.clone())));
         for (key, parent_value) in &parent.vars {
