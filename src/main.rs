@@ -1,8 +1,9 @@
-use crate::conf::{EnvValue, PortageConf};
+use crate::conf::PortageConf;
 use crate::r#const::DEFAULT_PORTAGE_CONF_PATH;
 use crate::vdb::Vdb;
 use anyhow::{Context, Result};
 use colored::Colorize;
+use makenv::EnvValue;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
