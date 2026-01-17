@@ -1,3 +1,5 @@
+pub mod atom;
+
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::Hash;
@@ -296,6 +298,20 @@ impl PartialOrd for PackageVersionSuffix {
 impl PartialEq<Self> for PackageVersionSuffix {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Hash for PackageVersionSuffix {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.suffix_order().hash(state);
+        let num = match self {
+            PackageVersionSuffix::Alpha(n)
+            | PackageVersionSuffix::Beta(n)
+            | PackageVersionSuffix::Pre(n)
+            | PackageVersionSuffix::Rc(n)
+            | PackageVersionSuffix::Patch(n) => n,
+        };
+        num.hash(state);
     }
 }
 

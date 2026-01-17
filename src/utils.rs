@@ -9,11 +9,11 @@ pub trait Inherit {
     /// Inherits the configuration of the given parent into self and returns the result as a new
     /// instance.
     #[must_use = "this returns the inherited instance as a new allocation"]
-    fn inherit(&self, parent: &Self) -> Self
+    fn inherit(self, parent: &Self) -> Self
     where
-        Self: Sized + Clone,
+        Self: Sized,
     {
-        let mut child = self.clone();
+        let mut child = self;
         child.inherit_from(parent);
         child
     }

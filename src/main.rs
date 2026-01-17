@@ -1,14 +1,13 @@
 use crate::conf::PortageConf;
-use crate::r#const::DEFAULT_USE_PORTAGE_CONF_PATH;
+use crate::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
 use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
 use makenv::EnvValue;
 use std::path::Path;
-use std::str::FromStr;
 
 mod conf;
-mod r#const;
+mod consts;
 mod linefile;
 pub mod makenv;
 pub mod package;
@@ -37,7 +36,12 @@ fn main() -> Result<()> {
     if args.info {
         info(&conf);
     } else {
-        for atom in conf.mask_manager.iter() {
+        println!("{}", "Masked packages:".blue().bold());
+        for atom in conf.mask_manager.mask.iter() {
+            println!("{atom}");
+        }
+        println!("\n{}", "Unmasked packages:".blue().bold());
+        for atom in conf.mask_manager.unmask.iter() {
             println!("{atom}");
         }
     }

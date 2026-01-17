@@ -1,6 +1,6 @@
 mod desc;
 
-use crate::r#const::SUPPORTED_EAPI;
+use crate::consts::SUPPORTED_EAPI;
 use crate::linefile::LineBasedFile;
 use crate::package::PackageVersion;
 use crate::package::{Package, PackageVersionSuffix};
@@ -14,6 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 lazy_static! {
+    /// TODO: Rethink placement of those regexes. The ones in package.atom should be used instead.
     /// Regex to validate repository names according to PMS 3.1.5.
     static ref REPOSITORY_NAME_RE: Regex = Regex::new(r"^[A-Za-z0-9_-]*[A-Za-z0-9_]$").unwrap();
     /// Regex to validate category names according to PMS 3.1.1.
@@ -31,6 +32,7 @@ pub struct Repository {
     pub eapi: usize,
     pub packages: HashSet<Package>,
     pub package_mask: LineBasedFile,
+    pub package_unmask: LineBasedFile,
     pub arch_list: LineBasedFile,
     pub profiles_desc: Vec<ProfileDescription>,
 }
@@ -70,6 +72,11 @@ impl Repository {
             packages: Self::collect_packages(&path, categories)?,
             package_mask: LineBasedFile::from_path(
                 &path.join("profiles").join("package.mask"),
+                eapi > 6,
+                true,
+            )?,
+            package_unmask: LineBasedFile::from_path(
+                &path.join("profiles").join("package.unmask"),
                 eapi > 6,
                 true,
             )?,

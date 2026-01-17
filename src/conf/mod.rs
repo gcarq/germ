@@ -2,7 +2,7 @@ mod manager;
 pub mod repos;
 
 use crate::conf::repos::ReposConf;
-use crate::r#const::DEFAULT_PORTAGE_CONF_PATH;
+use crate::consts::DEFAULT_PORTAGE_CONF_PATH;
 use crate::linefile::LineBasedFile;
 use crate::makenv::MakeEnv;
 use crate::profile::Profile;
@@ -18,7 +18,6 @@ pub struct PortageConf {
     pub make_env: MakeEnv,
     pub repos_conf: ReposConf,
     profile: Profile,
-    package_mask: LineBasedFile,
     pub mask_manager: MaskManager,
 }
 
@@ -42,14 +41,18 @@ impl PortageConf {
         Self::validate_arch(&arch, &repos)?;
         Self::validate_profile(&profile_path, &arch, &repos)?;
 
-        let package_mask = LineBasedFile::from_path(&path.join("package.mask"), true, true)?;
-        let mask_manager = MaskManager::new(&repos, &profile, &package_mask);
+        let mask_manager = MaskManager::new(
+            &repos,
+            &profile,
+            LineBasedFile::from_path(&path.join("package.mask"), true, true)?,
+            LineBasedFile::from_path(&path.join("package.unmask"), true, true)?,
+        )
+        .with_context(|| "Unable to build MaskManager")?;
 
         Ok(PortageConf {
             make_env,
             repos_conf,
             profile,
-            package_mask,
             mask_manager,
         })
     }

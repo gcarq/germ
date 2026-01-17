@@ -5,6 +5,7 @@ use anyhow::Result;
 /// EAPI > 6 supports directories, in that case all files in that directory are merged together.
 /// Lines beginning with a hyphen clear the content of previous lines that are equal to the
 /// remainder of that line.
+/// TODO: consider saving relevant file path and line numbers for better error messages.
 #[derive(Debug, Default, Clone)]
 pub struct LineBasedFile {
     lines: Vec<String>,

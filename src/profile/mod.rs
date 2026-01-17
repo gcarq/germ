@@ -1,7 +1,7 @@
 mod deprecation;
 
 use crate::conf::repos::ReposConf;
-use crate::r#const::SUPPORTED_EAPI;
+use crate::consts::SUPPORTED_EAPI;
 use crate::linefile::LineBasedFile;
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
@@ -21,6 +21,8 @@ pub struct Profile {
     packages: LineBasedFile,
     // Prevents packages from being installed in this profile
     pub package_mask: LineBasedFile,
+    // Allows packages to be installed that would otherwise be masked
+    pub package_unmask: LineBasedFile,
     // Override the default USE flags specified by make.defaults on a per-package basis
     package_use: LineBasedFile,
 
@@ -69,6 +71,7 @@ impl Profile {
             deprecated: DeprecationInfo::from_path(&path.join("deprecated"))?,
             packages: LineBasedFile::from_path(&path.join("packages"), eapi > 6, true)?,
             package_mask: LineBasedFile::from_path(&path.join("package.mask"), eapi > 6, true)?,
+            package_unmask: LineBasedFile::from_path(&path.join("package.unmask"), eapi > 6, true)?,
             package_use: LineBasedFile::from_path(&path.join("package.use"), eapi > 6, true)?,
             use_mask: LineBasedFile::from_path(&path.join("use.mask"), eapi > 6, true)?,
             use_force: LineBasedFile::from_path(&path.join("use.force"), eapi > 6, true)?,
@@ -172,6 +175,7 @@ impl Inherit for Profile {
         self.make_defaults.inherit_from(&parent.make_defaults);
         self.packages.inherit_from(&parent.packages);
         self.package_mask.inherit_from(&parent.package_mask);
+        self.package_unmask.inherit_from(&parent.package_unmask);
         self.package_use.inherit_from(&parent.package_use);
         self.use_mask.inherit_from(&parent.use_mask);
         self.use_force.inherit_from(&parent.use_force);
