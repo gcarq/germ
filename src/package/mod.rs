@@ -187,6 +187,8 @@ impl PartialEq<Self> for PackageVersion {
 }
 
 impl Hash for PackageVersion {
+    /// TODO: this must match the comparison logic,
+    ///  this is currently not true for the version components starting with '0'.
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.version.hash(state);
         for suffix in &self.suffixes {

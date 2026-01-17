@@ -1,5 +1,3 @@
-mod version;
-
 use crate::package::{PackageVersion, PackageVersionSuffix};
 use anyhow::{Result, anyhow};
 use constcat::concat;
@@ -87,6 +85,14 @@ impl fmt::Display for Operator {
     }
 }
 
+#[derive(Debug, Default, Eq, Hash, PartialEq)]
+pub enum AtomVariant {
+    #[default]
+    Simple,
+    VersionOperator,
+    VersionWildcard,
+}
+
 /// Represents a portage package atom. An atom is simply a dependency that is used by portage when
 /// calculating relationships between packages.
 /// TODO:
@@ -101,6 +107,7 @@ pub struct Atom {
     version: Option<PackageVersion>,
     slot: Option<String>,
     repo: Option<String>,
+    variant: AtomVariant,
 }
 
 impl Atom {
@@ -108,18 +115,23 @@ impl Atom {
     /// Returns an error if the string is not a valid atom.
     pub fn new(atom: &str) -> Result<Self> {
         if let Some(caps) = ATOM_OPERATOR_RE.captures(atom) {
-            return Ok(Self::from_regex_capture(&caps)?.with_operator(
-                match caps.name("operator") {
-                    Some(m) => Operator::from_str(m.as_str()),
-                    None => None,
-                },
-            ));
+            return Ok(
+                Self::from_regex_capture(&caps, AtomVariant::VersionOperator)?.with_operator(
+                    match caps.name("operator") {
+                        Some(m) => Operator::from_str(m.as_str()),
+                        None => None,
+                    },
+                ),
+            );
         }
         if let Some(caps) = ATOM_STAR_RE.captures(atom) {
-            return Ok(Self::from_regex_capture(&caps)?.with_operator(Some(Operator::Equal)));
+            return Ok(
+                Self::from_regex_capture(&caps, AtomVariant::VersionWildcard)?
+                    .with_operator(Some(Operator::Equal)),
+            );
         }
         if let Some(caps) = ATOM_SIMPLE_RE.captures(atom) {
-            return Self::from_regex_capture(&caps);
+            return Self::from_regex_capture(&caps, AtomVariant::Simple);
         }
 
         Err(anyhow!("invalid atom: {atom}"))
@@ -128,7 +140,7 @@ impl Atom {
     /// Creates an Atom from the given regex captures.
     /// It assumes the correct regex has been used.
     /// NOTE: this does not set the operator field, see [`Self::with_operator`].
-    fn from_regex_capture(caps: &Captures) -> Result<Atom> {
+    fn from_regex_capture(caps: &Captures, variant: AtomVariant) -> Result<Atom> {
         Ok(Self {
             operator: None,
             category: match caps.name("category") {
@@ -144,6 +156,7 @@ impl Atom {
             version: Self::parse_version_components(caps),
             slot: caps.name("slot").map(|m| m.as_str().to_string()),
             repo: caps.name("repo").map(|m| m.as_str().to_string()),
+            variant,
         })
     }
 
@@ -186,13 +199,13 @@ impl fmt::Display for Atom {
         }
         write!(f, "{}/{}", self.category, self.package)?;
         if let Some(version) = &self.version {
-            write!(f, "-{}", version)?;
+            write!(f, "-{version}",)?;
         }
         if let Some(slot) = &self.slot {
-            write!(f, ":{}", slot)?;
+            write!(f, ":{slot}")?;
         }
         if let Some(repo) = &self.repo {
-            write!(f, "::{}", repo)?;
+            write!(f, "::{repo}")?;
         }
         Ok(())
     }
@@ -326,6 +339,7 @@ mod tests {
                     category: "dev-lang".into(),
                     package: "rust".into(),
                     version: Some(PackageVersion::new("1.70.0".into(), Vec::new(), 0)),
+                    variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
             ),
@@ -336,6 +350,7 @@ mod tests {
                     category: "sys-apps".into(),
                     package: "sed".into(),
                     version: Some(PackageVersion::new("4.8".into(), Vec::new(), 0)),
+                    variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
             ),
@@ -350,6 +365,7 @@ mod tests {
                         vec![PackageVersionSuffix::new("p2")],
                         0,
                     )),
+                    variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
             ),
@@ -360,6 +376,7 @@ mod tests {
                     category: "net-misc".into(),
                     package: "dhcp".into(),
                     version: Some(PackageVersion::new("3".into(), Vec::new(), 0)),
+                    variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
             ),
@@ -382,6 +399,7 @@ mod tests {
                     category: "dev-lang".into(),
                     package: "rust".into(),
                     version: Some(PackageVersion::new("1.70.0".into(), Vec::new(), 0)),
+                    variant: AtomVariant::VersionWildcard,
                     ..Default::default()
                 },
             ),
@@ -392,6 +410,7 @@ mod tests {
                     category: "dev-libs".into(),
                     package: "glib".into(),
                     version: Some(PackageVersion::new("2".into(), Vec::new(), 0)),
+                    variant: AtomVariant::VersionWildcard,
                     ..Default::default()
                 },
             ),
@@ -438,6 +457,7 @@ mod tests {
             )),
             slot: Some("1.70".into()),
             repo: Some("gentoo".into()),
+            variant: AtomVariant::VersionOperator,
         };
         let atom_str = atom.to_string();
         assert_eq!(atom_str, ">=dev-lang/rust-1.70.0_beta_p11-r2:1.70::gentoo");
