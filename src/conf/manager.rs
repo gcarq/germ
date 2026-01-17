@@ -1,5 +1,5 @@
+use crate::deps::Atom;
 use crate::linefile::LineBasedFile;
-use crate::package::atom::Atom;
 use crate::profile::Profile;
 use crate::repository::Repository;
 use crate::utils::Inherit;

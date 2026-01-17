@@ -1,5 +1,3 @@
-pub mod atom;
-
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::Hash;
@@ -52,7 +50,7 @@ impl fmt::Display for Package {
 }
 
 /// Represents a package version with its version string, suffixes, and revision.
-#[derive(Eq, Debug)]
+#[derive(Eq, Debug, Default)]
 pub struct PackageVersion {
     version: String,
     suffixes: Vec<PackageVersionSuffix>,
@@ -185,6 +183,16 @@ impl PartialOrd for PackageVersion {
 impl PartialEq<Self> for PackageVersion {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Hash for PackageVersion {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.version.hash(state);
+        for suffix in &self.suffixes {
+            suffix.hash(state);
+        }
+        self.revision.hash(state);
     }
 }
 

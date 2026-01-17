@@ -8,6 +8,7 @@ use std::path::Path;
 
 mod conf;
 mod consts;
+pub mod deps;
 mod linefile;
 pub mod makenv;
 pub mod package;
