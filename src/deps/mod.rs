@@ -1,8 +1,10 @@
-use crate::package::{PackageVersion, PackageVersionSuffix};
-use anyhow::{Result, anyhow};
+use crate::package::Package;
+use crate::package::version::{PackageVersion, PackageVersionSuffix};
+use anyhow::{Context, Result, anyhow};
 use constcat::concat;
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
+use std::cmp::Ordering;
 use std::fmt;
 
 const OPERATOR: &str = r"(?<operator>[=~]|[><]=?)";
@@ -97,8 +99,6 @@ pub enum AtomVariant {
 /// calculating relationships between packages.
 /// TODO:
 ///  * implement remaining atom variants (see man 5 ebuild)
-///  * implement version comparison logic
-///  * implement matching logic between atoms and packages
 #[derive(Debug, PartialEq, Default, Hash, Eq)]
 pub struct Atom {
     operator: Option<Operator>,
@@ -116,44 +116,89 @@ impl Atom {
     pub fn new(atom: &str) -> Result<Self> {
         if let Some(caps) = ATOM_OPERATOR_RE.captures(atom) {
             return Ok(
-                Self::from_regex_capture(&caps, AtomVariant::VersionOperator)?.with_operator(
-                    match caps.name("operator") {
+                Self::from_regex_capture(&caps, AtomVariant::VersionOperator)
+                    .with_context(|| anyhow!("invalid atom: {atom}"))?
+                    .with_operator(match caps.name("operator") {
                         Some(m) => Operator::from_str(m.as_str()),
                         None => None,
-                    },
-                ),
+                    }),
             );
         }
         if let Some(caps) = ATOM_STAR_RE.captures(atom) {
             return Ok(
-                Self::from_regex_capture(&caps, AtomVariant::VersionWildcard)?
+                Self::from_regex_capture(&caps, AtomVariant::VersionWildcard)
+                    .with_context(|| anyhow!("invalid atom: {atom}"))?
                     .with_operator(Some(Operator::Equal)),
             );
         }
         if let Some(caps) = ATOM_SIMPLE_RE.captures(atom) {
-            return Self::from_regex_capture(&caps, AtomVariant::Simple);
+            return Self::from_regex_capture(&caps, AtomVariant::Simple)
+                .with_context(|| anyhow!("invalid atom: {atom}"));
         }
 
         Err(anyhow!("invalid atom: {atom}"))
+    }
+
+    /// Checks if the given package matches this atom.
+    /// TODO: implement wildcard operator, slot and repo matching
+    pub fn matches(&self, pkg: &Package) -> bool {
+        if self.category != pkg.category || self.package != pkg.name {
+            return false;
+        }
+        if let Some(version) = &self.version {
+            let matches = match self.variant {
+                AtomVariant::Simple => version == &pkg.version,
+                AtomVariant::VersionOperator => match self.operator {
+                    Some(Operator::Less) => pkg.version < *version,
+                    Some(Operator::LessEqual) => pkg.version <= *version,
+                    Some(Operator::Equal) => pkg.version == *version,
+                    Some(Operator::Greater) => pkg.version > *version,
+                    Some(Operator::GreaterEqual) => pkg.version >= *version,
+                    Some(Operator::Approximate) => {
+                        match pkg.version.cmp_base_version(version) == Ordering::Equal {
+                            true => match version.suffixes.is_empty() {
+                                true => true,
+                                false => pkg.version.cmp_suffixes(version) == Ordering::Equal,
+                            },
+                            false => false,
+                        }
+                    }
+                    None => unreachable!("BUG: atom is expected to have an operator"),
+                },
+                AtomVariant::VersionWildcard => todo!("wildcard matching not implemented"),
+            };
+            if !matches {
+                return false;
+            }
+        }
+        true
     }
 
     /// Creates an Atom from the given regex captures.
     /// It assumes the correct regex has been used.
     /// NOTE: this does not set the operator field, see [`Self::with_operator`].
     fn from_regex_capture(caps: &Captures, variant: AtomVariant) -> Result<Atom> {
+        let version = match Self::parse_version_components(caps) {
+            Some(_) if variant == AtomVariant::Simple => Err(anyhow!(
+                "atom must have an operator or be in format <category>/<package>"
+            ))?,
+            v => v,
+        };
+
         Ok(Self {
             operator: None,
-            category: match caps.name("category") {
-                Some(m) => m.as_str(),
-                None => "*",
-            }
-            .to_string(),
-            package: match caps.name("package") {
-                Some(m) => m.as_str(),
-                None => "*",
-            }
-            .to_string(),
-            version: Self::parse_version_components(caps),
+            category: caps
+                .name("category")
+                .ok_or_else(|| anyhow!("atom missing <category>"))?
+                .as_str()
+                .to_string(),
+            package: caps
+                .name("package")
+                .ok_or_else(|| anyhow!("atom missing <package>"))?
+                .as_str()
+                .to_string()
+                .to_string(),
+            version,
             slot: caps.name("slot").map(|m| m.as_str().to_string()),
             repo: caps.name("repo").map(|m| m.as_str().to_string()),
             variant,
@@ -199,7 +244,7 @@ impl fmt::Display for Atom {
         }
         write!(f, "{}/{}", self.category, self.package)?;
         if let Some(version) = &self.version {
-            write!(f, "-{version}",)?;
+            write!(f, "-{version}")?;
         }
         if let Some(slot) = &self.slot {
             write!(f, ":{slot}")?;
@@ -248,37 +293,6 @@ mod tests {
                 },
             ),
             (
-                "sys-apps/sed-4.0.5",
-                Atom {
-                    category: "sys-apps".into(),
-                    package: "sed".into(),
-                    version: Some(PackageVersion::new("4.0.5".into(), Vec::new(), 0)),
-                    ..Default::default()
-                },
-            ),
-            (
-                "sys-libs/zlib-1.1.4-r1",
-                Atom {
-                    category: "sys-libs".into(),
-                    package: "zlib".into(),
-                    version: Some(PackageVersion::new("1.1.4".into(), Vec::new(), 1)),
-                    ..Default::default()
-                },
-            ),
-            (
-                "net-misc/dhcp-3.0_p2",
-                Atom {
-                    category: "net-misc".into(),
-                    package: "dhcp".into(),
-                    version: Some(PackageVersion::new(
-                        "3.0".into(),
-                        vec![PackageVersionSuffix::new("p2")],
-                        0,
-                    )),
-                    ..Default::default()
-                },
-            ),
-            (
                 "dev-lang/rust:1.92.0",
                 Atom {
                     category: "dev-lang".into(),
@@ -288,25 +302,10 @@ mod tests {
                 },
             ),
             (
-                "media-libs/mesa-9999::x11",
-                Atom {
-                    category: "media-libs".into(),
-                    package: "mesa".into(),
-                    version: Some(PackageVersion::new("9999".into(), Vec::new(), 0)),
-                    repo: Some("x11".into()),
-                    ..Default::default()
-                },
-            ),
-            (
-                "net-misc/dhcp-3.0_p2:0::gentoo",
+                "net-misc/dhcp:0::gentoo",
                 Atom {
                     category: "net-misc".into(),
                     package: "dhcp".into(),
-                    version: Some(PackageVersion::new(
-                        "3.0".into(),
-                        vec![PackageVersionSuffix::new("p2")],
-                        0,
-                    )),
                     slot: Some("0".into()),
                     repo: Some("gentoo".into()),
                     ..Default::default()
@@ -324,8 +323,7 @@ mod tests {
         ];
 
         for (atom_str, expected_atom) in test_cases {
-            let atom = Atom::new(atom_str).unwrap();
-            assert_eq!(atom, expected_atom);
+            assert_eq!(Atom::new(atom_str).unwrap(), expected_atom);
         }
     }
 
@@ -344,12 +342,38 @@ mod tests {
                 },
             ),
             (
+                ">dev-lang/rust-1.70.0_beta-r2",
+                Atom {
+                    operator: Some(Operator::Greater),
+                    category: "dev-lang".into(),
+                    package: "rust".into(),
+                    version: Some(PackageVersion::new(
+                        "1.70.0".into(),
+                        vec![PackageVersionSuffix::new("beta")],
+                        2,
+                    )),
+                    variant: AtomVariant::VersionOperator,
+                    ..Default::default()
+                },
+            ),
+            (
                 ">=sys-apps/sed-4.8",
                 Atom {
                     operator: Some(Operator::GreaterEqual),
                     category: "sys-apps".into(),
                     package: "sed".into(),
                     version: Some(PackageVersion::new("4.8".into(), Vec::new(), 0)),
+                    variant: AtomVariant::VersionOperator,
+                    ..Default::default()
+                },
+            ),
+            (
+                "<net-misc/dhcp-3",
+                Atom {
+                    operator: Some(Operator::Less),
+                    category: "net-misc".into(),
+                    package: "dhcp".into(),
+                    version: Some(PackageVersion::new("3".into(), Vec::new(), 0)),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -370,12 +394,15 @@ mod tests {
                 },
             ),
             (
-                "<net-misc/dhcp-3",
+                "~dev-lang/rust-1.70.0",
                 Atom {
-                    operator: Some(Operator::Less),
-                    category: "net-misc".into(),
-                    package: "dhcp".into(),
-                    version: Some(PackageVersion::new("3".into(), Vec::new(), 0)),
+                    operator: Some(Operator::Approximate),
+                    category: "dev-lang".into(),
+                    package: "rust".into(),
+                    version: Some(PackageVersion {
+                        version: "1.70.0".into(),
+                        ..Default::default()
+                    }),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -429,6 +456,7 @@ mod tests {
             "dev-lang/",
             "/rust",
             ">=dev-lang/rust-",
+            "dev-lang/rust-1.70.0",
             "=dev-lang/rust-1.70.0_extra",
             "dev-lang/rust:::",
             "dev-lang/rust*",
@@ -438,6 +466,67 @@ mod tests {
 
         for atom_str in invalid_atoms {
             assert!(Atom::new(atom_str).is_err(), "{atom_str} should be invalid");
+        }
+    }
+
+    #[test]
+    fn test_atom_matches_true() {
+        // TODO: test wildcards and slot/repo matching
+        let atoms = vec![
+            "sys-devel/gcc",
+            ">sys-devel/gcc-15",
+            ">=sys-devel/gcc-15.2.1",
+            "<sys-devel/gcc-16",
+            "<=sys-devel/gcc-15.2.2_p20260101",
+            "=sys-devel/gcc-15.2.1_p20251122-r1",
+            "~sys-devel/gcc-15",
+            "~sys-devel/gcc-15.2",
+            "~sys-devel/gcc-15.2.1",
+            "~sys-devel/gcc-15.2.1_p20251122",
+        ];
+        let pkg = Package::new(
+            "sys-devel".into(),
+            "gcc".into(),
+            PackageVersion {
+                version: "15.2.1".into(),
+                suffixes: vec![PackageVersionSuffix::new("p20251122")],
+                revision: 1,
+            },
+        );
+        for atom in atoms {
+            let atom = Atom::new(atom).unwrap();
+            assert!(atom.matches(&pkg), "{atom} should match {pkg}");
+        }
+    }
+
+    #[test]
+    fn test_atom_matches_false() {
+        let atoms = vec![
+            "sys-devel/binutils",
+            "virtual/gcc",
+            "<sys-devel/gcc-15",
+            "<=sys-devel/gcc-15.2.1",
+            ">sys-devel/gcc-16",
+            ">=sys-devel/gcc-15.2.2_p20251122-r2",
+            "=sys-devel/gcc-15.2.1_p20251122",
+            "=sys-devel/gcc-15.2.1_p20251122-r2",
+            "~sys-devel/gcc-14",
+            "~sys-devel/gcc-15.3",
+            "~sys-devel/gcc-15.2.2",
+            "~sys-devel/gcc-15.2.1_p20260101",
+        ];
+        let pkg = Package::new(
+            "sys-devel".into(),
+            "gcc".into(),
+            PackageVersion {
+                version: "15.2.1".into(),
+                suffixes: vec![PackageVersionSuffix::new("p20251122")],
+                revision: 1,
+            },
+        );
+        for atom in atoms {
+            let atom = Atom::new(atom).unwrap();
+            assert!(!atom.matches(&pkg), "{atom} shouldn't match {pkg}");
         }
     }
 

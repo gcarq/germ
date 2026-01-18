@@ -2,8 +2,8 @@ mod desc;
 
 use crate::consts::SUPPORTED_EAPI;
 use crate::linefile::LineBasedFile;
-use crate::package::PackageVersion;
-use crate::package::{Package, PackageVersionSuffix};
+use crate::package::Package;
+use crate::package::version::{PackageVersion, PackageVersionSuffix};
 use crate::repository::desc::ProfileDescription;
 use crate::utils::FileFromPath;
 use anyhow::{Context, Result, anyhow};
@@ -212,13 +212,8 @@ impl Repository {
                     && let Some(file_name) = entry.file_name().into_string().ok()
                     && PACKAGE_NAME_RE.is_match(&file_name)
                 {
-                    let versions =
-                        Self::collect_package_versions(&cat_path.join(&file_name), &file_name)?;
-                    // A package directory may exist without any ebuild files.
-                    if versions.is_empty() {
-                        continue;
-                    }
-                    for version in versions {
+                    let pkg_path = cat_path.join(&file_name);
+                    for version in Self::collect_package_versions(&pkg_path, &file_name)? {
                         packages.insert(Package::new(category.clone(), file_name.clone(), version));
                     }
                 }

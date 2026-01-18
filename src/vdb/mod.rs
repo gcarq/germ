@@ -1,4 +1,5 @@
-use crate::package::{Package, PackageVersion, PackageVersionSuffix};
+use crate::package::Package;
+use crate::package::version::{PackageVersion, PackageVersionSuffix};
 use anyhow::Result;
 use lazy_static::lazy_static;
 use regex::Regex;
