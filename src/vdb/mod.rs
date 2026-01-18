@@ -70,7 +70,7 @@ impl Vdb {
                             .and_then(|r| r.as_str().parse::<usize>().ok())
                             .unwrap_or(0),
                     );
-                    packages.insert(Package::new(category.clone(), pkg_name, vec![version]));
+                    packages.insert(Package::new(category.clone(), pkg_name, version));
                 }
             }
         }

@@ -218,7 +218,9 @@ impl Repository {
                     if versions.is_empty() {
                         continue;
                     }
-                    packages.insert(Package::new(category.clone(), file_name, versions));
+                    for version in versions {
+                        packages.insert(Package::new(category.clone(), file_name.clone(), version));
+                    }
                 }
             }
         }

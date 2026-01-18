@@ -3,31 +3,26 @@ use std::fmt;
 use std::hash::Hash;
 
 /// Represents a package with its category, name, and available versions.
+/// TODO: add slot and repo information.
 #[derive(Eq, Debug)]
 pub struct Package {
     category: String,
     name: String,
-    pub versions: Vec<PackageVersion>,
+    version: PackageVersion,
 }
 
 impl Package {
-    pub fn new(category: String, name: String, versions: Vec<PackageVersion>) -> Self {
-        debug_assert!(!versions.is_empty());
+    pub fn new(category: String, name: String, version: PackageVersion) -> Self {
         Self {
             category,
             name,
-            versions,
+            version,
         }
     }
 
     /// Returns the qualified name of the package in the format category/name e.g. app-editors/vim.
     pub fn qualified_name(&self) -> String {
         format!("{}/{}", self.category, self.name)
-    }
-
-    /// Returns the latest version of the package.
-    pub fn latest_version(&self) -> &PackageVersion {
-        self.versions.iter().max_by(|a, b| a.cmp(b)).unwrap()
     }
 }
 
@@ -334,24 +329,9 @@ mod tests {
         let package = Package::new(
             "app-editors".into(),
             "vim".into(),
-            vec![PackageVersion::new("1.0.0".into(), vec![], 0)],
+            PackageVersion::new("1.0.0".into(), vec![], 0),
         );
         assert_eq!(package.qualified_name(), "app-editors/vim");
-    }
-
-    #[test]
-    fn test_package_latest_version() {
-        let package = Package::new(
-            "app-editors".into(),
-            "vim".into(),
-            vec![
-                PackageVersion::new("1.0.0".into(), vec![], 0),
-                PackageVersion::new("1.2.0".into(), vec![], 0),
-                PackageVersion::new("1.2.0".into(), vec![], 1),
-                PackageVersion::new("1.2.0_p2025".into(), vec![], 1),
-            ],
-        );
-        assert_eq!(package.latest_version().to_string(), "1.2.0_p2025-r1");
     }
 
     #[test]
