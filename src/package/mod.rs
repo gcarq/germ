@@ -1,8 +1,7 @@
 pub mod version;
 
 use crate::package::version::PackageVersion;
-use std::fmt;
-use std::hash::Hash;
+use std::{fmt, hash};
 
 /// Represents a package with its category, name, and available versions.
 /// TODO: add slot and repo information.
@@ -34,8 +33,8 @@ impl PartialEq<Self> for Package {
     }
 }
 
-impl Hash for Package {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl hash::Hash for Package {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
         self.qualified_name().hash(state);
     }
 }
@@ -55,7 +54,7 @@ mod tests {
         let package = Package::new(
             "app-editors".into(),
             "vim".into(),
-            PackageVersion::new("1.0.0".into(), vec![], 0),
+            PackageVersion::new("1.0.0".into(), vec![], 0).unwrap(),
         );
         assert_eq!(package.qualified_name(), "app-editors/vim");
     }

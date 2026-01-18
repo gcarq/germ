@@ -1,5 +1,5 @@
 use crate::package::Package;
-use crate::package::version::{PackageVersion, PackageVersionSuffix};
+use crate::package::version::{PackageVersion, VersionSuffix};
 use anyhow::{Context, Result, anyhow};
 use constcat::concat;
 use lazy_static::lazy_static;
@@ -155,13 +155,8 @@ impl Atom {
                     Some(Operator::Greater) => pkg.version > *version,
                     Some(Operator::GreaterEqual) => pkg.version >= *version,
                     Some(Operator::Approximate) => {
-                        match pkg.version.cmp_base_version(version) == Ordering::Equal {
-                            true => match version.suffixes.is_empty() {
-                                true => true,
-                                false => pkg.version.cmp_suffixes(version) == Ordering::Equal,
-                            },
-                            false => false,
-                        }
+                        pkg.version.number == version.number
+                            && pkg.version.suffixes == version.suffixes
                     }
                     None => unreachable!("BUG: atom is expected to have an operator"),
                 },
@@ -207,6 +202,8 @@ impl Atom {
 
     /// Parses version components from the given regex captures if present,
     /// that includes version, suffixes and revision.
+    /// The caller must make sure the regex is correct.
+    /// TODO: move to PackageVersion impl?
     fn parse_version_components(caps: &Captures) -> Option<PackageVersion> {
         let version = match caps.name("version") {
             Some(m) => m.as_str(),
@@ -218,17 +215,20 @@ impl Atom {
                 s.as_str()
                     .split('_')
                     .filter(|s| !s.is_empty())
-                    .map(PackageVersionSuffix::new)
-                    .collect::<Vec<PackageVersionSuffix>>()
+                    .map(VersionSuffix::new)
+                    .collect::<Vec<VersionSuffix>>()
             })
             .unwrap_or_default();
-        Some(PackageVersion::new(
+
+        let version = PackageVersion::new(
             version.to_string(),
             suffixes,
             caps.name("revision")
                 .and_then(|r| r.as_str().parse::<usize>().ok())
                 .unwrap_or(0),
-        ))
+        )
+        .unwrap();
+        Some(version)
     }
 
     fn with_operator(mut self, operator: Option<Operator>) -> Self {
@@ -336,7 +336,7 @@ mod tests {
                     operator: Some(Operator::Equal),
                     category: "dev-lang".into(),
                     package: "rust".into(),
-                    version: Some(PackageVersion::new("1.70.0".into(), Vec::new(), 0)),
+                    version: PackageVersion::new("1.70.0".into(), Vec::new(), 0).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -347,11 +347,12 @@ mod tests {
                     operator: Some(Operator::Greater),
                     category: "dev-lang".into(),
                     package: "rust".into(),
-                    version: Some(PackageVersion::new(
+                    version: PackageVersion::new(
                         "1.70.0".into(),
-                        vec![PackageVersionSuffix::new("beta")],
+                        vec![VersionSuffix::new("beta")],
                         2,
-                    )),
+                    )
+                    .ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -362,7 +363,7 @@ mod tests {
                     operator: Some(Operator::GreaterEqual),
                     category: "sys-apps".into(),
                     package: "sed".into(),
-                    version: Some(PackageVersion::new("4.8".into(), Vec::new(), 0)),
+                    version: PackageVersion::new("4.8".into(), Vec::new(), 0).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -373,7 +374,7 @@ mod tests {
                     operator: Some(Operator::Less),
                     category: "net-misc".into(),
                     package: "dhcp".into(),
-                    version: Some(PackageVersion::new("3".into(), Vec::new(), 0)),
+                    version: PackageVersion::new("3".into(), Vec::new(), 0).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -384,11 +385,8 @@ mod tests {
                     operator: Some(Operator::LessEqual),
                     category: "net-misc".into(),
                     package: "dhcp".into(),
-                    version: Some(PackageVersion::new(
-                        "3.0".into(),
-                        vec![PackageVersionSuffix::new("p2")],
-                        0,
-                    )),
+                    version: PackageVersion::new("3.0".into(), vec![VersionSuffix::new("p2")], 0)
+                        .ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -399,10 +397,7 @@ mod tests {
                     operator: Some(Operator::Approximate),
                     category: "dev-lang".into(),
                     package: "rust".into(),
-                    version: Some(PackageVersion {
-                        version: "1.70.0".into(),
-                        ..Default::default()
-                    }),
+                    version: PackageVersion::new("1.70.0".into(), Vec::new(), 0).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -425,7 +420,7 @@ mod tests {
                     operator: Some(Operator::Equal),
                     category: "dev-lang".into(),
                     package: "rust".into(),
-                    version: Some(PackageVersion::new("1.70.0".into(), Vec::new(), 0)),
+                    version: PackageVersion::new("1.70.0".into(), Vec::new(), 0).ok(),
                     variant: AtomVariant::VersionWildcard,
                     ..Default::default()
                 },
@@ -436,7 +431,7 @@ mod tests {
                     operator: Some(Operator::Equal),
                     category: "dev-libs".into(),
                     package: "glib".into(),
-                    version: Some(PackageVersion::new("2".into(), Vec::new(), 0)),
+                    version: PackageVersion::new("2".into(), Vec::new(), 0).ok(),
                     variant: AtomVariant::VersionWildcard,
                     ..Default::default()
                 },
@@ -479,19 +474,12 @@ mod tests {
             "<sys-devel/gcc-16",
             "<=sys-devel/gcc-15.2.2_p20260101",
             "=sys-devel/gcc-15.2.1_p20251122-r1",
-            "~sys-devel/gcc-15",
-            "~sys-devel/gcc-15.2",
-            "~sys-devel/gcc-15.2.1",
             "~sys-devel/gcc-15.2.1_p20251122",
         ];
         let pkg = Package::new(
             "sys-devel".into(),
             "gcc".into(),
-            PackageVersion {
-                version: "15.2.1".into(),
-                suffixes: vec![PackageVersionSuffix::new("p20251122")],
-                revision: 1,
-            },
+            PackageVersion::new("15.2.1".into(), vec![VersionSuffix::new("p20251122")], 1).unwrap(),
         );
         for atom in atoms {
             let atom = Atom::new(atom).unwrap();
@@ -510,19 +498,16 @@ mod tests {
             ">=sys-devel/gcc-15.2.2_p20251122-r2",
             "=sys-devel/gcc-15.2.1_p20251122",
             "=sys-devel/gcc-15.2.1_p20251122-r2",
-            "~sys-devel/gcc-14",
             "~sys-devel/gcc-15.3",
-            "~sys-devel/gcc-15.2.2",
+            "~sys-devel/gcc-15",
+            "~sys-devel/gcc-15.2",
+            "~sys-devel/gcc-15.2.1",
             "~sys-devel/gcc-15.2.1_p20260101",
         ];
         let pkg = Package::new(
             "sys-devel".into(),
             "gcc".into(),
-            PackageVersion {
-                version: "15.2.1".into(),
-                suffixes: vec![PackageVersionSuffix::new("p20251122")],
-                revision: 1,
-            },
+            PackageVersion::new("15.2.1".into(), vec![VersionSuffix::new("p20251122")], 1).unwrap(),
         );
         for atom in atoms {
             let atom = Atom::new(atom).unwrap();
@@ -536,14 +521,12 @@ mod tests {
             operator: Some(Operator::GreaterEqual),
             category: "dev-lang".into(),
             package: "rust".into(),
-            version: Some(PackageVersion::new(
+            version: PackageVersion::new(
                 "1.70.0".into(),
-                vec![
-                    PackageVersionSuffix::new("beta"),
-                    PackageVersionSuffix::new("p11"),
-                ],
+                vec![VersionSuffix::new("beta"), VersionSuffix::new("p11")],
                 2,
-            )),
+            )
+            .ok(),
             slot: Some("1.70".into()),
             repo: Some("gentoo".into()),
             variant: AtomVariant::VersionOperator,

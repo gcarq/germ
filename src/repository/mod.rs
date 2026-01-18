@@ -3,7 +3,7 @@ mod desc;
 use crate::consts::SUPPORTED_EAPI;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
-use crate::package::version::{PackageVersion, PackageVersionSuffix};
+use crate::package::version::{PackageVersion, VersionSuffix};
 use crate::repository::desc::ProfileDescription;
 use crate::utils::FileFromPath;
 use anyhow::{Context, Result, anyhow};
@@ -236,7 +236,7 @@ impl Repository {
                 let suffixes = caps["suffixes"]
                     .split('_')
                     .filter(|s| !s.is_empty())
-                    .map(PackageVersionSuffix::new)
+                    .map(VersionSuffix::new)
                     .collect();
                 let version = PackageVersion::new(
                     caps["version"].to_string(),
@@ -244,7 +244,7 @@ impl Repository {
                     caps.name("revision")
                         .and_then(|r| r.as_str().parse::<usize>().ok())
                         .unwrap_or(0),
-                );
+                )?;
                 versions.push(version);
             }
         }

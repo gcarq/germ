@@ -1,96 +1,26 @@
+use anyhow::{Result, anyhow};
 use std::cmp::Ordering;
-use std::fmt;
-use std::hash::Hash;
+use std::{fmt, hash};
 
-/// Represents a package version with its version string, suffixes, and revision.
-#[derive(Eq, Debug, Default)]
+/// Represents a package version according to PMS section 3.2 and 3.3.
+/// This includes the base version components (e.g., "1.2.3a"), any suffixes
+/// (e.g., "_alpha1", "_p20240101"), and the revision number (e.g., "-r1").
+#[derive(Eq, Debug)]
 pub struct PackageVersion {
-    pub version: String,
-    pub suffixes: Vec<PackageVersionSuffix>,
+    pub number: VersionNumber,
+    pub suffixes: Vec<VersionSuffix>,
     pub revision: usize,
 }
 
 impl PackageVersion {
-    pub fn new(version: String, suffixes: Vec<PackageVersionSuffix>, revision: usize) -> Self {
+    /// Creates a new [`PackageVersion`] from the given version string, suffixes, and revision.
+    pub fn new(version: String, suffixes: Vec<VersionSuffix>, revision: usize) -> Result<Self> {
         debug_assert!(!version.is_empty());
-        Self {
-            version,
+        Ok(Self {
+            number: VersionNumber::new(&version)?,
             suffixes,
             revision,
-        }
-    }
-
-    /// Splits the version into its numeric components and an optional letter component.
-    /// For example, "1.2.3a" becomes (["1", "2", "3"], Some('a')) and
-    /// "2.0.1" becomes (["2", "0", "1"], None).
-    fn version_components(&self) -> (Vec<String>, Option<char>) {
-        let (version, letter) = match self.version.chars().last().unwrap() {
-            c @ 'a'..='z' => (&self.version[..self.version.len() - 1], Some(c)),
-            _ => (self.version.as_str(), None),
-        };
-        let components = version
-            .split('.')
-            .map(|part| part.to_string())
-            .collect::<Vec<String>>();
-        (components, letter)
-    }
-
-    /// Compares the base version (numeric components and letter).
-    pub fn cmp_base_version(&self, other: &Self) -> Ordering {
-        let (a_comps, a_letter) = self.version_components();
-        let (b_comps, b_letter) = other.version_components();
-
-        let mut a_comps_iter = a_comps.iter();
-        let mut b_comps_iter = b_comps.iter();
-
-        // First numeric component uses int comparison. It's safe to unwrap as there must be at
-        // least one component, and we know it only contains numbers.
-        match a_comps_iter
-            .next()
-            .unwrap()
-            .parse::<usize>()
-            .unwrap()
-            .cmp(&b_comps_iter.next().unwrap().parse::<usize>().unwrap())
-        {
-            Ordering::Equal => {}
-            non_equal => return non_equal,
-        }
-
-        // Compare remaining numeric components
-        while let (Some(a_comp), Some(b_comp)) = (a_comps_iter.next(), b_comps_iter.next()) {
-            // If either component starts with '0', compare as ascii chars.
-            if a_comp.starts_with("0") || b_comp.starts_with("0") {
-                // Strip leading zeros for comparison.
-                for (a_char, b_char) in a_comp
-                    .trim_start_matches("0")
-                    .chars()
-                    .zip(b_comp.trim_start_matches("0").chars())
-                {
-                    match a_char.cmp(&b_char) {
-                        Ordering::Equal => {}
-                        non_equal => return non_equal,
-                    }
-                }
-            } else {
-                // Compare as integers, safe to unwrap as it can only contain numbers at this point.
-                match a_comp
-                    .parse::<usize>()
-                    .unwrap()
-                    .cmp(&b_comp.parse::<usize>().unwrap())
-                {
-                    Ordering::Equal => {}
-                    non_equal => return non_equal,
-                }
-            }
-        }
-
-        // Compare letter component
-        match (a_letter, b_letter) {
-            (Some(a), Some(b)) => a.cmp(&b),
-            (Some(_), None) => Ordering::Greater,
-            (None, Some(_)) => Ordering::Less,
-            (None, None) => Ordering::Equal,
-        }
+        })
     }
 
     /// Compares version suffixes. If one has an additional patch suffix, it's considered greater.
@@ -104,11 +34,11 @@ impl PackageVersion {
                 .find(|o| *o != Ordering::Equal)
                 .unwrap_or(Ordering::Equal),
             Ordering::Greater => match self.suffixes[other.suffixes.len()] {
-                PackageVersionSuffix::Patch(_) => Ordering::Greater,
+                VersionSuffix::Patch(_) => Ordering::Greater,
                 _ => Ordering::Less,
             },
             Ordering::Less => match other.suffixes[self.suffixes.len()] {
-                PackageVersionSuffix::Patch(_) => Ordering::Less,
+                VersionSuffix::Patch(_) => Ordering::Less,
                 _ => Ordering::Greater,
             },
         }
@@ -118,7 +48,7 @@ impl PackageVersion {
 impl Ord for PackageVersion {
     /// Compares two package versions according to PMS section 3.3.
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.cmp_base_version(other) {
+        match self.number.cmp(&other.number) {
             Ordering::Equal => {}
             non_equal => return non_equal,
         }
@@ -142,21 +72,17 @@ impl PartialEq<Self> for PackageVersion {
     }
 }
 
-impl Hash for PackageVersion {
-    /// TODO: this must match the comparison logic,
-    ///  this is currently not true for the version components starting with '0'.
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.version.hash(state);
-        for suffix in &self.suffixes {
-            suffix.hash(state);
-        }
+impl hash::Hash for PackageVersion {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.number.hash(state);
+        self.suffixes.hash(state);
         self.revision.hash(state);
     }
 }
 
 impl fmt::Display for PackageVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.version)?;
+        write!(f, "{}", self.number)?;
         for suffix in &self.suffixes {
             write!(f, "_{}", suffix)?;
         }
@@ -167,9 +93,165 @@ impl fmt::Display for PackageVersion {
     }
 }
 
+/// Represents the base version number as individual components and an optional letter suffix.
+#[derive(Eq, Debug)]
+pub struct VersionNumber {
+    pub components: Vec<BaseVersionComponent>,
+    pub letter: Option<char>,
+}
+
+impl VersionNumber {
+    /// Splits the version into its numeric components and an optional letter suffix.
+    /// For example, "1.2.3a" becomes (["1", "2", "3", "a"], Some('a')),
+    /// "2.0.1" becomes (["2", "0", "1"], None).
+    fn new(version: &str) -> Result<Self> {
+        // Safe to unwrap because the base version contains at least one character
+        let (version, letter) = match version
+            .chars()
+            .last()
+            .ok_or_else(|| anyhow!("unable to parse version number from: {version}"))?
+        {
+            c @ 'a'..='z' => (&version[..version.len() - 1], Some(c)),
+            _ => (version, None),
+        };
+        let components = version
+            .split('.')
+            .map(|part| part.to_string())
+            .enumerate()
+            .map(|(i, part)| match i {
+                0 => BaseVersionComponent::Alphabetic(part),
+                _ if part.starts_with('0') => BaseVersionComponent::Alphabetic(part),
+                _ => BaseVersionComponent::Numeric(part),
+            })
+            .collect();
+        Ok(Self { components, letter })
+    }
+}
+
+impl Ord for VersionNumber {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self
+            .components
+            .iter()
+            .zip(other.components.iter())
+            .map(|(a, b)| a.cmp(b))
+            .find(|o| *o != Ordering::Equal)
+            .unwrap_or(Ordering::Equal)
+        {
+            Ordering::Equal => {}
+            non_equal => return non_equal,
+        }
+
+        match self.components.len().cmp(&other.components.len()) {
+            Ordering::Equal => {}
+            non_equal => return non_equal,
+        }
+
+        match (self.letter, other.letter) {
+            (Some(a), Some(b)) => a.cmp(&b),
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => Ordering::Equal,
+        }
+    }
+}
+
+impl PartialEq<Self> for VersionNumber {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl PartialOrd<Self> for VersionNumber {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl hash::Hash for VersionNumber {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.components.hash(state);
+        self.letter.hash(state);
+    }
+}
+
+impl fmt::Display for VersionNumber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let repr = self
+            .components
+            .iter()
+            .map(|comp| comp.to_string())
+            .collect::<Vec<String>>()
+            .join(".");
+        write!(f, "{repr}")?;
+        if let Some(letter) = self.letter {
+            write!(f, "{letter}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Represents a component of the base version, either numeric or alphabetic.
+/// E.g., in "1.2.03a", "1" and "2" are Numeric, "03" is Alphabetic, and "a" is handled separately
+/// and not part of this enum.
+#[derive(Eq, Debug)]
+pub enum BaseVersionComponent {
+    Numeric(String),
+    Alphabetic(String),
+}
+
+impl Ord for BaseVersionComponent {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            // Compare as integers, safe to unwrap as it can only contain numbers at this point.
+            (BaseVersionComponent::Numeric(a), BaseVersionComponent::Numeric(b)) => a
+                .parse::<usize>()
+                .unwrap()
+                .cmp(&b.parse::<usize>().unwrap()),
+            (BaseVersionComponent::Alphabetic(a), BaseVersionComponent::Alphabetic(b))
+            | (BaseVersionComponent::Numeric(a), BaseVersionComponent::Alphabetic(b))
+            | (BaseVersionComponent::Alphabetic(a), BaseVersionComponent::Numeric(b)) => {
+                a.trim_start_matches('0').cmp(b.trim_start_matches('0'))
+            }
+        }
+    }
+}
+
+impl PartialEq<Self> for BaseVersionComponent {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl PartialOrd<Self> for BaseVersionComponent {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl hash::Hash for BaseVersionComponent {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        let comp = match self {
+            BaseVersionComponent::Numeric(n) => n,
+            BaseVersionComponent::Alphabetic(a) => a.trim_start_matches('0'),
+        };
+        comp.hash(state);
+    }
+}
+
+impl fmt::Display for BaseVersionComponent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let repr = match self {
+            BaseVersionComponent::Numeric(n) => n,
+            BaseVersionComponent::Alphabetic(a) => a,
+        };
+        write!(f, "{repr}")
+    }
+}
+
 /// Represents the different types of package version suffixes outlined in section 3.2.
 #[derive(Eq, Debug)]
-pub enum PackageVersionSuffix {
+pub enum VersionSuffix {
     Alpha(Option<usize>),
     Beta(Option<usize>),
     Pre(Option<usize>),
@@ -177,7 +259,7 @@ pub enum PackageVersionSuffix {
     Patch(Option<usize>),
 }
 
-impl PackageVersionSuffix {
+impl VersionSuffix {
     pub fn new(suffix: &str) -> Self {
         debug_assert!(
             ["alpha", "beta", "pre", "rc", "p"]
@@ -205,23 +287,23 @@ impl PackageVersionSuffix {
     /// Returns the order of the suffix type for comparison purposes.
     fn suffix_order(&self) -> usize {
         match self {
-            PackageVersionSuffix::Alpha(_) => 0,
-            PackageVersionSuffix::Beta(_) => 1,
-            PackageVersionSuffix::Pre(_) => 2,
-            PackageVersionSuffix::Rc(_) => 3,
-            PackageVersionSuffix::Patch(_) => 4,
+            VersionSuffix::Alpha(_) => 0,
+            VersionSuffix::Beta(_) => 1,
+            VersionSuffix::Pre(_) => 2,
+            VersionSuffix::Rc(_) => 3,
+            VersionSuffix::Patch(_) => 4,
         }
     }
 }
 
-impl fmt::Display for PackageVersionSuffix {
+impl fmt::Display for VersionSuffix {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (suffix, num) = match self {
-            PackageVersionSuffix::Alpha(n) => ("alpha", n),
-            PackageVersionSuffix::Beta(n) => ("beta", n),
-            PackageVersionSuffix::Pre(n) => ("pre", n),
-            PackageVersionSuffix::Rc(n) => ("rc", n),
-            PackageVersionSuffix::Patch(n) => ("p", n),
+            VersionSuffix::Alpha(n) => ("alpha", n),
+            VersionSuffix::Beta(n) => ("beta", n),
+            VersionSuffix::Pre(n) => ("pre", n),
+            VersionSuffix::Rc(n) => ("rc", n),
+            VersionSuffix::Patch(n) => ("p", n),
         };
         write!(f, "{suffix}")?;
         if let Some(num) = num {
@@ -231,7 +313,7 @@ impl fmt::Display for PackageVersionSuffix {
     }
 }
 
-impl Ord for PackageVersionSuffix {
+impl Ord for VersionSuffix {
     /// Compares two package versions according to PMS section 3.3.
     fn cmp(&self, other: &Self) -> Ordering {
         match self.suffix_order().cmp(&other.suffix_order()) {
@@ -240,11 +322,11 @@ impl Ord for PackageVersionSuffix {
         }
 
         match (self, other) {
-            (PackageVersionSuffix::Alpha(a), PackageVersionSuffix::Alpha(b))
-            | (PackageVersionSuffix::Beta(a), PackageVersionSuffix::Beta(b))
-            | (PackageVersionSuffix::Pre(a), PackageVersionSuffix::Pre(b))
-            | (PackageVersionSuffix::Rc(a), PackageVersionSuffix::Rc(b))
-            | (PackageVersionSuffix::Patch(a), PackageVersionSuffix::Patch(b)) => match (a, b) {
+            (VersionSuffix::Alpha(a), VersionSuffix::Alpha(b))
+            | (VersionSuffix::Beta(a), VersionSuffix::Beta(b))
+            | (VersionSuffix::Pre(a), VersionSuffix::Pre(b))
+            | (VersionSuffix::Rc(a), VersionSuffix::Rc(b))
+            | (VersionSuffix::Patch(a), VersionSuffix::Patch(b)) => match (a, b) {
                 (Some(a_num), Some(b_num)) => a_num.cmp(b_num),
                 (Some(_), None) => Ordering::Greater,
                 (None, Some(_)) => Ordering::Less,
@@ -255,27 +337,27 @@ impl Ord for PackageVersionSuffix {
     }
 }
 
-impl PartialOrd for PackageVersionSuffix {
+impl PartialOrd for VersionSuffix {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl PartialEq<Self> for PackageVersionSuffix {
+impl PartialEq<Self> for VersionSuffix {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl Hash for PackageVersionSuffix {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl hash::Hash for VersionSuffix {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
         self.suffix_order().hash(state);
         let num = match self {
-            PackageVersionSuffix::Alpha(n)
-            | PackageVersionSuffix::Beta(n)
-            | PackageVersionSuffix::Pre(n)
-            | PackageVersionSuffix::Rc(n)
-            | PackageVersionSuffix::Patch(n) => n,
+            VersionSuffix::Alpha(n)
+            | VersionSuffix::Beta(n)
+            | VersionSuffix::Pre(n)
+            | VersionSuffix::Rc(n)
+            | VersionSuffix::Patch(n) => n,
         };
         num.hash(state);
     }
@@ -288,7 +370,9 @@ mod tests {
     #[test]
     fn test_package_version_display_simple() {
         assert_eq!(
-            PackageVersion::new("1.0.0".into(), vec![], 0,).to_string(),
+            PackageVersion::new("1.0.0".into(), vec![], 0,)
+                .unwrap()
+                .to_string(),
             "1.0.0"
         );
     }
@@ -299,71 +383,108 @@ mod tests {
             PackageVersion::new(
                 "2.3.4a".into(),
                 vec![
-                    PackageVersionSuffix::Alpha(Some(3)),
-                    PackageVersionSuffix::Patch(Some(20250101))
+                    VersionSuffix::Alpha(Some(3)),
+                    VersionSuffix::Patch(Some(20250101))
                 ],
                 2,
             )
+            .unwrap()
             .to_string(),
             "2.3.4a_alpha3_p20250101-r2"
         );
     }
 
     #[test]
-    fn test_package_version_version_components() {
-        let pv1 = PackageVersion::new("1.2.3a".into(), vec![], 0);
+    fn test_version_components_new() {
         assert_eq!(
-            pv1.version_components(),
-            (vec!["1".into(), "2".into(), "3".into()], Some('a'))
+            VersionNumber::new("1.2.3a").unwrap(),
+            VersionNumber {
+                components: vec![
+                    BaseVersionComponent::Numeric("1".into()),
+                    BaseVersionComponent::Numeric("2".into()),
+                    BaseVersionComponent::Numeric("3".into()),
+                ],
+                letter: Some('a'),
+            }
         );
 
-        let pv2 = PackageVersion::new("2.0.1".into(), vec![], 0);
         assert_eq!(
-            pv2.version_components(),
-            (vec!["2".into(), "0".into(), "1".into()], None)
+            VersionNumber::new("2.0.1").unwrap(),
+            VersionNumber {
+                components: vec![
+                    BaseVersionComponent::Numeric("2".into()),
+                    BaseVersionComponent::Numeric("0".into()),
+                    BaseVersionComponent::Numeric("1".into()),
+                ],
+                letter: None,
+            }
+        );
+
+        assert_eq!(
+            VersionNumber::new("1.2.03").unwrap(),
+            VersionNumber {
+                components: vec![
+                    BaseVersionComponent::Numeric("1".into()),
+                    BaseVersionComponent::Numeric("2".into()),
+                    BaseVersionComponent::Alphabetic("03".into()),
+                ],
+                letter: None,
+            }
+        );
+
+        assert_eq!(
+            VersionNumber::new("20251122").unwrap(),
+            VersionNumber {
+                components: vec![BaseVersionComponent::Numeric("20251122".into()),],
+                letter: None,
+            }
         );
     }
 
     #[test]
     fn test_package_version_ord_version() {
-        let v1_2_3 = PackageVersion::new("1.2.3".into(), vec![], 0);
-        let v1_2_4 = PackageVersion::new("1.2.4".into(), vec![], 0);
-        let v1_10_0 = PackageVersion::new("1.10.0".into(), vec![], 0);
-        let v1_2_03 = PackageVersion::new("1.2.03".into(), vec![], 0);
-        let v_2_0 = PackageVersion::new("2.0".into(), vec![], 0);
+        let v1_2_3 = PackageVersion::new("1.2.3".into(), vec![], 0).unwrap();
+        let v1_2_03 = PackageVersion::new("1.2.03".into(), vec![], 0).unwrap();
+        let v1_2_4 = PackageVersion::new("1.2.4".into(), vec![], 0).unwrap();
+        let v1_10_0 = PackageVersion::new("1.10.0".into(), vec![], 0).unwrap();
+        let v1_10_0_1 = PackageVersion::new("1.10.0.1".into(), vec![], 0).unwrap();
+        let v2_0 = PackageVersion::new("2.0".into(), vec![], 0).unwrap();
+        let v2025_11_22 = PackageVersion::new("20251122".into(), vec![], 0).unwrap();
 
         assert!(v1_2_3 < v1_2_4);
-        assert!(v1_2_4 < v1_10_0);
         assert_eq!(v1_2_3, v1_2_03); // '03' vs '3' should compare as ascii
-        assert!(v1_2_4 < v_2_0);
+        assert!(v1_2_4 < v1_10_0);
+        assert!(v1_10_0 < v1_10_0_1);
+        assert!(v1_10_0_1 < v2_0);
+        assert!(v2_0 < v2025_11_22);
     }
 
     #[test]
     fn test_package_version_ord_letter() {
-        let v1_2_3 = PackageVersion::new("1.2.3".into(), vec![], 0);
-        let v1_2_3a = PackageVersion::new("1.2.3a".into(), vec![], 0);
-        let v1_2_3b = PackageVersion::new("1.2.3b".into(), vec![], 0);
+        let v1_2_3 = PackageVersion::new("1.2.3".into(), vec![], 0).unwrap();
+        let v1_2_3a = PackageVersion::new("1.2.3a".into(), vec![], 0).unwrap();
+        let v1_2_3b = PackageVersion::new("1.2.3b".into(), vec![], 0).unwrap();
+        let v1_2_3_1 = PackageVersion::new("1.2.3.1".into(), vec![], 0).unwrap();
 
         assert!(v1_2_3 < v1_2_3a);
         assert!(v1_2_3a < v1_2_3b);
+        assert!(v1_2_3b < v1_2_3_1);
     }
 
     #[test]
     fn test_package_version_ord_suffixes() {
         let v1_2_3_alpha =
-            PackageVersion::new("1.2.3".into(), vec![PackageVersionSuffix::Alpha(None)], 0);
+            PackageVersion::new("1.2.3".into(), vec![VersionSuffix::Alpha(None)], 0).unwrap();
         let v1_2_3_alpha_p2025 = PackageVersion::new(
             "1.2.3".into(),
-            vec![
-                PackageVersionSuffix::Alpha(None),
-                PackageVersionSuffix::Patch(Some(2025)),
-            ],
+            vec![VersionSuffix::Alpha(None), VersionSuffix::Patch(Some(2025))],
             0,
-        );
+        )
+        .unwrap();
         let v1_2_3_beta =
-            PackageVersion::new("1.2.3".into(), vec![PackageVersionSuffix::Beta(None)], 0);
+            PackageVersion::new("1.2.3".into(), vec![VersionSuffix::Beta(None)], 0).unwrap();
         let v1_2_3_patch =
-            PackageVersion::new("1.2.3".into(), vec![PackageVersionSuffix::Patch(None)], 0);
+            PackageVersion::new("1.2.3".into(), vec![VersionSuffix::Patch(None)], 0).unwrap();
 
         assert!(v1_2_3_alpha < v1_2_3_alpha_p2025);
         assert!(v1_2_3_alpha < v1_2_3_beta);
@@ -372,9 +493,9 @@ mod tests {
 
     #[test]
     fn test_package_version_ord_revision() {
-        let v1_r0 = PackageVersion::new("1.0.0".into(), vec![], 0);
-        let v1_r1 = PackageVersion::new("1.0.0".into(), vec![], 1);
-        let v1_r2 = PackageVersion::new("1.0.0".into(), vec![], 2);
+        let v1_r0 = PackageVersion::new("1.0.0".into(), vec![], 0).unwrap();
+        let v1_r1 = PackageVersion::new("1.0.0".into(), vec![], 1).unwrap();
+        let v1_r2 = PackageVersion::new("1.0.0".into(), vec![], 2).unwrap();
 
         assert!(v1_r0 < v1_r1);
         assert!(v1_r1 < v1_r2);
@@ -385,20 +506,22 @@ mod tests {
         let v1_2_3a_p2024 = PackageVersion::new(
             "1.2.3a".into(),
             vec![
-                PackageVersionSuffix::Alpha(None),
-                PackageVersionSuffix::Patch(Some(20240101)),
+                VersionSuffix::Alpha(None),
+                VersionSuffix::Patch(Some(20240101)),
             ],
             0,
-        );
+        )
+        .unwrap();
         let v1_2_3a_p2025 = PackageVersion::new(
             "1.2.3a".into(),
             vec![
-                PackageVersionSuffix::Alpha(None),
-                PackageVersionSuffix::Patch(Some(20251111)),
+                VersionSuffix::Alpha(None),
+                VersionSuffix::Patch(Some(20251111)),
             ],
             0,
-        );
-        let v1_5_0b = PackageVersion::new("1.5.0b".into(), vec![], 0);
+        )
+        .unwrap();
+        let v1_5_0b = PackageVersion::new("1.5.0b".into(), vec![], 0).unwrap();
 
         assert!(v1_2_3a_p2024 < v1_2_3a_p2025);
         assert!(v1_2_3a_p2025 < v1_5_0b);
@@ -406,13 +529,13 @@ mod tests {
 
     #[test]
     fn test_package_version_suffix_ord() {
-        let alpha1 = PackageVersionSuffix::Alpha(Some(1));
-        let alpha2 = PackageVersionSuffix::Alpha(Some(2));
-        let beta_none = PackageVersionSuffix::Beta(None);
-        let beta1 = PackageVersionSuffix::Beta(Some(1));
-        let pre1 = PackageVersionSuffix::Pre(Some(1));
-        let rc_none = PackageVersionSuffix::Rc(Some(1));
-        let patch1 = PackageVersionSuffix::Patch(Some(1));
+        let alpha1 = VersionSuffix::Alpha(Some(1));
+        let alpha2 = VersionSuffix::Alpha(Some(2));
+        let beta_none = VersionSuffix::Beta(None);
+        let beta1 = VersionSuffix::Beta(Some(1));
+        let pre1 = VersionSuffix::Pre(Some(1));
+        let rc_none = VersionSuffix::Rc(Some(1));
+        let patch1 = VersionSuffix::Patch(Some(1));
 
         assert!(alpha1 < alpha2);
         assert!(alpha2 < beta_none);
@@ -424,11 +547,11 @@ mod tests {
 
     #[test]
     fn test_package_version_suffix_display() {
-        let alpha = PackageVersionSuffix::Alpha(Some(3));
-        let beta = PackageVersionSuffix::Beta(None);
-        let pre = PackageVersionSuffix::Pre(None);
-        let rc = PackageVersionSuffix::Rc(Some(2));
-        let p = PackageVersionSuffix::Patch(Some(20240101));
+        let alpha = VersionSuffix::Alpha(Some(3));
+        let beta = VersionSuffix::Beta(None);
+        let pre = VersionSuffix::Pre(None);
+        let rc = VersionSuffix::Rc(Some(2));
+        let p = VersionSuffix::Patch(Some(20240101));
 
         assert_eq!(alpha.to_string(), "alpha3");
         assert_eq!(beta.to_string(), "beta");

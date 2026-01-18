@@ -1,5 +1,5 @@
 use crate::package::Package;
-use crate::package::version::{PackageVersion, PackageVersionSuffix};
+use crate::package::version::{PackageVersion, VersionSuffix};
 use anyhow::Result;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -62,7 +62,7 @@ impl Vdb {
                     let suffixes = caps["suffixes"]
                         .split('_')
                         .filter(|s| !s.is_empty())
-                        .map(PackageVersionSuffix::new)
+                        .map(VersionSuffix::new)
                         .collect();
                     let version = PackageVersion::new(
                         caps["version"].to_string(),
@@ -70,7 +70,7 @@ impl Vdb {
                         caps.name("revision")
                             .and_then(|r| r.as_str().parse::<usize>().ok())
                             .unwrap_or(0),
-                    );
+                    )?;
                     packages.insert(Package::new(category.clone(), pkg_name, version));
                 }
             }
