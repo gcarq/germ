@@ -110,15 +110,12 @@ mod tests {
             VAR4=value_with_\"escaped_quotes\"
         "#;
 
-        let result = shlex_split(content.to_string()).unwrap();
+        let result = shlex_split(content.into()).unwrap();
         let expected = vec![
-            ("VAR1".to_string(), "value1".to_string()),
-            ("VAR2".to_string(), "value with spaces".to_string()),
-            ("VAR3".to_string(), "another value".to_string()),
-            (
-                "VAR4".to_string(),
-                r#"value_with_"escaped_quotes""#.to_string(),
-            ),
+            ("VAR1".into(), "value1".into()),
+            ("VAR2".into(), "value with spaces".into()),
+            ("VAR3".into(), "another value".into()),
+            ("VAR4".into(), r#"value_with_"escaped_quotes""#.into()),
         ];
 
         assert_eq!(result, expected);

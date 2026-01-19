@@ -127,7 +127,7 @@ impl EnvValue {
     pub fn new(value: String, is_incremental: bool) -> Self {
         let values = value
             .split_ascii_whitespace()
-            .map(|s| s.to_string())
+            .map(|s| s.to_owned())
             .collect();
         if is_incremental {
             EnvValue::Incremental(values)
@@ -195,7 +195,7 @@ USE="${USE} -bar"
 
 enable_year2038="no"
         "#;
-        let make_env = MakeEnv::from_file_content(content.to_string()).unwrap();
+        let make_env = MakeEnv::from_file_content(content.into()).unwrap();
         assert_eq!(make_env.get("USE").unwrap().to_string(), "cet -foo -bar");
         assert_eq!(
             make_env.get("BOOTSTRAP_USE").unwrap().to_string(),

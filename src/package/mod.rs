@@ -13,10 +13,11 @@ pub struct Package {
 }
 
 impl Package {
-    pub fn new(category: String, name: String, version: PackageVersion) -> Self {
+    /// Creates a new [`Package`] from the given `category`, `name`, and `version`.
+    pub fn new(category: &str, name: &str, version: PackageVersion) -> Self {
         Self {
-            category,
-            name,
+            category: category.to_owned(),
+            name: name.to_owned(),
             version,
         }
     }
@@ -52,9 +53,9 @@ mod tests {
     #[test]
     fn test_package_qualified_name() {
         let package = Package::new(
-            "app-editors".into(),
-            "vim".into(),
-            PackageVersion::new("1.0.0", None, 0).unwrap(),
+            "app-editors",
+            "vim",
+            PackageVersion::new("1.0.0", None, None).unwrap(),
         );
         assert_eq!(package.qualified_name(), "app-editors/vim");
     }

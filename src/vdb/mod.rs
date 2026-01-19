@@ -58,15 +58,12 @@ impl Vdb {
                     && let Some(file_name) = entry.file_name().into_string().ok()
                     && let Some(caps) = QUALIFIED_PACKAGE_NAME_RE.captures(&file_name)
                 {
-                    let pkg_name = caps["name"].to_string();
                     let version = PackageVersion::new(
                         &caps["version"],
                         Some(&caps["suffixes"]),
-                        caps.name("revision")
-                            .and_then(|r| r.as_str().parse::<usize>().ok())
-                            .unwrap_or(0),
+                        caps.name("revision").map(|m| m.as_str()),
                     )?;
-                    packages.insert(Package::new(category.clone(), pkg_name, version));
+                    packages.insert(Package::new(&category, &caps["name"], version));
                 }
             }
         }

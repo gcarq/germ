@@ -27,8 +27,8 @@ impl DeprecationInfo {
         let recommended_profile = lines
             .next()
             .ok_or_else(|| anyhow!("deprecated file is empty"))?
-            .to_string();
-        let info = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+            .to_owned();
+        let info = lines.collect::<Vec<_>>().join("\n").trim().to_owned();
         Ok(Self {
             recommended_profile,
             info,
@@ -43,7 +43,7 @@ mod tests {
     #[test]
     fn test_deprecation_info_from_file_content() {
         let content = "default/linux/amd64/23.0\n\nThis profile is deprecated. Please upgrade.";
-        let deprecation_info = DeprecationInfo::from_file_content(content.to_string()).unwrap();
+        let deprecation_info = DeprecationInfo::from_file_content(content.to_owned()).unwrap();
         assert_eq!(
             deprecation_info.recommended_profile,
             "default/linux/amd64/23.0"

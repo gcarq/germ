@@ -1,5 +1,5 @@
 use crate::package::version::suffix::VersionSuffixes;
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 use number::VersionNumber;
 use std::fmt;
 use std::str::FromStr;
@@ -18,15 +18,21 @@ pub struct PackageVersion {
 }
 
 impl PackageVersion {
-    /// Creates a new [`PackageVersion`] from the given version string, suffixes, and revision.
-    pub fn new(version: &str, suffixes: Option<&str>, revision: usize) -> Result<Self> {
+    /// Creates a new [`PackageVersion`] from the given `version`, `suffixes`, and `revision`.
+    /// For example: `PackageVersion::new("1.2.3a", Some("_alpha1_p20240101"), "1")`
+    pub fn new(version: &str, suffixes: Option<&str>, revision: Option<&str>) -> Result<Self> {
         Ok(Self {
             number: VersionNumber::from_str(version)?,
             suffixes: match suffixes {
                 Some(s) => VersionSuffixes::from_str(s)?,
                 None => VersionSuffixes::default(),
             },
-            revision,
+            revision: match revision {
+                Some(rev) => rev
+                    .parse::<usize>()
+                    .with_context(|| anyhow!("revision must be a positive integer, got '{rev}'"))?,
+                None => 0,
+            },
         })
     }
 }
@@ -48,11 +54,11 @@ mod tests {
     #[test]
     fn test_package_version_new_ok() {
         let test_cases = vec![
-            PackageVersion::new("1.0.0", None, 0),
-            PackageVersion::new("1.2.3a", Some("_alpha1"), 0),
-            PackageVersion::new("2.0.1", Some("_beta2_p20240101"), 1),
-            PackageVersion::new("2.3.4z", Some("alpha_p20250101"), 2),
-            PackageVersion::new("9999", None, 0),
+            PackageVersion::new("1.0.0", None, None),
+            PackageVersion::new("1.2.3a", Some("_alpha1"), None),
+            PackageVersion::new("2.0.1", Some("_beta2_p20240101"), Some("1")),
+            PackageVersion::new("2.3.4z", Some("alpha_p20250101"), Some("2")),
+            PackageVersion::new("9999", None, None),
         ];
         for version in test_cases {
             version.unwrap();
@@ -62,14 +68,16 @@ mod tests {
     #[test]
     fn test_package_version_new_err() {
         let test_cases = vec![
-            PackageVersion::new("", None, 0),
-            PackageVersion::new("1.1.1aa", None, 0),
-            PackageVersion::new("0.33.1A", None, 0),
-            PackageVersion::new("1..0", None, 0),
-            PackageVersion::new("a.b.c", None, 0),
-            PackageVersion::new("20251212", Some("_ALPHA"), 9999),
-            PackageVersion::new("1.2.3a", Some("_unknownsuffix"), 0),
-            PackageVersion::new("2.0.1", Some("_betaX"), 1),
+            PackageVersion::new("", None, None),
+            PackageVersion::new("1.1.1aa", None, None),
+            PackageVersion::new("0.33.1A", None, None),
+            PackageVersion::new("1..0", None, None),
+            PackageVersion::new("a.b.c", None, None),
+            PackageVersion::new("20251212", Some("_ALPHA"), Some("9999")),
+            PackageVersion::new("1.2.3a", Some("_unknownsuffix"), None),
+            PackageVersion::new("2.0.1", Some("_betaX"), Some("1")),
+            PackageVersion::new("1.0.0", None, Some("a")),
+            PackageVersion::new("1.0.0", None, Some("-1")),
         ];
         for version in test_cases {
             assert!(version.is_err(), "Expected error for: {}", version.unwrap());
@@ -79,17 +87,17 @@ mod tests {
     #[test]
     fn test_package_version_display() {
         let test_cases = vec![
-            (PackageVersion::new("1.0.0", None, 0), "1.0.0"),
+            (PackageVersion::new("1.0.0", None, None), "1.0.0"),
             (
-                PackageVersion::new("1.2.3a", Some("_alpha1"), 0),
+                PackageVersion::new("1.2.3a", Some("_alpha1"), None),
                 "1.2.3a_alpha1",
             ),
             (
-                PackageVersion::new("2.0.1", Some("_beta2_p20240101"), 1),
+                PackageVersion::new("2.0.1", Some("_beta2_p20240101"), Some("1")),
                 "2.0.1_beta2_p20240101-r1",
             ),
             (
-                PackageVersion::new("2.3.4z", Some("alpha_p20250101"), 2),
+                PackageVersion::new("2.3.4z", Some("alpha_p20250101"), Some("2")),
                 "2.3.4z_alpha_p20250101-r2",
             ),
         ];
@@ -100,9 +108,9 @@ mod tests {
 
     #[test]
     fn test_package_version_ord_revision() {
-        let v1_r0 = PackageVersion::new("1.0.0", None, 0).unwrap();
-        let v1_r1 = PackageVersion::new("1.0.0", None, 1).unwrap();
-        let v1_r2 = PackageVersion::new("1.0.0", None, 2).unwrap();
+        let v1_r0 = PackageVersion::new("1.0.0", None, None).unwrap();
+        let v1_r1 = PackageVersion::new("1.0.0", None, Some("1")).unwrap();
+        let v1_r2 = PackageVersion::new("1.0.0", None, Some("2")).unwrap();
 
         assert!(v1_r0 < v1_r1);
         assert!(v1_r1 < v1_r2);
@@ -110,11 +118,11 @@ mod tests {
 
     #[test]
     fn test_package_version_ord() {
-        let v1_2_3a = PackageVersion::new("1.2.3a", Some("_alpha"), 0).unwrap();
-        let v1_2_3a_p2024 = PackageVersion::new("1.2.3a", Some("_alpha_p20240101"), 0).unwrap();
-        let v1_2_3a_p2025 = PackageVersion::new("1.2.3a", Some("_alpha_p20251111"), 0).unwrap();
-        let v1_5_0b = PackageVersion::new("1.5.0b", None, 0).unwrap();
-        let v1_5_0br3 = PackageVersion::new("1.5.0b", None, 3).unwrap();
+        let v1_2_3a = PackageVersion::new("1.2.3a", Some("_alpha"), None).unwrap();
+        let v1_2_3a_p2024 = PackageVersion::new("1.2.3a", Some("_alpha_p20240101"), None).unwrap();
+        let v1_2_3a_p2025 = PackageVersion::new("1.2.3a", Some("_alpha_p20251111"), None).unwrap();
+        let v1_5_0b = PackageVersion::new("1.5.0b", None, None).unwrap();
+        let v1_5_0br3 = PackageVersion::new("1.5.0b", None, Some("3")).unwrap();
 
         assert!(v1_2_3a < v1_2_3a_p2024);
         assert!(v1_2_3a_p2024 < v1_2_3a_p2025);

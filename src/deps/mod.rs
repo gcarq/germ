@@ -142,6 +142,11 @@ impl Atom {
         Err(anyhow!("invalid atom: {atom}"))
     }
 
+    /// Returns the qualified name for this atom in the format category/name e.g. app-editors/vim.
+    pub fn qualified_name(&self) -> String {
+        format!("{}/{}", self.category, self.package)
+    }
+
     /// Checks if the given package matches this atom.
     /// TODO: implement wildcard operator, slot and repo matching
     pub fn matches(&self, pkg: &Package) -> bool {
@@ -189,21 +194,20 @@ impl Atom {
                 .name("category")
                 .ok_or_else(|| anyhow!("atom missing <category>"))?
                 .as_str()
-                .to_string(),
+                .to_owned(),
             package: caps
                 .name("package")
                 .ok_or_else(|| anyhow!("atom missing <package>"))?
                 .as_str()
-                .to_string()
-                .to_string(),
+                .to_owned(),
             version,
-            slot: caps.name("slot").map(|m| m.as_str().to_string()),
-            repo: caps.name("repo").map(|m| m.as_str().to_string()),
+            slot: caps.name("slot").map(|m| m.as_str().to_owned()),
+            repo: caps.name("repo").map(|m| m.as_str().to_owned()),
             variant,
         })
     }
 
-    /// Parses the version from the given regex captures `caps`.
+    /// Parses the version including suffixes and revision from the given regex captures `caps`.
     /// If no version is found, returns `Ok(None)`.
     fn parse_version(caps: &Captures) -> Result<Option<PackageVersion>> {
         let version = match caps.name("version") {
@@ -211,16 +215,9 @@ impl Atom {
             None => return Ok(None),
         };
         let suffixes = caps.name("suffixes").map(|m| m.as_str());
-        let revision = match caps.name("revision") {
-            Some(m) => m
-                .as_str()
-                .parse::<usize>()
-                .with_context(|| "unable to parse revision")?,
-            _ => 0,
-        };
+        let revision = caps.name("revision").map(|m| m.as_str());
 
-        let version = PackageVersion::new(version, suffixes, revision)?;
-        Ok(Some(version))
+        Ok(Some(PackageVersion::new(version, suffixes, revision)?))
     }
 
     fn with_operator(mut self, operator: Option<Operator>) -> Self {
@@ -251,43 +248,6 @@ impl fmt::Display for Atom {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_operator_from_str_ok() {
-        let test_cases = vec![
-            ("<", Operator::Less),
-            ("<=", Operator::LessEqual),
-            ("=", Operator::Equal),
-            (">", Operator::Greater),
-            (">=", Operator::GreaterEqual),
-            ("~", Operator::Approximate),
-        ];
-        for (op_str, expected_op) in test_cases {
-            let op = Operator::from_str(op_str).unwrap();
-            assert_eq!(op, expected_op);
-        }
-    }
-
-    #[test]
-    fn test_operator_from_str_err() {
-        let invalid_ops = vec!["!", "==", "><", "=>", "invalid"];
-        for op_str in invalid_ops {
-            assert!(
-                Operator::from_str(op_str).is_err(),
-                "{op_str} should be invalid"
-            );
-        }
-    }
-
-    #[test]
-    fn test_operator_display() {
-        assert_eq!(Operator::Less.to_string(), "<");
-        assert_eq!(Operator::LessEqual.to_string(), "<=");
-        assert_eq!(Operator::Equal.to_string(), "=");
-        assert_eq!(Operator::Greater.to_string(), ">");
-        assert_eq!(Operator::GreaterEqual.to_string(), ">=");
-        assert_eq!(Operator::Approximate.to_string(), "~");
-    }
 
     #[test]
     fn test_atom_from_str_simple() {
@@ -344,7 +304,7 @@ mod tests {
                     operator: Some(Operator::Equal),
                     category: "dev-lang".into(),
                     package: "rust".into(),
-                    version: PackageVersion::new("1.70.0", None, 0).ok(),
+                    version: PackageVersion::new("1.70.0", None, None).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -355,7 +315,7 @@ mod tests {
                     operator: Some(Operator::Greater),
                     category: "dev-lang".into(),
                     package: "rust".into(),
-                    version: PackageVersion::new("1.70.0", Some("beta"), 2).ok(),
+                    version: PackageVersion::new("1.70.0", Some("beta"), Some("2")).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -366,7 +326,7 @@ mod tests {
                     operator: Some(Operator::GreaterEqual),
                     category: "sys-apps".into(),
                     package: "sed".into(),
-                    version: PackageVersion::new("4.8", None, 0).ok(),
+                    version: PackageVersion::new("4.8", None, None).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -377,7 +337,7 @@ mod tests {
                     operator: Some(Operator::Less),
                     category: "net-misc".into(),
                     package: "dhcp".into(),
-                    version: PackageVersion::new("3", None, 0).ok(),
+                    version: PackageVersion::new("3", None, None).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -388,7 +348,7 @@ mod tests {
                     operator: Some(Operator::LessEqual),
                     category: "net-misc".into(),
                     package: "dhcp".into(),
-                    version: PackageVersion::new("3.0", Some("p2"), 0).ok(),
+                    version: PackageVersion::new("3.0", Some("p2"), None).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -399,7 +359,7 @@ mod tests {
                     operator: Some(Operator::Approximate),
                     category: "dev-lang".into(),
                     package: "rust".into(),
-                    version: PackageVersion::new("1.70.0", None, 0).ok(),
+                    version: PackageVersion::new("1.70.0", None, None).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -422,7 +382,7 @@ mod tests {
                     operator: Some(Operator::Equal),
                     category: "dev-lang".into(),
                     package: "rust".into(),
-                    version: PackageVersion::new("1.70.0", None, 0).ok(),
+                    version: PackageVersion::new("1.70.0", None, None).ok(),
                     variant: AtomVariant::VersionWildcard,
                     ..Default::default()
                 },
@@ -433,7 +393,7 @@ mod tests {
                     operator: Some(Operator::Equal),
                     category: "dev-libs".into(),
                     package: "glib".into(),
-                    version: PackageVersion::new("2", None, 0).ok(),
+                    version: PackageVersion::new("2", None, None).ok(),
                     variant: AtomVariant::VersionWildcard,
                     ..Default::default()
                 },
@@ -479,9 +439,9 @@ mod tests {
             "~sys-devel/gcc-15.2.1_p20251122",
         ];
         let pkg = Package::new(
-            "sys-devel".into(),
-            "gcc".into(),
-            PackageVersion::new("15.2.1", Some("p20251122"), 1).unwrap(),
+            "sys-devel",
+            "gcc",
+            PackageVersion::new("15.2.1", Some("p20251122"), Some("1")).unwrap(),
         );
         for atom in atoms {
             let atom = Atom::new(atom).unwrap();
@@ -507,9 +467,9 @@ mod tests {
             "~sys-devel/gcc-15.2.1_p20260101",
         ];
         let pkg = Package::new(
-            "sys-devel".into(),
-            "gcc".into(),
-            PackageVersion::new("15.2.1", Some("p20251122"), 1).unwrap(),
+            "sys-devel",
+            "gcc",
+            PackageVersion::new("15.2.1", Some("p20251122"), Some("1")).unwrap(),
         );
         for atom in atoms {
             let atom = Atom::new(atom).unwrap();
@@ -518,17 +478,66 @@ mod tests {
     }
 
     #[test]
+    fn test_atom_qualified_name() {
+        let atom = Atom {
+            category: "dev-lang".into(),
+            package: "rust".into(),
+            ..Default::default()
+        };
+        assert_eq!(atom.qualified_name(), "dev-lang/rust");
+    }
+
+    #[test]
     fn test_atom_display() {
         let atom = Atom {
             operator: Some(Operator::GreaterEqual),
             category: "dev-lang".into(),
             package: "rust".into(),
-            version: PackageVersion::new("1.70.0", Some("beta_p11"), 2).ok(),
+            version: PackageVersion::new("1.70.0", Some("beta_p11"), Some("2")).ok(),
             slot: Some("1.70".into()),
             repo: Some("gentoo".into()),
             variant: AtomVariant::VersionOperator,
         };
-        let atom_str = atom.to_string();
-        assert_eq!(atom_str, ">=dev-lang/rust-1.70.0_beta_p11-r2:1.70::gentoo");
+        assert_eq!(
+            atom.to_string(),
+            ">=dev-lang/rust-1.70.0_beta_p11-r2:1.70::gentoo"
+        );
+    }
+
+    #[test]
+    fn test_operator_from_str_ok() {
+        let test_cases = vec![
+            ("<", Operator::Less),
+            ("<=", Operator::LessEqual),
+            ("=", Operator::Equal),
+            (">", Operator::Greater),
+            (">=", Operator::GreaterEqual),
+            ("~", Operator::Approximate),
+        ];
+        for (op_str, expected_op) in test_cases {
+            let op = Operator::from_str(op_str).unwrap();
+            assert_eq!(op, expected_op);
+        }
+    }
+
+    #[test]
+    fn test_operator_from_str_err() {
+        let invalid_ops = vec!["!", "==", "><", "=>", "invalid"];
+        for op_str in invalid_ops {
+            assert!(
+                Operator::from_str(op_str).is_err(),
+                "{op_str} should be invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn test_operator_display() {
+        assert_eq!(Operator::Less.to_string(), "<");
+        assert_eq!(Operator::LessEqual.to_string(), "<=");
+        assert_eq!(Operator::Equal.to_string(), "=");
+        assert_eq!(Operator::Greater.to_string(), ">");
+        assert_eq!(Operator::GreaterEqual.to_string(), ">=");
+        assert_eq!(Operator::Approximate.to_string(), "~");
     }
 }

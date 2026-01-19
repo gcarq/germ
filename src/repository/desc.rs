@@ -17,9 +17,9 @@ impl ProfileDescription {
             return Err(anyhow!("Invalid profile description line: {line}"));
         }
         Ok(Self {
-            keyword: parts[0].to_string(),
-            profile_path: parts[1].to_string(),
-            stability: parts[2].to_string(),
+            keyword: parts[0].to_owned(),
+            profile_path: parts[1].to_owned(),
+            stability: parts[2].to_owned(),
         })
     }
 }

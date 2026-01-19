@@ -125,8 +125,8 @@ impl NumberComponent {
             return Err(anyhow!("invalid version component: '{number}'"));
         }
         let component = match index == 0 || !number.starts_with('0') {
-            true => NumberComponent::Numeric(number.to_string()),
-            false => NumberComponent::Alphabetic(number.to_string()),
+            true => NumberComponent::Numeric(number.to_owned()),
+            false => NumberComponent::Alphabetic(number.to_owned()),
         };
         Ok(component)
     }

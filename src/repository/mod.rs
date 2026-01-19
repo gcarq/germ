@@ -149,7 +149,7 @@ impl Repository {
             .lines()
             .next()
             .ok_or_else(|| anyhow!("Empty repo_name file"))?
-            .to_string();
+            .to_owned();
         if !REPOSITORY_NAME_RE.is_match(&repo_name) {
             return Err(anyhow!(
                 "Invalid repository name: {repo_name}. It must match the regex: {}",
@@ -191,7 +191,7 @@ impl Repository {
             .with_context(|| format!("Unable to read {}", path.display()))?
             .lines()
             .filter(|&line| CATEGORY_NAME_RE.is_match(line))
-            .map(|line| line.to_string())
+            .map(|line| line.to_owned())
             .collect();
         Ok(categories)
     }
@@ -209,12 +209,12 @@ impl Repository {
                 if let Some(entry) = entry.ok()
                     && let Some(meta) = entry.metadata().ok()
                     && meta.is_dir()
-                    && let Some(file_name) = entry.file_name().into_string().ok()
-                    && PACKAGE_NAME_RE.is_match(&file_name)
+                    && let Some(file_name) = entry.file_name().as_os_str().to_str()
+                    && PACKAGE_NAME_RE.is_match(file_name)
                 {
-                    let pkg_path = cat_path.join(&file_name);
-                    for version in Self::collect_package_versions(&pkg_path, &file_name)? {
-                        packages.insert(Package::new(category.clone(), file_name.clone(), version));
+                    let pkg_path = cat_path.join(file_name);
+                    for version in Self::collect_package_versions(&pkg_path, file_name)? {
+                        packages.insert(Package::new(category, file_name, version));
                     }
                 }
             }
@@ -236,9 +236,7 @@ impl Repository {
                 let version = PackageVersion::new(
                     &caps["version"],
                     Some(&caps["suffixes"]),
-                    caps.name("revision")
-                        .and_then(|r| r.as_str().parse::<usize>().ok())
-                        .unwrap_or(0),
+                    caps.name("revision").map(|m| m.as_str()),
                 )?;
                 versions.push(version);
             }

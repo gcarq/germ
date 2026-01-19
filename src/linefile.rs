@@ -34,7 +34,7 @@ impl FileFromPath for LineBasedFile {
             .lines()
             .map(|line| line.trim())
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .map(|line| line.to_string())
+            .map(|line| line.to_owned())
             .collect();
         Ok(Self { lines })
     }
@@ -69,7 +69,7 @@ mod tests {
             app-arch/zstd abi_x86_32 abi_x86_64
         ";
 
-        let file = LineBasedFile::from_file_content(content.to_string()).unwrap();
+        let file = LineBasedFile::from_file_content(content.into()).unwrap();
         assert_eq!(
             file.lines,
             vec![
