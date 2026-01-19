@@ -20,12 +20,13 @@ pub trait Inherit {
 }
 
 /// Trait for types that can be constructed from file(s) at a given path.
-/// The path can point to a single file or a directory containing multiple files.
-/// If the path is a directory and `recursive` is true, all files in the directory
-/// are read and their contents are concatenated together.
-/// If `optional` is true, the absence of the path does not result in an error.
-/// Implementors must provide the `from_file_content` method to handle the actual content parsing.
 pub trait FileFromPath {
+    /// Creates an instance from the file(s) at the given `path`.
+    /// The `path` can point to a single file or a directory containing multiple files.
+    /// If the `path` is a directory and `recursive` is true, all files in the directory
+    /// are concatenated together in order of their filename.
+    /// If `optional` is true, the absence of the [`Path`] does not result in an `Err`.
+    /// TODO: ignore files ending with `~`
     fn from_path(path: &Path, recursive: bool, optional: bool) -> Result<Self>
     where
         Self: Sized + Default,
@@ -76,6 +77,7 @@ pub trait FileFromPath {
         Self::from_file_content(content)
     }
 
+    /// Creates an instance from the given file `content`.
     fn from_file_content(content: String) -> Result<Self>
     where
         Self: Sized;

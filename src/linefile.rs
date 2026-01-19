@@ -25,18 +25,26 @@ impl LineBasedFile {
     }
 }
 
+impl<'a> FromIterator<&'a str> for LineBasedFile {
+    /// Creates a new instance from the given line `iter`.
+    /// Lines that are empty or start with `#` are ignored.
+    fn from_iter<T: IntoIterator<Item = &'a str>>(iter: T) -> Self {
+        let lines = iter
+            .into_iter()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| line.to_owned())
+            .collect();
+        Self { lines }
+    }
+}
+
 impl FileFromPath for LineBasedFile {
     fn from_file_content(content: String) -> Result<Self>
     where
         Self: Sized,
     {
-        let lines = content
-            .lines()
-            .map(|line| line.trim())
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .map(|line| line.to_owned())
-            .collect();
-        Ok(Self { lines })
+        Ok(Self::from_iter(content.lines()))
     }
 }
 

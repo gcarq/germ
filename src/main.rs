@@ -1,5 +1,7 @@
 use crate::conf::PortageConf;
 use crate::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
+use crate::package::Package;
+use crate::package::version::PackageVersion;
 use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
@@ -38,14 +40,27 @@ fn main() -> Result<()> {
         info(&conf);
     } else {
         println!("{}", "Masked packages:".blue().bold());
-        for atom in conf.mask_manager.mask.iter() {
+        for atom in conf.mask_manager.mask.values().flatten() {
             println!("{atom}");
         }
         println!("\n{}", "Unmasked packages:".blue().bold());
-        for atom in conf.mask_manager.unmask.iter() {
+        for atom in conf.mask_manager.unmask.values().flatten() {
             println!("{atom}");
         }
     }
+
+    let rust_bin = Package::new(
+        "dev-lang",
+        "rust-bin",
+        PackageVersion::new("1.0.0", None, None).unwrap(),
+    );
+
+    println!();
+    println!(
+        "is_masked: {} = {}",
+        rust_bin,
+        conf.mask_manager.is_masked(&rust_bin)
+    );
 
     Ok(())
 

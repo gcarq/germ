@@ -9,6 +9,13 @@ const SUFFIX_PREFIXES: [&str; 5] = ["alpha", "beta", "pre", "rc", "p"];
 #[derive(Eq, Debug, Default)]
 pub struct VersionSuffixes(Vec<VersionSuffix>);
 
+impl VersionSuffixes {
+    /// Returns an iterator over the contained [`VersionSuffix`].
+    pub fn iter(&self) -> impl Iterator<Item = &VersionSuffix> {
+        self.0.iter()
+    }
+}
+
 impl FromStr for VersionSuffixes {
     type Err = anyhow::Error;
 
@@ -83,7 +90,7 @@ impl fmt::Display for VersionSuffixes {
 
 /// Represents the different types of package version suffixes outlined in section 3.2.
 #[derive(Eq, Debug)]
-enum VersionSuffix {
+pub enum VersionSuffix {
     Alpha(Option<usize>),
     Beta(Option<usize>),
     Pre(Option<usize>),
