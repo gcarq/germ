@@ -159,7 +159,21 @@ impl Atom {
                 AtomVariant::VersionOperator => match self.operator {
                     Some(Operator::Less) => pkg.version < *version,
                     Some(Operator::LessEqual) => pkg.version <= *version,
-                    Some(Operator::Equal) => pkg.version == *version,
+                    Some(Operator::Equal) => {
+                        // Equality requires all defined components in the atom to match
+                        pkg.version
+                            .number
+                            .components
+                            .iter()
+                            .zip(&version.number.components)
+                            .all(|(a, b)| a == b)
+                            && pkg
+                                .version
+                                .suffixes
+                                .iter()
+                                .zip(version.suffixes.iter())
+                                .all(|(a, b)| a == b)
+                    }
                     Some(Operator::Greater) => pkg.version > *version,
                     Some(Operator::GreaterEqual) => pkg.version >= *version,
                     Some(Operator::Approximate) => {
@@ -431,11 +445,15 @@ mod tests {
         // TODO: test wildcards and slot/repo matching
         let atoms = vec![
             "sys-devel/gcc",
+            "=sys-devel/gcc-15",
+            "=sys-devel/gcc-15.2",
+            "=sys-devel/gcc-15.2.1",
+            "=sys-devel/gcc-15.2.1_p20251122",
+            "=sys-devel/gcc-15.2.1_p20251122-r1",
             ">sys-devel/gcc-15",
             ">=sys-devel/gcc-15.2.1",
             "<sys-devel/gcc-16",
             "<=sys-devel/gcc-15.2.2_p20260101",
-            "=sys-devel/gcc-15.2.1_p20251122-r1",
             "~sys-devel/gcc-15.2.1_p20251122",
         ];
         let pkg = Package::new(
@@ -458,8 +476,8 @@ mod tests {
             "<=sys-devel/gcc-15.2.1",
             ">sys-devel/gcc-16",
             ">=sys-devel/gcc-15.2.2_p20251122-r2",
-            "=sys-devel/gcc-15.2.1_p20251122",
-            "=sys-devel/gcc-15.2.1_p20251122-r2",
+            "=sys-devel/gcc-15.2.2",
+            "=sys-devel/gcc-15.2.1_p20260330",
             "~sys-devel/gcc-15.3",
             "~sys-devel/gcc-15",
             "~sys-devel/gcc-15.2",
