@@ -11,6 +11,7 @@ use std::path::Path;
 mod conf;
 mod consts;
 pub mod deps;
+mod eapi;
 mod linefile;
 pub mod makenv;
 pub mod package;

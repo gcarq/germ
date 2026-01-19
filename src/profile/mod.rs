@@ -1,7 +1,7 @@
 mod deprecation;
 
 use crate::conf::repos::ReposConf;
-use crate::consts::SUPPORTED_EAPI;
+use crate::eapi::Eapi;
 use crate::linefile::LineBasedFile;
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
@@ -13,7 +13,7 @@ use std::path::Path;
 /// Represents a profile outlined in PMS section 5.
 #[derive(Debug, Default)]
 pub struct Profile {
-    eapi: usize,
+    eapi: Eapi,
     deprecated: Option<DeprecationInfo>,
 
     pub make_defaults: MakeEnv,
@@ -44,19 +44,14 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Builds a profile from the given path and all available repositories.
-    /// The path must exist and point to a valid profile directory.
+    /// Builds a profile from the given `path` and all available repositories from `repos`.
+    /// An error is returned if the `path` doesn't exist or the profile directory is invalid.
     pub fn new(path: &Path, repos: &ReposConf) -> Result<Self> {
         if !path.exists() {
             return Err(anyhow!("Profile path {} does not exist", path.display()));
         }
 
         let eapi = Self::read_eapi(&path.join("eapi"))?;
-        if eapi > SUPPORTED_EAPI {
-            return Err(anyhow!(
-                "Unsupported eapi version: {eapi}. Supported versions are 0 to {SUPPORTED_EAPI}"
-            ));
-        }
 
         // TODO: remove debug print
         println!(
@@ -66,45 +61,69 @@ impl Profile {
         );
 
         let mut profile = Self {
-            eapi,
             make_defaults: MakeEnv::from_path(&path.join("make.defaults"), false, true)?,
             deprecated: DeprecationInfo::from_path(&path.join("deprecated"))?,
-            packages: LineBasedFile::from_path(&path.join("packages"), eapi > 6, true)?,
-            package_mask: LineBasedFile::from_path(&path.join("package.mask"), eapi > 6, true)?,
-            package_unmask: LineBasedFile::from_path(&path.join("package.unmask"), eapi > 6, true)?,
-            package_use: LineBasedFile::from_path(&path.join("package.use"), eapi > 6, true)?,
-            use_mask: LineBasedFile::from_path(&path.join("use.mask"), eapi > 6, true)?,
-            use_force: LineBasedFile::from_path(&path.join("use.force"), eapi > 6, true)?,
+            packages: LineBasedFile::from_path(
+                &path.join("packages"),
+                eapi.profile_file_dirs,
+                true,
+            )?,
+            package_mask: LineBasedFile::from_path(
+                &path.join("package.mask"),
+                eapi.profile_file_dirs,
+                true,
+            )?,
+            package_unmask: LineBasedFile::from_path(
+                &path.join("package.unmask"),
+                eapi.profile_file_dirs,
+                true,
+            )?,
+            package_use: LineBasedFile::from_path(
+                &path.join("package.use"),
+                eapi.profile_file_dirs,
+                true,
+            )?,
+            use_mask: LineBasedFile::from_path(
+                &path.join("use.mask"),
+                eapi.profile_file_dirs,
+                true,
+            )?,
+            use_force: LineBasedFile::from_path(
+                &path.join("use.force"),
+                eapi.profile_file_dirs,
+                true,
+            )?,
             use_stable_mask: LineBasedFile::from_path(
                 &path.join("use.stable.mask"),
-                eapi > 6,
+                eapi.profile_file_dirs,
                 true,
             )?,
             use_stable_force: LineBasedFile::from_path(
                 &path.join("use.stable.force"),
-                eapi > 6,
+                eapi.profile_file_dirs,
                 true,
             )?,
             package_use_mask: LineBasedFile::from_path(
                 &path.join("package.use.mask"),
-                eapi > 6,
+                eapi.profile_file_dirs,
                 true,
             )?,
             package_use_force: LineBasedFile::from_path(
                 &path.join("package.use.force"),
-                eapi > 6,
+                eapi.profile_file_dirs,
                 true,
             )?,
             package_use_stable_mask: LineBasedFile::from_path(
                 &path.join("package.use.stable.mask"),
-                eapi > 6,
+                eapi.profile_file_dirs,
                 true,
             )?,
             package_use_stable_force: LineBasedFile::from_path(
                 &path.join("package.use.stable.force"),
-                eapi > 6,
+                eapi.profile_file_dirs,
                 true,
             )?,
+            eapi,
         };
         for parent in Self::resolve_parents(path, repos)? {
             profile.inherit_from(&parent)
@@ -153,19 +172,18 @@ impl Profile {
         Ok(profiles)
     }
 
-    /// Reads the EAPI version from the given file path.
-    fn read_eapi(path: &Path) -> Result<usize> {
-        let eapi = match path.exists() {
-            true => fs::read_to_string(path)
+    /// Reads the EAPI version from the given file `path`.
+    fn read_eapi(path: &Path) -> Result<Eapi> {
+        if !path.exists() {
+            return Ok(Eapi::default());
+        }
+        Eapi::new(
+            fs::read_to_string(path)
                 .with_context(|| "Unable to read eapi file")?
                 .lines()
                 .next()
-                .ok_or_else(|| anyhow!("Empty eapi file"))?
-                .parse::<usize>()
-                .context("eapi version must be an unsigned integer")?,
-            false => 0,
-        };
-        Ok(eapi)
+                .ok_or_else(|| anyhow!("Empty eapi file"))?,
+        )
     }
 }
 

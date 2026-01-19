@@ -1,6 +1,6 @@
 mod desc;
 
-use crate::consts::SUPPORTED_EAPI;
+use crate::eapi::Eapi;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
 use crate::package::version::PackageVersion;
@@ -29,7 +29,7 @@ lazy_static! {
 pub struct Repository {
     pub path: PathBuf,
     pub name: String,
-    pub eapi: usize,
+    pub eapi: Eapi,
     pub packages: HashSet<Package>,
     pub package_mask: LineBasedFile,
     pub package_unmask: LineBasedFile,
@@ -72,12 +72,12 @@ impl Repository {
             packages: Self::collect_packages(&path, categories)?,
             package_mask: LineBasedFile::from_path(
                 &path.join("profiles").join("package.mask"),
-                eapi > 6,
+                eapi.profile_file_dirs,
                 true,
             )?,
             package_unmask: LineBasedFile::from_path(
                 &path.join("profiles").join("package.unmask"),
-                eapi > 6,
+                eapi.profile_file_dirs,
                 true,
             )?,
             arch_list: LineBasedFile::from_path(
@@ -159,25 +159,19 @@ impl Repository {
         Ok(repo_name)
     }
 
-    /// Reads the repository eapi version from the given repository path.
+    /// Reads the repository eapi version from the given repository `path`.
     /// Returns 0 if no eapi file exists.
-    fn read_eapi(path: &Path) -> Result<usize> {
+    fn read_eapi(path: &Path) -> Result<Eapi> {
         let eapi_file = path.join("profiles").join("eapi");
         if !fs::exists(&eapi_file)? {
-            return Ok(0);
+            return Ok(Eapi::default());
         }
-        let eapi = fs::read_to_string(&eapi_file)?
-            .lines()
-            .next()
-            .ok_or_else(|| anyhow!("Empty eapi file"))?
-            .parse::<usize>()
-            .context("eapi version must be an unsigned integer")?;
-        if eapi > SUPPORTED_EAPI {
-            return Err(anyhow!(
-                "Unsupported eapi version: {eapi}. Supported versions are 0 to {SUPPORTED_EAPI}"
-            ));
-        }
-        Ok(eapi)
+        Eapi::new(
+            fs::read_to_string(&eapi_file)?
+                .lines()
+                .next()
+                .ok_or_else(|| anyhow!("Empty eapi file"))?,
+        )
     }
 
     /// Collects all categories from the given repository path.
