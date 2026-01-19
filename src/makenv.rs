@@ -144,7 +144,7 @@ impl EnvValue {
     /// The passed context must be in the original order.
     /// TODO: Add env.d to context for expansion.
     #[must_use = "this returns the expanded value as a new allocation"]
-    pub fn expand(&self, context: &[(String, EnvValue)]) -> EnvValue {
+    pub fn expand(&self, context: &[(String, EnvValue)]) -> Self {
         let value = match self {
             EnvValue::Literal(values) => values,
             EnvValue::Incremental(values) => values,

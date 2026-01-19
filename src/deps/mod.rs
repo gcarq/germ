@@ -194,7 +194,7 @@ impl Atom {
     /// Creates an Atom from the given regex captures.
     /// It assumes the correct regex has been used.
     /// NOTE: this does not set the operator field, see [`Self::with_operator`].
-    fn from_regex_capture(caps: &Captures, variant: AtomVariant) -> Result<Atom> {
+    fn from_regex_capture(caps: &Captures, variant: AtomVariant) -> Result<Self> {
         let version = match Self::parse_version(caps)? {
             Some(_) if variant == AtomVariant::Simple => Err(anyhow!(
                 "atom must have an operator or be in format <category>/<package>"

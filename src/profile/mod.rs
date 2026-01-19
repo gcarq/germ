@@ -119,9 +119,9 @@ impl Profile {
         Ok(profile)
     }
 
-    /// Takes a path to a profile directory and resolves all profiles listed in the parent file.
+    /// Takes a `path` to a profile directory and resolves all profiles listed in the parent file.
     /// Parents are returned in the order they are listed or an empty vec if there are no parents.
-    fn resolve_parents(path: &Path, repos: &ReposConf) -> Result<Vec<Profile>> {
+    fn resolve_parents(path: &Path, repos: &ReposConf) -> Result<Vec<Self>> {
         let parent = path.join("parent");
         if !parent.exists() {
             return Ok(Vec::new());
