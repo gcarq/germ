@@ -51,7 +51,7 @@ impl Repository {
         let categories = Self::collect_categories(&path)?
             .into_iter()
             .chain(Self::collect_categories(&main_repo.path)?)
-            .collect::<Vec<String>>();
+            .collect::<Vec<_>>();
         Self::with_categories(path, &categories)
     }
 
@@ -92,7 +92,7 @@ impl Repository {
             )?
             .iter()
             .map(|line| ProfileDescription::from_line(line))
-            .collect::<Result<Vec<ProfileDescription>>>()?,
+            .collect::<Result<_>>()?,
             path,
             eapi,
         })

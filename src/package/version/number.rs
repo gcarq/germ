@@ -18,11 +18,10 @@ impl FromStr for VersionNumber {
     /// For example, "1.2.3a" becomes (["1", "2", "3", "a"], Some('a')),
     /// "2.0.1" becomes (["2", "0", "1"], None).
     fn from_str(version: &str) -> Result<Self> {
-        // Safe to unwrap because the base version contains at least one character
         let (version, letter) = match version
             .chars()
             .last()
-            .ok_or_else(|| anyhow!("unable to parse version number from: {version}"))?
+            .ok_or_else(|| anyhow!("unable to parse version number from: '{version}'"))?
         {
             c @ 'a'..='z' => (&version[..version.len() - 1], Some(c)),
             c if !c.is_ascii_digit() => {
@@ -30,22 +29,12 @@ impl FromStr for VersionNumber {
             }
             _ => (version, None),
         };
+
         let components = version
             .split('.')
-            .map(|part| match part.is_empty() {
-                true => Err(anyhow!("invalid version component in '{version}'")),
-                false => Ok(part.to_string()),
-            })
             .enumerate()
-            .map(|(idx, part)| match part {
-                Ok(part) => match idx {
-                    0 => Ok(NumberComponent::Alphabetic(part)),
-                    _ if part.starts_with('0') => Ok(NumberComponent::Alphabetic(part)),
-                    _ => Ok(NumberComponent::Numeric(part)),
-                },
-                Err(msg) => Err(msg),
-            })
-            .collect::<Result<Vec<_>>>()?;
+            .map(|(idx, comp)| NumberComponent::new(comp, idx))
+            .collect::<Result<_>>()?;
         Ok(Self { components, letter })
     }
 }
@@ -103,7 +92,7 @@ impl fmt::Display for VersionNumber {
             .components
             .iter()
             .map(|comp| comp.to_string())
-            .collect::<Vec<String>>()
+            .collect::<Vec<_>>()
             .join(".");
         write!(f, "{repr}")?;
         if let Some(letter) = self.letter {
@@ -113,13 +102,34 @@ impl fmt::Display for VersionNumber {
     }
 }
 
-/// Represents a component of the base version, either numeric or alphabetic.
+/// Represents a component of the base version, either `Numeric` or `Alphabetic`.
+/// The distinction is important for comparison purposes, components starting with a '0' are
+/// considered Alphabetic and are compared as strings, while Numeric and compared as integers.
+/// Nevertheless, both variants should only contain digits.
 /// E.g., in "1.2.03a", "1" and "2" are Numeric, "03" is Alphabetic, and "a" is handled separately
 /// and not part of this enum.
+/// See PMS 3.2 and 3.3 for more details.
 #[derive(Eq, Debug)]
 pub enum NumberComponent {
     Numeric(String),
     Alphabetic(String),
+}
+
+impl NumberComponent {
+    /// Creates a new [`NumberComponent`] from the given `number` and its index in the version.
+    /// The first component (index 0) is always considered `Numeric`.
+    /// Subsequent components starting with '0' are considered `Alphabetic`.
+    /// Returns an `Err` if the `number` is empty or contains non-digit characters.
+    pub fn new(number: &str, index: usize) -> Result<Self> {
+        if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
+            return Err(anyhow!("invalid version component: '{number}'"));
+        }
+        let component = match index == 0 || !number.starts_with('0') {
+            true => NumberComponent::Numeric(number.to_string()),
+            false => NumberComponent::Alphabetic(number.to_string()),
+        };
+        Ok(component)
+    }
 }
 
 impl Ord for NumberComponent {

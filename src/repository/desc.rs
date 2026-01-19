@@ -12,7 +12,7 @@ impl ProfileDescription {
     /// Parses a profile description from a single line.
     /// The line must consist of <keyword> <profile_path> <stability> otherwise an Err is returned.
     pub fn from_line(line: &str) -> Result<Self> {
-        let parts = line.split_ascii_whitespace().collect::<Vec<&str>>();
+        let parts = line.split_ascii_whitespace().collect::<Vec<_>>();
         if parts.len() != 3 {
             return Err(anyhow!("Invalid profile description line: {line}"));
         }

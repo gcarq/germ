@@ -132,7 +132,7 @@ impl Profile {
             .lines()
             .map(|line| line.trim())
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .collect::<Vec<&str>>();
+            .collect::<Vec<_>>();
 
         let mut profiles = Vec::new();
         for profile in lines {

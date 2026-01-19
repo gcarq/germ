@@ -37,12 +37,12 @@ impl MaskManager {
         let mask = mask
             .into_iter()
             .map(|line| Atom::new(&line))
-            .collect::<Result<HashSet<Atom>>>()
+            .collect::<Result<_>>()
             .with_context(|| "unable to collect package masks")?;
         let unmask = unmask
             .into_iter()
             .map(|line| Atom::new(&line))
-            .collect::<Result<HashSet<Atom>>>()
+            .collect::<Result<_>>()
             .with_context(|| "unable to collect package unmasks")?;
         let manager = Self { mask, unmask };
         Ok(manager)

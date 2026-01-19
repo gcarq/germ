@@ -46,33 +46,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_package_version_display_simple() {
-        assert_eq!(
-            PackageVersion::new("1.0.0", None, 0,).unwrap().to_string(),
-            "1.0.0"
-        );
+    fn test_package_version_new_ok() {
+        let test_cases = vec![
+            PackageVersion::new("1.0.0", None, 0),
+            PackageVersion::new("1.2.3a", Some("_alpha1"), 0),
+            PackageVersion::new("2.0.1", Some("_beta2_p20240101"), 1),
+            PackageVersion::new("2.3.4z", Some("alpha_p20250101"), 2),
+            PackageVersion::new("9999", None, 0),
+        ];
+        for version in test_cases {
+            version.unwrap();
+        }
     }
 
     #[test]
-    fn test_package_version_display_complex() {
-        assert_eq!(
-            PackageVersion::new("2.3.4a", Some("alpha3_p20250101"), 2,)
-                .unwrap()
-                .to_string(),
-            "2.3.4a_alpha3_p20250101-r2"
-        );
+    fn test_package_version_new_err() {
+        let test_cases = vec![
+            PackageVersion::new("", None, 0),
+            PackageVersion::new("1.1.1aa", None, 0),
+            PackageVersion::new("0.33.1A", None, 0),
+            PackageVersion::new("1..0", None, 0),
+            PackageVersion::new("a.b.c", None, 0),
+            PackageVersion::new("20251212", Some("_ALPHA"), 9999),
+            PackageVersion::new("1.2.3a", Some("_unknownsuffix"), 0),
+            PackageVersion::new("2.0.1", Some("_betaX"), 1),
+        ];
+        for version in test_cases {
+            assert!(version.is_err(), "Expected error for: {}", version.unwrap());
+        }
     }
 
     #[test]
-    fn test_package_version_ord_suffixes() {
-        let v1_2_3_alpha = PackageVersion::new("1.2.3", Some("_alpha"), 0).unwrap();
-        let v1_2_3_alpha_p2025 = PackageVersion::new("1.2.3", Some("_alpha_p2025"), 0).unwrap();
-        let v1_2_3_beta = PackageVersion::new("1.2.3", Some("_beta"), 0).unwrap();
-        let v1_2_3_patch = PackageVersion::new("1.2.3", Some("_p"), 0).unwrap();
-
-        assert!(v1_2_3_alpha < v1_2_3_alpha_p2025);
-        assert!(v1_2_3_alpha < v1_2_3_beta);
-        assert!(v1_2_3_beta < v1_2_3_patch);
+    fn test_package_version_display() {
+        let test_cases = vec![
+            (PackageVersion::new("1.0.0", None, 0), "1.0.0"),
+            (
+                PackageVersion::new("1.2.3a", Some("_alpha1"), 0),
+                "1.2.3a_alpha1",
+            ),
+            (
+                PackageVersion::new("2.0.1", Some("_beta2_p20240101"), 1),
+                "2.0.1_beta2_p20240101-r1",
+            ),
+            (
+                PackageVersion::new("2.3.4z", Some("alpha_p20250101"), 2),
+                "2.3.4z_alpha_p20250101-r2",
+            ),
+        ];
+        for (pkg_version, expected_str) in test_cases {
+            assert_eq!(pkg_version.unwrap().to_string(), expected_str);
+        }
     }
 
     #[test]
@@ -86,12 +109,16 @@ mod tests {
     }
 
     #[test]
-    fn test_package_version_ord_complex() {
+    fn test_package_version_ord() {
+        let v1_2_3a = PackageVersion::new("1.2.3a", Some("_alpha"), 0).unwrap();
         let v1_2_3a_p2024 = PackageVersion::new("1.2.3a", Some("_alpha_p20240101"), 0).unwrap();
         let v1_2_3a_p2025 = PackageVersion::new("1.2.3a", Some("_alpha_p20251111"), 0).unwrap();
         let v1_5_0b = PackageVersion::new("1.5.0b", None, 0).unwrap();
+        let v1_5_0br3 = PackageVersion::new("1.5.0b", None, 3).unwrap();
 
+        assert!(v1_2_3a < v1_2_3a_p2024);
         assert!(v1_2_3a_p2024 < v1_2_3a_p2025);
         assert!(v1_2_3a_p2025 < v1_5_0b);
+        assert!(v1_5_0b < v1_5_0br3);
     }
 }

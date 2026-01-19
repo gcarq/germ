@@ -81,7 +81,7 @@ impl ReposConf {
                 }
                 None
             })
-            .collect::<Vec<String>>()
+            .collect::<Vec<_>>()
             .join("\n");
         Ok(merged_conf)
     }
@@ -96,9 +96,9 @@ impl ReposConf {
             .ok_or_else(|| anyhow!("repos.conf DEFAULT section missing main-repo property"))?;
 
         conf.section(Some(name))
-            .ok_or_else(|| anyhow!("repos.conf is missing the section for {name}"))?
+            .ok_or_else(|| anyhow!("repos.conf is missing the section for '{name}'"))?
             .get("location")
-            .ok_or_else(|| anyhow!("Repository {name} missing location property",))
+            .ok_or_else(|| anyhow!("Repository '{name}' missing location property"))
             .and_then(|path| Repository::build_main_repo_from_path(PathBuf::from(path)))
     }
 
@@ -117,7 +117,9 @@ impl ReposConf {
                     let path = properties
                         .get("location")
                         .map(PathBuf::from)
-                        .ok_or_else(|| anyhow!("Repository {} missing location property", name))?;
+                        .ok_or_else(|| {
+                            anyhow!("Repository '{}' missing location property", name)
+                        })?;
                     let repo = Repository::build_overlay_from_path(path, main_repo)?;
                     repos.insert(repo.name.clone(), repo);
                 }

@@ -71,7 +71,7 @@ pub trait FileFromPath {
                 fs::read_to_string(&path)
                     .with_context(|| format!("unable to read file {}", path.display()))
             })
-            .collect::<Result<Vec<String>>>()?
+            .collect::<Result<Vec<_>>>()?
             .join("\n");
         Self::from_file_content(content)
     }
@@ -87,7 +87,7 @@ pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
         .ok_or_else(|| anyhow!("Unable to split text due to syntax errors"))?
         .into_iter()
         .map(
-            |line| match line.splitn(2, '=').collect::<Vec<&str>>().as_slice() {
+            |line| match line.splitn(2, '=').collect::<Vec<_>>().as_slice() {
                 [key, value] => Ok((key.to_string(), value.to_string())),
                 _ => Err(anyhow!("syntax error in file: {line}")),
             },

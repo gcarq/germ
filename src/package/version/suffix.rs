@@ -19,14 +19,14 @@ impl FromStr for VersionSuffixes {
             .split('_')
             .filter(|s| !s.is_empty())
             .map(VersionSuffix::new)
-            .collect::<Result<Vec<VersionSuffix>>>()?;
+            .collect::<Result<_>>()?;
         Ok(Self(suffixes))
     }
 }
 
 impl FromIterator<VersionSuffix> for VersionSuffixes {
     fn from_iter<T: IntoIterator<Item = VersionSuffix>>(iter: T) -> Self {
-        let suffixes = iter.into_iter().collect::<Vec<VersionSuffix>>();
+        let suffixes = iter.into_iter().collect();
         Self(suffixes)
     }
 }
