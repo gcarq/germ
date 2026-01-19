@@ -54,7 +54,7 @@ mod tests {
         let package = Package::new(
             "app-editors".into(),
             "vim".into(),
-            PackageVersion::new("1.0.0".into(), vec![], 0).unwrap(),
+            PackageVersion::new("1.0.0", None, 0).unwrap(),
         );
         assert_eq!(package.qualified_name(), "app-editors/vim");
     }

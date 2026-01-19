@@ -84,7 +84,7 @@ pub trait FileFromPath {
 /// Uses [`shlex`] to analyze and split the given [`String`] into key-value pairs.
 pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
     shlex::split(&content)
-        .ok_or(anyhow!("Unable to split text due to syntax errors"))?
+        .ok_or_else(|| anyhow!("Unable to split text due to syntax errors"))?
         .into_iter()
         .map(
             |line| match line.splitn(2, '=').collect::<Vec<&str>>().as_slice() {

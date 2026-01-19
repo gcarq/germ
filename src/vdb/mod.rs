@@ -1,5 +1,5 @@
 use crate::package::Package;
-use crate::package::version::{PackageVersion, VersionSuffix};
+use crate::package::version::PackageVersion;
 use anyhow::Result;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -59,14 +59,9 @@ impl Vdb {
                     && let Some(caps) = QUALIFIED_PACKAGE_NAME_RE.captures(&file_name)
                 {
                     let pkg_name = caps["name"].to_string();
-                    let suffixes = caps["suffixes"]
-                        .split('_')
-                        .filter(|s| !s.is_empty())
-                        .map(VersionSuffix::new)
-                        .collect();
                     let version = PackageVersion::new(
-                        caps["version"].to_string(),
-                        suffixes,
+                        &caps["version"],
+                        Some(&caps["suffixes"]),
                         caps.name("revision")
                             .and_then(|r| r.as_str().parse::<usize>().ok())
                             .unwrap_or(0),

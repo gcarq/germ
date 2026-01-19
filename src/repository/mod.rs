@@ -3,7 +3,7 @@ mod desc;
 use crate::consts::SUPPORTED_EAPI;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
-use crate::package::version::{PackageVersion, VersionSuffix};
+use crate::package::version::PackageVersion;
 use crate::repository::desc::ProfileDescription;
 use crate::utils::FileFromPath;
 use anyhow::{Context, Result, anyhow};
@@ -148,7 +148,7 @@ impl Repository {
         let repo_name = fs::read_to_string(path.join("profiles").join("repo_name"))?
             .lines()
             .next()
-            .ok_or(anyhow!("Empty repo_name file"))?
+            .ok_or_else(|| anyhow!("Empty repo_name file"))?
             .to_string();
         if !REPOSITORY_NAME_RE.is_match(&repo_name) {
             return Err(anyhow!(
@@ -169,7 +169,7 @@ impl Repository {
         let eapi = fs::read_to_string(&eapi_file)?
             .lines()
             .next()
-            .ok_or(anyhow!("Empty eapi file"))?
+            .ok_or_else(|| anyhow!("Empty eapi file"))?
             .parse::<usize>()
             .context("eapi version must be an unsigned integer")?;
         if eapi > SUPPORTED_EAPI {
@@ -233,14 +233,9 @@ impl Repository {
                 && let Some(caps) = PACKAGE_VERSION_RE.captures(&file_name)
                 && caps["name"].starts_with(name)
             {
-                let suffixes = caps["suffixes"]
-                    .split('_')
-                    .filter(|s| !s.is_empty())
-                    .map(VersionSuffix::new)
-                    .collect();
                 let version = PackageVersion::new(
-                    caps["version"].to_string(),
-                    suffixes,
+                    &caps["version"],
+                    Some(&caps["suffixes"]),
                     caps.name("revision")
                         .and_then(|r| r.as_str().parse::<usize>().ok())
                         .unwrap_or(0),

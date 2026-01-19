@@ -26,7 +26,7 @@ impl DeprecationInfo {
         let mut lines = content.lines();
         let recommended_profile = lines
             .next()
-            .ok_or(anyhow!("deprecated file is empty"))?
+            .ok_or_else(|| anyhow!("deprecated file is empty"))?
             .to_string();
         let info = lines.collect::<Vec<&str>>().join("\n").trim().to_string();
         Ok(Self {

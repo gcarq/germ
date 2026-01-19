@@ -91,16 +91,14 @@ impl ReposConf {
     fn resolve_main_repo(conf: &Ini) -> Result<Repository> {
         let name = conf
             .section(Some("DEFAULT"))
-            .ok_or(anyhow!("repos.conf missing DEFAULT section"))?
+            .ok_or_else(|| anyhow!("repos.conf missing DEFAULT section"))?
             .get("main-repo")
-            .ok_or(anyhow!(
-                "repos.conf DEFAULT section missing main-repo property"
-            ))?;
+            .ok_or_else(|| anyhow!("repos.conf DEFAULT section missing main-repo property"))?;
 
         conf.section(Some(name))
-            .ok_or(anyhow!("repos.conf is missing the section for {name}"))?
+            .ok_or_else(|| anyhow!("repos.conf is missing the section for {name}"))?
             .get("location")
-            .ok_or(anyhow!("Repository {name} missing location property",))
+            .ok_or_else(|| anyhow!("Repository {name} missing location property",))
             .and_then(|path| Repository::build_main_repo_from_path(PathBuf::from(path)))
     }
 
@@ -119,7 +117,7 @@ impl ReposConf {
                     let path = properties
                         .get("location")
                         .map(PathBuf::from)
-                        .ok_or(anyhow!("Repository {} missing location property", name))?;
+                        .ok_or_else(|| anyhow!("Repository {} missing location property", name))?;
                     let repo = Repository::build_overlay_from_path(path, main_repo)?;
                     repos.insert(repo.name.clone(), repo);
                 }

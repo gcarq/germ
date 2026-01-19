@@ -141,9 +141,9 @@ impl Profile {
             // see https://bugs.gentoo.org/515666
             let path = match profile.split_once(':') {
                 Some((name, path)) => {
-                    let repo = repos.get(name).ok_or(anyhow!(
-                        "Referenced Repository {name} not found for profile {profile}"
-                    ))?;
+                    let repo = repos.get(name).ok_or_else(|| {
+                        anyhow!("Referenced Repository {name} not found for profile {profile}")
+                    })?;
                     repo.path.join("profiles").join(path)
                 }
                 None => path.join(profile),
@@ -160,7 +160,7 @@ impl Profile {
                 .with_context(|| "Unable to read eapi file")?
                 .lines()
                 .next()
-                .ok_or(anyhow!("Empty eapi file"))?
+                .ok_or_else(|| anyhow!("Empty eapi file"))?
                 .parse::<usize>()
                 .context("eapi version must be an unsigned integer")?,
             false => 0,
