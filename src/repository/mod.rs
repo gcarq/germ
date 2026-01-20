@@ -118,13 +118,13 @@ impl Repository {
             "use.local.desc",
         ];
         for file in required_profile_files {
-            if !&profiles
+            if profiles
                 .join(file)
                 .metadata()
                 .with_context(|| {
                     format!("Failed to read file {} from {}", file, profiles.display())
                 })?
-                .is_file()
+                .is_dir()
             {
                 return Err(anyhow!("Required file not found: profiles/{file}"));
             }

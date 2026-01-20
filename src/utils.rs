@@ -26,7 +26,6 @@ pub trait FileFromPath {
     /// If the `path` is a directory and `recursive` is true, all files in the directory
     /// are concatenated together in order of their filename.
     /// If `optional` is true, the absence of the [`Path`] does not result in an `Err`.
-    /// TODO: ignore files ending with `~`
     fn from_path(path: &Path, recursive: bool, optional: bool) -> Result<Self>
     where
         Self: Sized + Default,
@@ -50,16 +49,19 @@ pub trait FileFromPath {
         }
 
         let mut paths = Vec::new();
+
+        // Ignore subdirectories and files starting with '.' or ending with '~'.
         for entry in fs::read_dir(path).with_context(|| "unable to read directory")? {
             let entry = entry?;
-            // Ignore subdirectories and hidden files
-            if !entry.metadata()?.is_file()
-                || entry
-                    .file_name()
-                    .to_str()
-                    .with_context(|| anyhow!("{} doesn't contain valid unicode", path.display()))?
-                    .starts_with('.')
-            {
+            if entry.metadata()?.is_dir() {
+                continue;
+            }
+            let file_name = entry
+                .file_name()
+                .to_str()
+                .with_context(|| anyhow!("{} doesn't contain valid unicode", path.display()))?
+                .to_owned();
+            if file_name.starts_with('.') || file_name.ends_with('~') {
                 continue;
             }
             paths.push(entry.path());
