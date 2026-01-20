@@ -1,52 +1,24 @@
 use crate::package::Package;
 use crate::package::version::PackageVersion;
+use crate::regex::{ATOM_OP, CAT_PKG, CAT_PKG_VER_REV, REPOSITORY, SLOT_LOOSE};
 use anyhow::{Context, Result, anyhow};
-use constcat::concat;
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 use std::fmt;
 use std::str::FromStr;
 
-const OPERATOR: &str = r"(?<operator>[=~]|[><]=?)";
-
-/// PMS 3.1.1 Category names
-/// A category name may contain any of the characters [A-Za-z0-9+_.-].
-/// It must not begin with a hyphen, a dot or a plus sign.
-const CATEGORY: &str = r"(?<category>[\w][\w+.-]*)";
-
-const REPOSITORY: &str = r"[\w][\w-]*";
-
-/// PMS 3.1.2 Package names
-/// A package name may contain any of the characters [A-Za-z0-9+_-].
-/// It must not begin with a hyphen or a plus sign, and must not end in a hyphen
-/// followed by anything matching the version syntax
-const PACKAGE: &str = r"(?<package>[\w][\w+-]*?)";
-const VERSION: &str =
-    r"(?<version>\d+(?:\.\d+)*[a-z]?)(?<suffixes>(?:_(?:alpha|beta|pre|rc|p)\d*)*)";
-const REVISION: &str = r"(?<revision>\d*)";
-const VR: &str = concat!(VERSION, "(:?-r", REVISION, ")?");
-
-const CATPKG: &str = concat!(CATEGORY, "/", PACKAGE, "(?:-", VR, ")?");
-const CATPKGVR: &str = concat!(CATEGORY, "/", PACKAGE, "-", VR);
-
-/// PMS 3.1.3 Slot names
-/// A slot name may contain any of the characters [A-Za-z0-9+_.-].
-/// It must not begin with a hyphen, a dot or a plus sign.
-const SLOT: &str = r"([\w][\w+.-]*)";
-const SLOT_LOOSE: &str = r"([\w+./*=-]+)";
-
 lazy_static! {
     /// Regex to capture simple atoms with category and package,
     /// optionally version, slot and repository e.g.: dev-lang/rust, dev-lang/rust-1.70.0.
     static ref ATOM_SIMPLE_RE: Regex = Regex::new(&format!(
-        r"^{CATPKG}(?:\:(?P<slot>{SLOT_LOOSE}))?(?:\:\:(?P<repo>{REPOSITORY}))?$"
+        r"^{CAT_PKG}(?:\:(?P<slot>{SLOT_LOOSE}))?(?:\:\:(?P<repo>{REPOSITORY}))?$"
     ))
     .unwrap();
     /// Regex to capture atoms with operator, category, package,
     /// version, slot and repository e.g.: >=dev-lang/rust-1.70
-    static ref ATOM_OPERATOR_RE: Regex = Regex::new(&format!(r"^{OPERATOR}{CATPKGVR}$")).unwrap();
+    static ref ATOM_OPERATOR_RE: Regex = Regex::new(&format!(r"^{ATOM_OP}{CAT_PKG_VER_REV}$")).unwrap();
     /// Regex to capture atoms with '=' category, package and a version wildcard.
-    static ref ATOM_STAR_RE: Regex = Regex::new(&format!(r"^={CATPKGVR}\*$")).unwrap();
+    static ref ATOM_STAR_RE: Regex = Regex::new(&format!(r"^={CAT_PKG_VER_REV}\*$")).unwrap();
 }
 
 #[derive(Debug, Eq, PartialEq, Hash)]
@@ -460,7 +432,8 @@ mod tests {
             "sys-devel",
             "gcc",
             PackageVersion::new("15.2.1", Some("p20251122"), Some("1")).unwrap(),
-        );
+        )
+        .unwrap();
         for atom in atoms {
             let atom = Atom::new(atom).unwrap();
             assert!(atom.matches(&pkg), "{atom} should match {pkg}");
@@ -488,7 +461,8 @@ mod tests {
             "sys-devel",
             "gcc",
             PackageVersion::new("15.2.1", Some("p20251122"), Some("1")).unwrap(),
-        );
+        )
+        .unwrap();
         for atom in atoms {
             let atom = Atom::new(atom).unwrap();
             assert!(!atom.matches(&pkg), "{atom} shouldn't match {pkg}");

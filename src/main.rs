@@ -15,7 +15,9 @@ mod eapi;
 mod linefile;
 pub mod makenv;
 pub mod package;
+mod process;
 mod profile;
+mod regex;
 mod repository;
 mod utils;
 mod vdb;
@@ -48,18 +50,25 @@ fn main() -> Result<()> {
         for atom in conf.mask_manager.unmask.values().flatten() {
             println!("{atom}");
         }
+        for pkg in conf
+            .repos_conf
+            .repositories()
+            .iter()
+            .flat_map(|r| r.packages.iter())
+        {
+            println!("{pkg}");
+        }
     }
 
     let rust_bin = Package::new(
         "dev-lang",
         "rust-bin",
-        PackageVersion::new("1.0.0", None, None).unwrap(),
-    );
+        PackageVersion::new("1.0.0", None, None)?,
+    )?;
 
     println!();
     println!(
-        "is_masked: {} = {}",
-        rust_bin,
+        "is_masked: {rust_bin} = {}",
         conf.mask_manager.is_masked(&rust_bin)
     );
 

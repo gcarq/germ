@@ -88,28 +88,32 @@ mod tests {
             "dev-lang",
             "rust",
             PackageVersion::new("1.50", None, Some("2")).unwrap(),
-        );
+        )
+        .unwrap();
         assert!(!manager.is_masked(&pkg1), "{pkg1} should not be masked");
 
         let pkg2 = Package::new(
             "dev-lang",
             "rust",
             PackageVersion::new("1.60", None, Some("1")).unwrap(),
-        );
+        )
+        .unwrap();
         assert!(manager.is_masked(&pkg2), "{pkg2} should be masked");
 
         let pkg3 = Package::new(
             "app-editors",
             "vim",
             PackageVersion::new("8.2", None, None).unwrap(),
-        );
+        )
+        .unwrap();
         assert!(manager.is_masked(&pkg3), "{pkg3} should be masked");
 
         let pkg4 = Package::new(
             "app-editors",
             "nano",
             PackageVersion::new("5.0", None, None).unwrap(),
-        );
+        )
+        .unwrap();
         assert!(!manager.is_masked(&pkg4), "{pkg4} should not be masked");
     }
 }

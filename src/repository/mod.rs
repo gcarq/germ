@@ -3,7 +3,9 @@ mod desc;
 use crate::eapi::Eapi;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
+use crate::package::ebuild::Ebuild;
 use crate::package::version::PackageVersion;
+use crate::regex::{PKG_VER_REV, REPOSITORY};
 use crate::repository::desc::ProfileDescription;
 use crate::utils::FileFromPath;
 use anyhow::{Context, Result, anyhow};
@@ -14,15 +16,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 lazy_static! {
-    /// TODO: Rethink placement of those regexes. The ones in package.atom should be used instead.
-    /// Regex to validate repository names according to PMS 3.1.5.
-    static ref REPOSITORY_NAME_RE: Regex = Regex::new(r"^[A-Za-z0-9_-]*[A-Za-z0-9_]$").unwrap();
-    /// Regex to validate category names according to PMS 3.1.1.
-    static ref CATEGORY_NAME_RE: Regex = Regex::new(r"^[A-Za-z0-9_][A-Za-z0-9+_.-]*$").unwrap();
-    /// Regex to validate package names according to PMS 3.1.2.
-    static ref PACKAGE_NAME_RE: Regex = Regex::new(r"^[A-Za-z0-9_][A-Za-z0-9+_.-]*[A-Za-z0-9+_.]$").unwrap();
-    /// Regex to validate and parse package versions according to PMS 3.2.
-    static ref PACKAGE_VERSION_RE: Regex = Regex::new(r"^(?<name>[A-Za-z0-9_][A-Za-z0-9+_.-]*[A-Za-z0-9+_.])-(?<version>[0-9]+(?:\.[0-9]+)*[a-z]?)(?<suffixes>(?:_(?:alpha|beta|pre|rc|p)\d*)*)(?:-r(?<revision>\d*))?.ebuild$").unwrap();
+    /// Regex to validate repository names.
+    static ref REPO_RE: Regex = Regex::new(&format!(r"^{REPOSITORY}$")).unwrap();
+
+    /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision`
+    /// from an ebuild name.
+    static ref EBUILD_RE: Regex = Regex::new(&format!(r"^{PKG_VER_REV}.ebuild$")).unwrap();
 }
 
 #[derive(Debug)]
@@ -150,10 +149,10 @@ impl Repository {
             .next()
             .ok_or_else(|| anyhow!("Empty repo_name file"))?
             .to_owned();
-        if !REPOSITORY_NAME_RE.is_match(&repo_name) {
+        if !REPO_RE.is_match(&repo_name) {
             return Err(anyhow!(
                 "Invalid repository name: {repo_name}. It must match the regex: {}",
-                REPOSITORY_NAME_RE.as_str()
+                REPO_RE.as_str()
             ));
         }
         Ok(repo_name)
@@ -184,7 +183,6 @@ impl Repository {
         let categories = fs::read_to_string(&path)
             .with_context(|| format!("Unable to read {}", path.display()))?
             .lines()
-            .filter(|&line| CATEGORY_NAME_RE.is_match(line))
             .map(|line| line.to_owned())
             .collect();
         Ok(categories)
@@ -204,11 +202,11 @@ impl Repository {
                     && let Some(meta) = entry.metadata().ok()
                     && meta.is_dir()
                     && let Some(file_name) = entry.file_name().as_os_str().to_str()
-                    && PACKAGE_NAME_RE.is_match(file_name)
                 {
                     let pkg_path = cat_path.join(file_name);
-                    for version in Self::collect_package_versions(&pkg_path, file_name)? {
-                        packages.insert(Package::new(category, file_name, version));
+                    for (ebuild, version) in Self::collect_package_metadata(&pkg_path, file_name)? {
+                        let pkg = Package::new(category, file_name, version)?.with_ebuild(ebuild);
+                        packages.insert(pkg);
                     }
                 }
             }
@@ -216,25 +214,89 @@ impl Repository {
         Ok(packages)
     }
 
-    /// Collects all versions for the given package directory, package name and regex.
-    fn collect_package_versions(path: &Path, name: &str) -> Result<Vec<PackageVersion>> {
+    /// Collects all ebuilds and versions for the given package directory `path` and package `name`.
+    fn collect_package_metadata(path: &Path, name: &str) -> Result<Vec<(Ebuild, PackageVersion)>> {
         let mut versions = Vec::new();
         for entry in fs::read_dir(path)? {
             if let Some(entry) = entry.ok()
                 && let Some(meta) = entry.metadata().ok()
                 && meta.is_file()
                 && let Some(file_name) = entry.file_name().into_string().ok()
-                && let Some(caps) = PACKAGE_VERSION_RE.captures(&file_name)
-                && caps["name"].starts_with(name)
+                && let Some(caps) = EBUILD_RE.captures(&file_name)
+                && caps["package"].starts_with(name)
             {
+                let ebuild = Ebuild::from_path(entry.path()).with_context(|| {
+                    anyhow!("Unable to process ebuild file {}", entry.path().display())
+                })?;
                 let version = PackageVersion::new(
                     &caps["version"],
                     Some(&caps["suffixes"]),
                     caps.name("revision").map(|m| m.as_str()),
                 )?;
-                versions.push(version);
+                versions.push((ebuild, version));
             }
         }
         Ok(versions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_repository_regex_match() {
+        let valid_names = ["gentoo", "my-repo_1", "repo123"];
+        for name in valid_names {
+            assert!(
+                REPO_RE.is_match(name),
+                "repository name '{name}' should be valid",
+            );
+        }
+    }
+
+    #[test]
+    fn test_repository_regex_no_match() {
+        let invalid_names = ["", "my repo", "repo!", "repo@123", "repo#name", "-repo"];
+        for name in invalid_names {
+            assert!(
+                !REPO_RE.is_match(name),
+                "repository name '{name}' should be invalid",
+            );
+        }
+    }
+
+    #[test]
+    fn test_ebuild_regex_match() {
+        let valid_ebuilds = [
+            "vim-8.2.3456.ebuild",
+            "vim-8.2.3456-r1.ebuild",
+            "rust-1.65.0_alpha1-r2.ebuild",
+            "curl-7.79.1_beta2_p20220101.ebuild",
+        ];
+        for ebuild in valid_ebuilds {
+            assert!(
+                EBUILD_RE.is_match(ebuild),
+                "ebuild name '{ebuild}' should be valid",
+            );
+        }
+    }
+
+    #[test]
+    fn test_ebuild_regex_no_match() {
+        let invalid_ebuilds = [
+            "",
+            "vim8.2.3456.ebuild",
+            "app-editors/vim-.ebuild",
+            "dev-lang/rust-1.65.0_alphaX-r2.ebuild",
+            "net-misc/curl-7.79.1--r1.ebuild",
+            "net-misc/curl-7.79.1_beta2_p20220101-rX.ebuild",
+        ];
+        for ebuild in invalid_ebuilds {
+            assert!(
+                !EBUILD_RE.is_match(ebuild),
+                "ebuild name '{ebuild}' should be invalid",
+            );
+        }
     }
 }

@@ -1,0 +1,130 @@
+use constcat::concat;
+use lazy_static::lazy_static;
+use regex::Regex;
+
+/// This module contains common regex patterns to validate and parse various
+/// components as per the Portage Package Management Specification (PMS).
+pub const ATOM_OP: &str = r"(?<operator>[=~]|[><]=?)";
+
+/// PMS 3.1.1 Category names
+/// A category name may contain any of the characters [A-Za-z0-9+_.-].
+/// It must not begin with a hyphen, a dot or a plus sign.
+pub const CATEGORY: &str = r"(?<category>[\w][\w+.-]*)";
+
+/// Regex to validate repository names according to PMS 3.1.5.
+pub const REPOSITORY: &str = r"[\w][\w-]*";
+
+/// PMS 3.1.2 Package names
+/// A package name may contain any of the characters [A-Za-z0-9+_-].
+/// It must not begin with a hyphen or a plus sign, and must not end in a hyphen
+/// followed by anything matching the version syntax
+pub const PACKAGE: &str = r"(?<package>[\w][\w+-]*[\w+])";
+
+pub const VERSION: &str =
+    r"(?<version>\d+(?:\.\d+)*[a-z]?)(?<suffixes>(?:_(?:alpha|beta|pre|rc|p)\d*)*)";
+
+pub const REVISION: &str = r"(?<revision>\d*)";
+
+pub const VER_REV: &str = concat!(VERSION, "(:?-r", REVISION, ")?");
+
+pub const PKG_VER_REV: &str = concat!(PACKAGE, "-", VER_REV);
+
+/// Category and package with optional version and revision
+pub const CAT_PKG: &str = constcat::concat!(CATEGORY, "/", PACKAGE, "(?:-", VER_REV, ")?");
+
+pub const CAT_PKG_VER_REV: &str = concat!(CATEGORY, "/", PACKAGE, "-", VER_REV);
+
+/// PMS 3.1.3 Slot names
+/// A slot name may contain any of the characters [A-Za-z0-9+_.-].
+/// It must not begin with a hyphen, a dot or a plus sign.
+pub const SLOT: &str = r"([\w][\w+.-]*)";
+
+pub const SLOT_LOOSE: &str = r"([\w+./*=-]+)";
+
+lazy_static! {
+    /// Regex to validate if a string is a valid category name.
+    pub static ref CATEGORY_RE: Regex = Regex::new(&format!(r"^{CATEGORY}$")).unwrap();
+
+    /// Regex to validate if a string is a valid package name.
+    pub static ref PKG_RE: Regex = Regex::new(&format!(r"^{PACKAGE}$")).unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_category_regex_match() {
+        let valid_categories = vec![
+            "app-editors",
+            "dev-lang",
+            "sys-apps",
+            "media-libs",
+            "net-misc",
+            "net++",
+            "foo.bar",
+            "foo_bar",
+            "foo+bar",
+        ];
+        for category in valid_categories {
+            assert!(
+                CATEGORY_RE.is_match(category),
+                "Category '{category}' should be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn test_category_regex_no_match() {
+        let invalid_categories = vec![
+            "-invalid-category",
+            ".hidden-category",
+            "+plus-category",
+            "invalid category",
+        ];
+        for category in invalid_categories {
+            assert!(
+                !CATEGORY_RE.is_match(category),
+                "Category '{category}' should be invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn test_package_regex_match() {
+        let valid_packages = vec![
+            "vim",
+            "rust",
+            "python_",
+            "memtest86+",
+            "box64",
+            "foo-bar",
+            "foo_bar",
+            "foo+bar",
+        ];
+        for package in valid_packages {
+            assert!(
+                PKG_RE.is_match(package),
+                "Package '{package}' should be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn test_package_regex_no_match() {
+        let invalid_packages = vec![
+            "",
+            "invalid package",
+            "memtest86-",
+            "bar!baz",
+            "-bar",
+            "+bar",
+        ];
+        for package in invalid_packages {
+            assert!(
+                !PKG_RE.is_match(package),
+                "Package '{package}' should be invalid"
+            );
+        }
+    }
+}
