@@ -10,27 +10,27 @@ pub const ATOM_OP: &str = r"(?<operator>[=~]|[><]=?)";
 /// PMS 3.1.1 Category names
 /// A category name may contain any of the characters [A-Za-z0-9+_.-].
 /// It must not begin with a hyphen, a dot or a plus sign.
-pub const CATEGORY: &str = r"(?<category>[\w][\w+.-]*)";
+pub const CATEGORY: &str = r"(?<category>[a-zA-Z0-9_][a-zA-Z0-9_+.-]*)";
 
 /// PMS 3.1.2 Package names
 /// A package name may contain any of the characters [A-Za-z0-9+_-].
 /// It must not begin with a hyphen or a plus sign, and must not end in a hyphen
 /// followed by anything matching the version syntax
-pub const PACKAGE: &str = r"(?<package>[\w][\w+-]*[\w+])";
+pub const PACKAGE: &str = r"(?<package>[a-zA-Z0-9_][a-zA-Z0-9_+-]*[a-zA-Z0-9_+])";
 
 /// PMS 3.1.3 Slot names
 /// A slot name may contain any of the characters [A-Za-z0-9+_.-].
 /// It must not begin with a hyphen, a dot or a plus sign.
-pub const SLOT: &str = r"([\w][\w+.-]*)";
-pub const SLOT_LOOSE: &str = r"([\w+./*=-]+)";
+pub const SLOT: &str = r"([a-zA-Z0-9_][a-zA-Z0-9_+.-]*)";
+pub const SLOT_LOOSE: &str = r"([a-zA-Z0-9_+./*=-]+)";
 
 /// Regex to validate repository names according to PMS 3.1.5.
-pub const REPOSITORY: &str = r"[\w][\w-]*";
+pub const REPOSITORY: &str = r"[[a-zA-Z0-9_]][a-zA-Z0-9_-]*";
 
 pub const VERSION: &str =
-    r"(?<version>\d+(?:\.\d+)*[a-z]?)(?<suffixes>(?:_(?:alpha|beta|pre|rc|p)\d*)*)";
+    r"(?<version>[0-9]+(?:\.[0-9]+)*[a-z]?)(?<suffixes>(?:_(?:alpha|beta|pre|rc|p)[0-9]*)*)";
 
-pub const REVISION: &str = r"(?<revision>\d*)";
+pub const REVISION: &str = r"(?<revision>[0-9]*)";
 
 pub const VER_REV: &str = concat!(VERSION, "(:?-r", REVISION, ")?");
 
