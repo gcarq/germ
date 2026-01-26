@@ -15,7 +15,6 @@ mod eapi;
 mod linefile;
 pub mod makenv;
 pub mod package;
-mod process;
 mod profile;
 mod regex;
 mod repository;
@@ -71,6 +70,18 @@ fn main() -> Result<()> {
         "is_masked: {rust_bin} = {}",
         conf.mask_manager.is_masked(&rust_bin)
     );
+
+    conf.repos_conf.repositories().iter().for_each(|repo| {
+        println!("Repository: {}", repo.name);
+        println!(
+            "Eclasses: {}",
+            repo.eclasses
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    });
 
     Ok(())
 

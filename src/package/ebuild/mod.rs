@@ -5,6 +5,8 @@ use regex::Regex;
 use std::fs;
 use std::path::PathBuf;
 
+mod process;
+
 lazy_static! {
     /// Regex to capture EAPI from ebuild files according to PMS 7.3.1.
     /// The regex crate doesn't support backreferences, so we can't enforce matching quotes.
