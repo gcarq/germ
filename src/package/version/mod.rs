@@ -35,9 +35,29 @@ impl PackageVersion {
             },
         })
     }
+
+    /// Returns the version, with no revision. For example `7.0.174`.
+    pub fn v(&self) -> String {
+        format!("{}{}", self.number, self.suffixes)
+    }
+
+    /// Returns the revision, or `r0` if none exists.
+    pub fn r(&self) -> String {
+        match self.revision {
+            0 => "r0".to_owned(),
+            rev => format!("r{}", rev),
+        }
+    }
+
+    /// Returns the version and revision (if any), for example `7.0.174` or `7.0.174-r1`.
+    pub fn vr(&self) -> String {
+        self.to_string()
+    }
 }
 
 impl fmt::Display for PackageVersion {
+    /// Returns the full version string including suffixes and revision,
+    /// for example: `1.2.3_alpha1-r1`. This is also referred to as the `PVR` in PMS.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.number, self.suffixes)?;
         if self.revision > 0 {

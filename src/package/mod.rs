@@ -47,9 +47,45 @@ impl Package {
         self
     }
 
-    /// Returns the qualified name of the package in the format category/name e.g. app-editors/vim.
+    /// Returns the qualified name of the package in the format `category/name`
+    /// e.g. `app-editors/vim`.
     pub fn qualified_name(&self) -> String {
         format!("{}/{}", self.category, self.name)
+    }
+
+    /// Returns the package name and version, without the revision part. For example, `vim-7.0.174`.
+    pub fn p(&self) -> String {
+        format!("{}-{}", self.name, self.version.v())
+    }
+
+    /// Returns the package name, version, and revision (if any), for example `vim-7.0.174-r1`.
+    pub fn pf(&self) -> String {
+        format!("{}-{}", self.name, self.version.vr())
+    }
+
+    /// Returns the package name, for example `vim`.
+    pub fn pn(&self) -> String {
+        self.name.clone()
+    }
+
+    /// Returns the package’s category, for example `app-editors`.
+    pub fn category(&self) -> String {
+        self.category.clone()
+    }
+
+    /// Returns the package version, with no revision. For example `7.0.174`.
+    pub fn pv(&self) -> String {
+        self.version.v()
+    }
+
+    /// Returns the package revision, or `r0` if none exists.
+    pub fn pr(&self) -> String {
+        self.version.r()
+    }
+
+    /// Returns the package version and revision (if any), for example `7.0.174` or `7.0.174-r1`.
+    pub fn pvr(&self) -> String {
+        self.version.vr()
     }
 }
 
@@ -76,17 +112,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_package_qualified_name() {
-        let package = Package::new(
-            "app-editors",
-            "vim",
-            PackageVersion::new("1.0.0", None, None).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(package.qualified_name(), "app-editors/vim");
-    }
-
-    #[test]
     fn test_package_new_ok() {
         let package = Package::new(
             "app-editors",
@@ -104,5 +129,24 @@ mod tests {
             PackageVersion::new("1.0.0", None, None).unwrap(),
         );
         assert!(package.is_err());
+    }
+
+    #[test]
+    fn test_package_fmt() {
+        let package = Package::new(
+            "app-editors",
+            "vim",
+            PackageVersion::new("7.0.174", None, Some("1")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(package.to_string(), "app-editors/vim-7.0.174-r1");
+        assert_eq!(package.qualified_name(), "app-editors/vim");
+        assert_eq!(package.p(), "vim-7.0.174");
+        assert_eq!(package.pf(), "vim-7.0.174-r1");
+        assert_eq!(package.pn(), "vim");
+        assert_eq!(package.category(), "app-editors");
+        assert_eq!(package.pv(), "7.0.174");
+        assert_eq!(package.pr(), "r1");
+        assert_eq!(package.pvr(), "7.0.174-r1");
     }
 }
