@@ -1,4 +1,5 @@
 mod desc;
+mod eclass;
 
 use crate::eapi::Eapi;
 use crate::linefile::LineBasedFile;
@@ -7,6 +8,8 @@ use crate::package::ebuild::Ebuild;
 use crate::package::version::PackageVersion;
 use crate::regex::{PKG_VER_REV, REPOSITORY};
 use crate::repository::desc::ProfileDescription;
+use crate::repository::eclass::Eclasses;
+use crate::utils;
 use crate::utils::FileFromPath;
 use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
@@ -32,6 +35,7 @@ pub struct Repository {
     pub packages: HashSet<Package>,
     pub package_mask: LineBasedFile,
     pub package_unmask: LineBasedFile,
+    pub eclasses: Eclasses,
     pub arch_list: LineBasedFile,
     pub profiles_desc: Vec<ProfileDescription>,
 }
@@ -79,6 +83,7 @@ impl Repository {
                 eapi.profile_file_dirs,
                 true,
             )?,
+            eclasses: Eclasses::from_path(&path.join("eclass"))?,
             arch_list: LineBasedFile::from_path(
                 &path.join("profiles").join("arch.list"),
                 false,
@@ -217,17 +222,12 @@ impl Repository {
     /// Collects all ebuilds and versions for the given package directory `path` and package `name`.
     fn collect_package_metadata(path: &Path, name: &str) -> Result<Vec<(Ebuild, PackageVersion)>> {
         let mut versions = Vec::new();
-        for entry in fs::read_dir(path)? {
-            if let Some(entry) = entry.ok()
-                && let Some(meta) = entry.metadata().ok()
-                && meta.is_file()
-                && let Some(file_name) = entry.file_name().into_string().ok()
-                && let Some(caps) = EBUILD_RE.captures(&file_name)
+        for file_path in utils::files_from_dir(path)? {
+            let file_path = file_path?;
+            if let Some(caps) = EBUILD_RE.captures(&utils::path_to_filename(&file_path)?)
                 && caps["package"].starts_with(name)
             {
-                let ebuild = Ebuild::from_path(entry.path()).with_context(|| {
-                    anyhow!("Unable to process ebuild file {}", entry.path().display())
-                })?;
+                let ebuild = Ebuild::from_path(file_path)?;
                 let version = PackageVersion::new(
                     &caps["version"],
                     Some(&caps["suffixes"]),

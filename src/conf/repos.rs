@@ -1,4 +1,5 @@
 use crate::repository::Repository;
+use crate::utils;
 use anyhow::{Context, Result, anyhow};
 use ini::Ini;
 use std::collections::HashMap;
@@ -68,20 +69,13 @@ impl ReposConf {
             return fs::read_to_string(path).with_context(|| "Failed to load repos.conf");
         }
 
-        let merged_conf = fs::read_dir(path)?
-            .filter_map(|entry| {
-                if let Some(entry) = entry.ok()
-                    && let Some(meta) = entry.metadata().ok()
-                    && meta.is_file()
-                {
-                    let conf_path = entry.path();
-                    if !conf_path.starts_with(".") && !conf_path.ends_with("~") {
-                        return fs::read_to_string(&conf_path).ok();
-                    }
-                }
-                None
+        let merged_conf = utils::files_from_dir(path)?
+            .map(|p| match p {
+                Ok(p) => fs::read_to_string(&p)
+                    .with_context(|| format!("unable to read file {}", p.display())),
+                Err(e) => Err(anyhow!(e)),
             })
-            .collect::<Vec<_>>()
+            .collect::<Result<Vec<_>>>()?
             .join("\n");
         Ok(merged_conf)
     }

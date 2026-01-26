@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Trait for inheriting configurations from another instance.
 pub trait Inherit {
@@ -48,24 +48,7 @@ pub trait FileFromPath {
             ));
         }
 
-        let mut paths = Vec::new();
-
-        // Ignore subdirectories and files starting with '.' or ending with '~'.
-        for entry in fs::read_dir(path).with_context(|| "unable to read directory")? {
-            let entry = entry?;
-            if entry.metadata()?.is_dir() {
-                continue;
-            }
-            let file_name = entry
-                .file_name()
-                .to_str()
-                .with_context(|| anyhow!("{} doesn't contain valid unicode", path.display()))?
-                .to_owned();
-            if file_name.starts_with('.') || file_name.ends_with('~') {
-                continue;
-            }
-            paths.push(entry.path());
-        }
+        let mut paths = files_from_dir(path)?.collect::<Result<Vec<PathBuf>>>()?;
         paths.sort();
 
         let content = paths
@@ -97,6 +80,37 @@ pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
             },
         )
         .collect()
+}
+
+/// Reads the files from the given directory `path`, ignoring subdirectories and files
+/// starting with `.` or ending with `~`.
+/// Returns an iterator for all files as `PathBuf`.
+pub fn files_from_dir(path: &Path) -> Result<impl Iterator<Item = Result<PathBuf>>> {
+    let iter = fs::read_dir(path)
+        .with_context(|| anyhow!("unable to read directory: '{}'", path.display()))?
+        .map(|entry| {
+            let entry = entry?;
+            if entry.metadata()?.is_dir() {
+                return Ok(None);
+            }
+            let path = entry.path();
+            if path.starts_with(".") || path.ends_with("~") {
+                return Ok(None);
+            }
+            Ok(Some(path))
+        })
+        .filter_map(|res| res.transpose());
+    Ok(iter)
+}
+
+/// Extracts the filename from the given path as a `String`.
+pub fn path_to_filename(path: &Path) -> Result<String> {
+    Ok(path
+        .file_name()
+        .ok_or_else(|| anyhow!("path has no filename: '{}'", path.display()))?
+        .to_str()
+        .ok_or_else(|| anyhow!("filename contains invalid unicode: '{}'", path.display()))?
+        .to_owned())
 }
 
 #[cfg(test)]
