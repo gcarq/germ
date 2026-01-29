@@ -26,10 +26,12 @@ pub struct ReposConf {
 
 impl ReposConf {
     pub fn new(path: &Path) -> Result<Self> {
-        let conf = Self::load_conf(path)?;
-        let conf = Ini::load_from_str(&conf).with_context(|| "Failed to parse repos.conf")?;
-        let main_repo = Self::resolve_main_repo(&conf)?;
-        let mut repos = Self::collect_overlays(&conf, &main_repo)?;
+        let conf = Self::load_conf(path).with_context(|| "unable to load repos.conf")?;
+        let conf = Ini::load_from_str(&conf).with_context(|| "failed to parse repos.conf")?;
+        let main_repo =
+            Self::resolve_main_repo(&conf).with_context(|| "unable to resolve main repo")?;
+        let mut repos = Self::collect_overlays(&conf, &main_repo)
+            .with_context(|| "unable to collect overlays")?;
         let main_repo_name = main_repo.name.clone();
         repos.insert(main_repo_name.clone(), main_repo);
         Ok(Self {
@@ -61,42 +63,39 @@ impl ReposConf {
     /// If the path is a directory, it loads and merges all files in the directory
     /// except files starting with '.' or ending with '~'.
     fn load_conf(path: &Path) -> Result<String> {
-        if !path.exists() {
-            return Err(anyhow!("{} not found", path.display()));
-        }
-
         if path.metadata()?.is_file() {
             return fs::read_to_string(path).with_context(|| "Failed to load repos.conf");
         }
 
         let merged_conf = utils::files_from_dir(path)?
             .map(|p| match p {
-                Ok(p) => fs::read_to_string(&p)
-                    .with_context(|| format!("unable to read file {}", p.display())),
-                Err(e) => Err(anyhow!(e)),
+                Ok(path) => fs::read_to_string(&path)
+                    .with_context(|| anyhow!("unable to read file {}", path.display())),
+                Err(err) => Err(err),
             })
             .collect::<Result<Vec<_>>>()?
             .join("\n");
         Ok(merged_conf)
     }
 
-    /// Resolves the main repository from the given repos.conf Ini configuration.
+    /// Resolves the main repository from the given repo `conf`
     /// and returns the repository name found in the configuration and the repository instance.
     fn resolve_main_repo(conf: &Ini) -> Result<Repository> {
         let name = conf
             .section(Some("DEFAULT"))
-            .ok_or_else(|| anyhow!("repos.conf missing DEFAULT section"))?
+            .ok_or_else(|| anyhow!("missing DEFAULT section"))?
             .get("main-repo")
-            .ok_or_else(|| anyhow!("repos.conf DEFAULT section missing main-repo property"))?;
+            .ok_or_else(|| anyhow!("DEFAULT section missing main-repo property"))?;
 
         conf.section(Some(name))
-            .ok_or_else(|| anyhow!("repos.conf is missing the section for '{name}'"))?
+            .ok_or_else(|| anyhow!("missing the section for '{name}'"))?
             .get("location")
-            .ok_or_else(|| anyhow!("Repository '{name}' missing location property"))
-            .and_then(|path| Repository::build_main_repo_from_path(PathBuf::from(path)))
+            .map(PathBuf::from)
+            .ok_or_else(|| anyhow!("missing location property for repo '{name}'"))
+            .and_then(Repository::build_main_repo_from_path)
     }
 
-    /// Collects all overlay repositories from the given repos.conf Ini configuration,
+    /// Collects all overlay repositories from the given repo `conf`,
     /// excluding the main repository.
     fn collect_overlays(conf: &Ini, main_repo: &Repository) -> Result<HashMap<String, Repository>> {
         let mut repos = HashMap::new();
@@ -111,10 +110,9 @@ impl ReposConf {
                     let path = properties
                         .get("location")
                         .map(PathBuf::from)
-                        .ok_or_else(|| {
-                            anyhow!("Repository '{}' missing location property", name)
-                        })?;
-                    let repo = Repository::build_overlay_from_path(path, main_repo)?;
+                        .ok_or_else(|| anyhow!("missing location property for repo '{}'", name))?;
+                    let repo = Repository::build_overlay_from_path(path, main_repo)
+                        .with_context(|| anyhow!("failed to build overlay '{name}'"))?;
                     repos.insert(repo.name.clone(), repo);
                 }
                 _ => {}

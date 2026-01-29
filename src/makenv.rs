@@ -57,8 +57,8 @@ impl FileFromPath for MakeEnv {
             .into_iter()
             .map(|(key, value)| {
                 if key
-                    .chars()
-                    .next()
+                    .as_bytes()
+                    .first()
                     .with_context(|| "variable name cannot be empty")?
                     .is_ascii_alphabetic()
                 {
@@ -68,14 +68,15 @@ impl FileFromPath for MakeEnv {
                     Err(anyhow!("invalid variable name: {key}"))
                 }
             })
-            .collect::<Result<Vec<(String, EnvValue)>>>()?;
+            .collect::<Result<Vec<_>>>()?;
 
         for i in 0..vars.len() {
             vars[i].1 = vars[i].1.expand(&vars[..i]);
         }
 
-        let vars = vars.into_iter().collect::<HashMap<String, EnvValue>>();
-        Ok(Self { vars })
+        Ok(Self {
+            vars: vars.into_iter().collect(),
+        })
     }
 }
 

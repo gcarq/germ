@@ -1,5 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use std::fs;
+use std::fs::DirEntry;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 /// Trait for inheriting configurations from another instance.
@@ -30,17 +32,16 @@ pub trait FileFromPath {
     where
         Self: Sized + Default,
     {
-        if !path.exists() {
-            return match optional {
-                true => Ok(Self::default()),
-                false => Err(anyhow!("{} does not exist", path.display())),
-            };
-        }
-
-        if path.metadata()?.is_file() {
+        let metadata = match path.metadata() {
+            Ok(metadata) => metadata,
+            Err(_) if optional => return Ok(Self::default()),
+            Err(e) => return Err(anyhow!("unable to access {}: {e}", path.display())),
+        };
+        if metadata.is_file() {
             let content = fs::read_to_string(path)?;
             return Self::from_file_content(content);
         }
+
         if !recursive {
             return Err(anyhow!(
                 "{} is a directory, but should be a file",
@@ -48,14 +49,14 @@ pub trait FileFromPath {
             ));
         }
 
-        let mut paths = files_from_dir(path)?.collect::<Result<Vec<PathBuf>>>()?;
+        let mut paths = files_from_dir(path)?.collect::<Result<Vec<_>>>()?;
         paths.sort();
 
         let content = paths
             .into_iter()
             .map(|path| {
                 fs::read_to_string(&path)
-                    .with_context(|| format!("unable to read file {}", path.display()))
+                    .with_context(|| anyhow!("unable to read file {}", path.display()))
             })
             .collect::<Result<Vec<_>>>()?
             .join("\n");
@@ -73,44 +74,62 @@ pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
     shlex::split(&content)
         .ok_or_else(|| anyhow!("Unable to split text due to syntax errors"))?
         .into_iter()
-        .map(
-            |line| match line.splitn(2, '=').collect::<Vec<_>>().as_slice() {
-                [key, value] => Ok((key.to_string(), value.to_string())),
-                _ => Err(anyhow!("syntax error in file: {line}")),
-            },
-        )
+        .map(|line| match line.split_once('=') {
+            Some((key, value)) => Ok((key.to_string(), value.to_string())),
+            None => Err(anyhow!("syntax error in file: {line}")),
+        })
         .collect()
 }
 
-/// Reads the files from the given directory `path`, ignoring subdirectories and files
-/// starting with `.` or ending with `~`.
-/// Returns an iterator for all files as `PathBuf`.
+/// Reads the path for all files from the given directory `path`,
+/// ignoring subdirectories and files starting with `.` or ending with `~`.
 pub fn files_from_dir(path: &Path) -> Result<impl Iterator<Item = Result<PathBuf>>> {
     let iter = fs::read_dir(path)
         .with_context(|| anyhow!("unable to read directory: '{}'", path.display()))?
-        .map(|entry| {
-            let entry = entry?;
-            if entry.metadata()?.is_dir() {
-                return Ok(None);
-            }
-            let path = entry.path();
-            if path.starts_with(".") || path.ends_with("~") {
-                return Ok(None);
-            }
-            Ok(Some(path))
-        })
-        .filter_map(|res| res.transpose());
+        .filter_map(|entry| match entry {
+            Ok(entry) => match is_file(&entry) {
+                Ok(true) => match entry.file_name().as_bytes() {
+                    [b'.', ..] | [.., b'~'] => None,
+                    _ => Some(Ok(entry.path())),
+                },
+                Ok(false) => None,
+                Err(err) => Some(Err(anyhow!(err))),
+            },
+            Err(err) => Some(Err(anyhow!(err))),
+        });
     Ok(iter)
 }
 
 /// Extracts the filename from the given path as a `String`.
-pub fn path_to_filename(path: &Path) -> Result<String> {
-    Ok(path
-        .file_name()
+pub fn path_to_filename(path: &Path) -> Result<&str> {
+    path.file_name()
         .ok_or_else(|| anyhow!("path has no filename: '{}'", path.display()))?
         .to_str()
-        .ok_or_else(|| anyhow!("filename contains invalid unicode: '{}'", path.display()))?
-        .to_owned())
+        .ok_or_else(|| anyhow!("filename contains invalid unicode: '{}'", path.display()))
+}
+
+/// Determines whether the given directory `entry` is a file.
+/// If the file type is a symlink or cannot be determined directly,
+/// it falls back to checking the metadata which requires a syscall.
+pub fn is_file(entry: &DirEntry) -> Result<bool> {
+    let file_type = entry.file_type()?;
+    if file_type.is_file() {
+        Ok(true)
+    } else if file_type.is_dir() {
+        Ok(false)
+    } else {
+        Ok(entry.metadata()?.is_file())
+    }
+}
+
+/// Determines whether the given directory `entry` is a directory.
+/// If the file type is a symlink or cannot be determined directly,
+/// it falls back to checking the metadata which requires a syscall.
+pub fn is_dir(entry: &DirEntry) -> Result<bool> {
+    match is_file(entry) {
+        Ok(is_file) => Ok(!is_file),
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]

@@ -47,10 +47,6 @@ impl Profile {
     /// Builds a profile from the given `path` and all available repositories from `repos`.
     /// An error is returned if the `path` doesn't exist or the profile directory is invalid.
     pub fn new(path: &Path, repos: &ReposConf) -> Result<Self> {
-        if !path.exists() {
-            return Err(anyhow!("Profile path {} does not exist", path.display()));
-        }
-
         let eapi = Self::read_eapi(&path.join("eapi"))?;
 
         // TODO: remove debug print

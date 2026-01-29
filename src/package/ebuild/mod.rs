@@ -2,7 +2,8 @@ use crate::eapi::Eapi;
 use anyhow::Result;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::fs;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 mod process;
@@ -24,9 +25,10 @@ pub struct Ebuild {
 impl Ebuild {
     /// Creates an `Ebuild` instance from the given `path`
     pub fn from_path(path: PathBuf) -> Result<Self> {
-        let content = fs::read_to_string(&path)?;
-        for line in content.lines() {
-            if let Some(caps) = PMS_EAPI_RE.captures(line) {
+        let reader = BufReader::with_capacity(256, File::open(&path)?);
+        for line in reader.lines() {
+            let line = line?;
+            if let Some(caps) = PMS_EAPI_RE.captures(&line) {
                 let eapi = Eapi::new(&caps["eapi"])?;
                 return Ok(Self { eapi, path });
             }

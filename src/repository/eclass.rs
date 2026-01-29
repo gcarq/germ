@@ -25,7 +25,8 @@ impl Eclasses {
         }
 
         for file_path in utils::files_from_dir(path)? {
-            let filename = utils::path_to_filename(&file_path?)?;
+            let file_path = file_path?;
+            let filename = utils::path_to_filename(&file_path)?;
             if let Some(eclass_name) = filename.strip_suffix(".eclass") {
                 let eclass = Eclass::new(eclass_name.to_owned(), path.join(filename))?;
                 eclasses.insert(eclass);

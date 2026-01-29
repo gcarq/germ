@@ -1,5 +1,5 @@
 use crate::consts::SUPPORTED_EAPIS;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use std::fmt;
 
 /// An EAPI can be thought of as a ‘version’ of the PMS to which a package conforms.
@@ -23,6 +23,24 @@ impl Eapi {
             profile_file_dirs: matches!(version, "7" | "8" | "9"),
         })
     }
+
+    /// Returns the minimum supported bash version for this EAPI.
+    /// Returns an `Err` if the EAPI version is unknown.
+    pub fn supported_bash_version(&self) -> Result<String> {
+        let version = match self.version.as_str() {
+            "0" | "1" | "2" | "3" | "4" | "5" => "3.2",
+            "6" | "7" => "4.2",
+            "8" => "5.0",
+            "9" => "5.3",
+            x => return Err(anyhow!("unable to determine bash version for EAPI '{x}'")),
+        };
+        Ok(version.to_owned())
+    }
+
+    /// Returns true if the EAPI enables the `failglob` shell option in global scope.
+    pub fn enables_failglob(&self) -> bool {
+        matches!(self.version.as_str(), "6" | "7" | "8" | "9")
+    }
 }
 
 impl Default for Eapi {
@@ -37,5 +55,67 @@ impl Default for Eapi {
 impl fmt::Display for Eapi {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.version)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_eapi_new_ok() {
+        for version in SUPPORTED_EAPIS.iter() {
+            let eapi = Eapi::new(version);
+            assert!(eapi.is_ok());
+            assert_eq!(eapi.unwrap().version.as_str(), *version);
+        }
+    }
+
+    #[test]
+    fn test_eapi_new_err() {
+        let eapi = Eapi::new("abc");
+        assert!(eapi.is_err());
+    }
+
+    #[test]
+    fn test_eapi_supported_bash_version() {
+        let test_cases = vec![
+            ("0", "3.2"),
+            ("1", "3.2"),
+            ("2", "3.2"),
+            ("3", "3.2"),
+            ("4", "3.2"),
+            ("5", "3.2"),
+            ("6", "4.2"),
+            ("7", "4.2"),
+            ("8", "5.0"),
+            ("9", "5.3"),
+        ];
+        for (version, exp_bash_version) in test_cases {
+            let eapi = Eapi::new(version).unwrap();
+            let bash_version = eapi.supported_bash_version().unwrap();
+            assert_eq!(bash_version, exp_bash_version);
+        }
+    }
+
+    #[test]
+    fn test_eapi_enables_failglob() {
+        let test_cases = vec![
+            ("0", false),
+            ("1", false),
+            ("2", false),
+            ("3", false),
+            ("4", false),
+            ("5", false),
+            ("6", true),
+            ("7", true),
+            ("8", true),
+            ("9", true),
+        ];
+        for (version, exp_enables) in test_cases {
+            let eapi = Eapi::new(version).unwrap();
+            let enables = eapi.enables_failglob();
+            assert_eq!(enables, exp_enables);
+        }
     }
 }

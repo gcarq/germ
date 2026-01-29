@@ -1,7 +1,8 @@
 use crate::package::Package;
 use crate::package::version::PackageVersion;
 use crate::regex::PKG_VER_REV;
-use anyhow::Result;
+use crate::utils;
+use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
@@ -28,20 +29,21 @@ impl Vdb {
 
     /// Collects all categories from the given VDB `path`.
     fn collect_categories(path: &Path) -> Result<Vec<String>> {
-        let categories = fs::read_dir(path)?
-            .filter_map(|entry| {
-                if let Some(entry) = entry.ok()
-                    && let Some(meta) = entry.metadata().ok()
-                    && meta.is_dir()
-                    && let Some(category) = entry.file_name().into_string().ok()
-                {
-                    Some(category)
-                } else {
-                    None
-                }
+        fs::read_dir(path)?
+            .filter_map(|entry| match entry {
+                Ok(entry) => match utils::is_file(&entry) {
+                    Ok(true) => None,
+                    Ok(false) => Some(
+                        entry
+                            .file_name()
+                            .into_string()
+                            .map_err(|_| anyhow!("unicode error")),
+                    ),
+                    Err(err) => Some(Err(anyhow!(err))),
+                },
+                Err(err) => Some(Err(anyhow!(err))),
             })
-            .collect();
-        Ok(categories)
+            .collect()
     }
 
     /// Collects all packages from the given VDB `path`.
@@ -50,20 +52,26 @@ impl Vdb {
         let mut packages = HashSet::new();
         for category in categories {
             for entry in fs::read_dir(path.join(&category))? {
-                if let Some(entry) = entry.ok()
-                    && let Some(meta) = entry.metadata().ok()
-                    && meta.is_dir()
-                    && let Some(file_name) = entry.file_name().into_string().ok()
-                    && let Some(caps) = PKG_VER_REV_RE.captures(&file_name)
-                {
-                    let version = PackageVersion::new(
-                        &caps["version"],
-                        Some(&caps["suffixes"]),
-                        caps.name("revision").map(|m| m.as_str()),
-                    )?;
-                    let package = Package::new(&category, &caps["package"], version)?;
-                    packages.insert(package);
+                let entry = entry?;
+                if utils::is_file(&entry)? {
+                    continue;
                 }
+                let file_name = entry.file_name();
+                let pvr = file_name.as_os_str().to_str().with_context(|| {
+                    anyhow!("unable to convert '{:?}' to string", entry.file_name())
+                })?;
+                let caps = match PKG_VER_REV_RE.captures(pvr) {
+                    Some(caps) => caps,
+                    None => continue,
+                };
+
+                let version = PackageVersion::new(
+                    &caps["version"],
+                    Some(&caps["suffixes"]),
+                    caps.name("revision").map(|m| m.as_str()),
+                )?;
+                let package = Package::new(&category, &caps["package"], version)?;
+                packages.insert(package);
             }
         }
         Ok(packages)

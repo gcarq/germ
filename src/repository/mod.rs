@@ -32,6 +32,7 @@ pub struct Repository {
     pub path: PathBuf,
     pub name: String,
     pub eapi: Eapi,
+    pub categories: Vec<String>,
     pub packages: HashSet<Package>,
     pub package_mask: LineBasedFile,
     pub package_unmask: LineBasedFile,
@@ -45,7 +46,7 @@ impl Repository {
     pub fn build_main_repo_from_path(path: PathBuf) -> Result<Self> {
         Self::validate_repository(&path)?;
         let categories = Self::collect_categories(&path)?;
-        Self::with_categories(path, &categories)
+        Self::with_categories(path, categories)
     }
 
     /// Builds an overlay repository from the given path and main [`Repository`].
@@ -53,9 +54,9 @@ impl Repository {
     pub fn build_overlay_from_path(path: PathBuf, main_repo: &Repository) -> Result<Self> {
         let categories = Self::collect_categories(&path)?
             .into_iter()
-            .chain(Self::collect_categories(&main_repo.path)?)
+            .chain(main_repo.categories.iter().cloned())
             .collect::<Vec<_>>();
-        Self::with_categories(path, &categories)
+        Self::with_categories(path, categories)
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
@@ -68,37 +69,35 @@ impl Repository {
     }
 
     /// Builds a new [`Repository`] with the given categories.
-    fn with_categories(path: PathBuf, categories: &[String]) -> Result<Self> {
+    fn with_categories(path: PathBuf, categories: Vec<String>) -> Result<Self> {
         let eapi = Self::read_eapi(&path)?;
+        let profiles = path.join("profiles");
         Ok(Self {
             name: Self::read_repo_name(&path)?,
-            packages: Self::collect_packages(&path, categories)?,
+            packages: HashSet::from_iter(
+                Self::collect_packages(&path, &categories)
+                    .with_context(|| "unable to collect packages")?,
+            ),
             package_mask: LineBasedFile::from_path(
-                &path.join("profiles").join("package.mask"),
+                &profiles.join("package.mask"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             package_unmask: LineBasedFile::from_path(
-                &path.join("profiles").join("package.unmask"),
+                &profiles.join("package.unmask"),
                 eapi.profile_file_dirs,
                 true,
             )?,
-            eclasses: Eclasses::from_path(&path.join("eclass"))?,
-            arch_list: LineBasedFile::from_path(
-                &path.join("profiles").join("arch.list"),
-                false,
-                true,
-            )?,
-            profiles_desc: LineBasedFile::from_path(
-                &path.join("profiles").join("profiles.desc"),
-                false,
-                true,
-            )?
-            .iter()
-            .map(|line| ProfileDescription::from_line(line))
-            .collect::<Result<_>>()?,
+            eclasses: Eclasses::from_path(&path.join("eclass"))
+                .with_context(|| "unable to collectd eclasses")?,
+            arch_list: LineBasedFile::from_path(&profiles.join("arch.list"), false, true)?,
+            profiles_desc: LineBasedFile::from_path(&profiles.join("profiles.desc"), false, true)?
+                .into_iter()
+                .map(|line| ProfileDescription::from_line(&line))
+                .collect::<Result<_>>()?,
             path,
             eapi,
+            categories,
         })
     }
 
@@ -123,14 +122,7 @@ impl Repository {
             "use.local.desc",
         ];
         for file in required_profile_files {
-            if profiles
-                .join(file)
-                .metadata()
-                .with_context(|| {
-                    format!("Failed to read file {} from {}", file, profiles.display())
-                })?
-                .is_dir()
-            {
+            if profiles.join(file).is_dir() {
                 return Err(anyhow!("Required file not found: profiles/{file}"));
             }
         }
@@ -140,7 +132,7 @@ impl Repository {
             if !fs::exists(profiles.join(dir))? {
                 return Err(anyhow!("Required folder not found: profiles/{dir}"));
             }
-            if !&profiles.join(dir).metadata()?.is_dir() {
+            if !&profiles.join(dir).is_dir() {
                 return Err(anyhow!("profiles/{dir} must be a directory"));
             }
         }
@@ -186,7 +178,7 @@ impl Repository {
             return Ok(Vec::new());
         }
         let categories = fs::read_to_string(&path)
-            .with_context(|| format!("Unable to read {}", path.display()))?
+            .with_context(|| anyhow!("Unable to read {}", path.display()))?
             .lines()
             .map(|line| line.to_owned())
             .collect();
@@ -195,48 +187,40 @@ impl Repository {
 
     /// Collects all packages from the given repository path,
     /// only respects categories in the given list.
-    fn collect_packages(path: &Path, categories: &[String]) -> Result<HashSet<Package>> {
-        let mut packages = HashSet::new();
+    fn collect_packages(path: &Path, categories: &[String]) -> Result<Vec<Package>> {
+        let mut packages = Vec::new();
         for category in categories {
             let cat_path = path.join(category);
-            if !cat_path.exists() {
-                continue;
-            }
-            for entry in fs::read_dir(&cat_path)? {
-                if let Some(entry) = entry.ok()
-                    && let Some(meta) = entry.metadata().ok()
-                    && meta.is_dir()
-                    && let Some(file_name) = entry.file_name().as_os_str().to_str()
-                {
-                    let pkg_path = cat_path.join(file_name);
-                    for (ebuild, version) in Self::collect_package_metadata(&pkg_path, file_name)? {
-                        let pkg = Package::new(category, file_name, version)?.with_ebuild(ebuild);
-                        packages.insert(pkg);
-                    }
+            let entries = match fs::read_dir(&cat_path) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+            for entry in entries {
+                let entry = entry?;
+                if utils::is_file(&entry)? {
+                    continue;
+                }
+                let pkg_path = entry.path();
+                let pkg_name = utils::path_to_filename(&pkg_path)?;
+
+                for file_path in utils::files_from_dir(&pkg_path)? {
+                    let file_path = file_path?;
+                    let caps = match EBUILD_RE.captures(utils::path_to_filename(&file_path)?) {
+                        Some(caps) if caps["package"].starts_with(pkg_name) => caps,
+                        _ => continue,
+                    };
+                    let version = PackageVersion::new(
+                        &caps["version"],
+                        Some(&caps["suffixes"]),
+                        caps.name("revision").map(|m| m.as_str()),
+                    )?;
+                    let ebuild = Ebuild::from_path(file_path)?;
+                    let pkg = Package::new(category, pkg_name, version)?.with_ebuild(ebuild);
+                    packages.push(pkg);
                 }
             }
         }
         Ok(packages)
-    }
-
-    /// Collects all ebuilds and versions for the given package directory `path` and package `name`.
-    fn collect_package_metadata(path: &Path, name: &str) -> Result<Vec<(Ebuild, PackageVersion)>> {
-        let mut versions = Vec::new();
-        for file_path in utils::files_from_dir(path)? {
-            let file_path = file_path?;
-            if let Some(caps) = EBUILD_RE.captures(&utils::path_to_filename(&file_path)?)
-                && caps["package"].starts_with(name)
-            {
-                let ebuild = Ebuild::from_path(file_path)?;
-                let version = PackageVersion::new(
-                    &caps["version"],
-                    Some(&caps["suffixes"]),
-                    caps.name("revision").map(|m| m.as_str()),
-                )?;
-                versions.push((ebuild, version));
-            }
-        }
-        Ok(versions)
     }
 }
 
