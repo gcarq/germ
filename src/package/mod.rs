@@ -55,12 +55,12 @@ impl Package {
 
     /// Returns the package name and version, without the revision part. For example, `vim-7.0.174`.
     pub fn p(&self) -> String {
-        format!("{}-{}", self.name, self.version.v())
+        format!("{}-{}", self.name, self.version.pv())
     }
 
     /// Returns the package name, version, and revision (if any), for example `vim-7.0.174-r1`.
     pub fn pf(&self) -> String {
-        format!("{}-{}", self.name, self.version.vr())
+        format!("{}-{}", self.name, self.version.pvr())
     }
 
     /// Returns the package name, for example `vim`.
@@ -75,17 +75,17 @@ impl Package {
 
     /// Returns the package version, with no revision. For example `7.0.174`.
     pub fn pv(&self) -> String {
-        self.version.v()
+        self.version.pv()
     }
 
     /// Returns the package revision, or `r0` if none exists.
     pub fn pr(&self) -> String {
-        self.version.r()
+        self.version.pr()
     }
 
     /// Returns the package version and revision (if any), for example `7.0.174` or `7.0.174-r1`.
     pub fn pvr(&self) -> String {
-        self.version.vr()
+        self.version.pvr()
     }
 }
 

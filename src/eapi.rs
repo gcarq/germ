@@ -41,6 +41,11 @@ impl Eapi {
     pub fn enables_failglob(&self) -> bool {
         matches!(self.version.as_str(), "6" | "7" | "8" | "9")
     }
+
+    /// Returns true if the EAPI supports `ver_cut` functionality.
+    pub fn has_ver_cut(&self) -> bool {
+        matches!(self.version.as_str(), "7" | "8" | "9")
+    }
 }
 
 impl Default for Eapi {

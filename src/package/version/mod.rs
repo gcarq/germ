@@ -1,8 +1,8 @@
 use crate::package::version::suffix::VersionSuffixes;
 use anyhow::{Context, Result, anyhow};
 use number::VersionNumber;
-use std::fmt;
 use std::str::FromStr;
+use std::{fmt, iter};
 
 pub mod number;
 pub mod suffix;
@@ -37,12 +37,12 @@ impl PackageVersion {
     }
 
     /// Returns the version, with no revision. For example `7.0.174`.
-    pub fn v(&self) -> String {
+    pub fn pv(&self) -> String {
         format!("{}{}", self.number, self.suffixes)
     }
 
     /// Returns the revision, or `r0` if none exists.
-    pub fn r(&self) -> String {
+    pub fn pr(&self) -> String {
         match self.revision {
             0 => "r0".to_owned(),
             rev => format!("r{}", rev),
@@ -50,8 +50,19 @@ impl PackageVersion {
     }
 
     /// Returns the version and revision (if any), for example `7.0.174` or `7.0.174-r1`.
-    pub fn vr(&self) -> String {
+    pub fn pvr(&self) -> String {
         self.to_string()
+    }
+
+    /// Returns an iterator over the `PV` components.
+    /// See https://devmanual.gentoo.org/function-reference/version-functions/index.html
+    pub fn pv_iter(&self) -> impl Iterator<Item = String> {
+        self.number
+            .iter()
+            .chain(self.suffixes.iter().flat_map(|suffix| {
+                let (name, num) = suffix.deconstruct();
+                iter::once(name.to_owned()).chain(num.map(|n| n.to_string()))
+            }))
     }
 }
 
@@ -101,6 +112,24 @@ mod tests {
         ];
         for version in test_cases {
             assert!(version.is_err(), "Expected error for: {}", version.unwrap());
+        }
+    }
+
+    #[test]
+    fn test_package_version_pv_iter() {
+        let test_cases = vec![
+            (
+                PackageVersion::new("1.2.3a", Some("alpha1_p20240101"), None).unwrap(),
+                vec!["1", "2", "3", "a", "alpha", "1", "p", "20240101"],
+            ),
+            (
+                PackageVersion::new("0.99.10", None, Some("2")).unwrap(),
+                vec!["0", "99", "10"],
+            ),
+        ];
+        for (pkg_version, expected) in test_cases {
+            let iter_result: Vec<String> = pkg_version.pv_iter().collect();
+            assert_eq!(iter_result, expected);
         }
     }
 

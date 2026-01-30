@@ -130,6 +130,17 @@ impl VersionSuffix {
         Ok(suffix)
     }
 
+    /// Deconstructs the suffix into its string representation and optional number.
+    pub fn deconstruct(&self) -> (&str, Option<usize>) {
+        match self {
+            VersionSuffix::Alpha(n) => ("alpha", *n),
+            VersionSuffix::Beta(n) => ("beta", *n),
+            VersionSuffix::Pre(n) => ("pre", *n),
+            VersionSuffix::Rc(n) => ("rc", *n),
+            VersionSuffix::Patch(n) => ("p", *n),
+        }
+    }
+
     /// Returns the order of the suffix type for comparison purposes.
     fn suffix_order(&self) -> usize {
         match self {
@@ -194,13 +205,7 @@ impl hash::Hash for VersionSuffix {
 
 impl fmt::Display for VersionSuffix {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (suffix, num) = match self {
-            VersionSuffix::Alpha(n) => ("alpha", n),
-            VersionSuffix::Beta(n) => ("beta", n),
-            VersionSuffix::Pre(n) => ("pre", n),
-            VersionSuffix::Rc(n) => ("rc", n),
-            VersionSuffix::Patch(n) => ("p", n),
-        };
+        let (suffix, num) = self.deconstruct();
         write!(f, "{suffix}")?;
         if let Some(num) = num {
             write!(f, "{num}")?;

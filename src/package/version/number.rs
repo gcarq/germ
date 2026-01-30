@@ -10,6 +10,17 @@ pub struct VersionNumber {
     pub letter: Option<char>,
 }
 
+impl VersionNumber {
+    /// Returns an iterator over the string representations of each component
+    /// followed by the optional letter suffix as the last element (if it exists).
+    pub fn iter(&self) -> impl Iterator<Item = String> {
+        self.components
+            .iter()
+            .map(|comp| comp.to_string())
+            .chain(self.letter.map(|c| c.to_string()))
+    }
+}
+
 impl FromStr for VersionNumber {
     type Err = anyhow::Error;
 

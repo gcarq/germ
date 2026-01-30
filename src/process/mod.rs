@@ -15,13 +15,17 @@ use std::os::fd::AsRawFd;
 /// The child process is started with `posix_spawn` and communicates via pipes.
 pub struct Process {
     pid: Pid,
-    ipc: IpcHandler,
+    pub ipc: IpcHandler,
 }
 
 impl Process {
     /// Spawns a new process with the given `args` and `env`.
     /// The first element in `args` is expected to be the full path to the binary to execute.
-    pub fn new(args: &[&str], env: HashMap<String, String>) -> Result<Self> {
+    pub fn new(args: &[String], env: &HashMap<String, String>) -> Result<Self> {
+        if args.is_empty() {
+            return Err(anyhow!("no arguments provided to spawn process"));
+        }
+
         // IPC pipe for parent -> child
         let (child_reader, parent_writer) = pipe().with_context(|| "unable to create pipe")?;
         // IPC pipe for child -> parent
@@ -34,20 +38,20 @@ impl Process {
         let attrs =
             PosixSpawnAttr::init().with_context(|| "unable to init posix spawn attributes")?;
 
-        actions.add_dup2(child_reader.as_raw_fd(), 3)?;
-        actions.add_dup2(child_writer.as_raw_fd(), 6)?;
+        actions.add_dup2(child_reader.as_raw_fd(), 10)?;
+        actions.add_dup2(child_writer.as_raw_fd(), 11)?;
         actions.add_close(parent_writer.as_raw_fd())?;
         actions.add_close(parent_reader.as_raw_fd())?;
 
-        let binary = args[0];
+        let binary = args[0].as_str();
         let args = args
             .iter()
-            .map(|arg| CString::new(*arg))
+            .map(|arg| CString::new(arg.clone()))
             .collect::<Result<Vec<CString>, _>>()
             .with_context(|| "unable to setup bash arguments")?;
 
         let env = env
-            .into_iter()
+            .iter()
             .map(|(k, v)| CString::new(format!("{k}={v}")))
             .collect::<Result<Vec<CString>, _>>()
             .with_context(|| "unable to setup bash environment")?;
@@ -59,6 +63,14 @@ impl Process {
         let pid = posix_spawn(binary, &actions, &attrs, &args, &env)
             .with_context(|| "posix_spawn failed")?;
         Ok(Self { pid, ipc })
+    }
+
+    /// Checks if the child process is still alive.
+    pub fn is_alive(&self) -> Result<bool> {
+        match waitpid(self.pid, Some(WaitPidFlag::WNOHANG))? {
+            WaitStatus::StillAlive => Ok(true),
+            _ => Ok(false),
+        }
     }
 
     /// Waits for the child process to terminate and returns its exit status.
@@ -88,12 +100,23 @@ mod tests {
         let args = vec![
             "/usr/bin/bash".into(),
             "-c".into(),
-            "while read line <&3; do echo \"bash got: $line\" >&6; done".into(),
+            "read line <&10; echo ${line} >&11;\
+            echo ${TEST_VARIABLE} >&11;\
+            sleep infinity"
+                .into(),
         ];
-        let mut proc = Process::new(&args, HashMap::new()).unwrap();
-        proc.ipc.send("hello").unwrap();
+        let env: HashMap<String, String> =
+            HashMap::from_iter([("TEST_VARIABLE".into(), "42".into())]);
+        let mut proc = Process::new(&args, &env).unwrap();
+        proc.ipc.send("sync").unwrap();
         let resp = proc.ipc.recv().unwrap();
-        assert_eq!(resp, Some("bash got: hello".into()));
+        assert_eq!(resp, Some("sync".to_owned()), "expected echoed line");
+        let resp = proc.ipc.recv().unwrap();
+        assert_eq!(
+            resp,
+            Some("42".to_owned()),
+            "expected value from env variable"
+        );
         proc.shutdown().unwrap();
     }
 }

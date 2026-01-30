@@ -122,16 +122,6 @@ pub fn is_file(entry: &DirEntry) -> Result<bool> {
     }
 }
 
-/// Determines whether the given directory `entry` is a directory.
-/// If the file type is a symlink or cannot be determined directly,
-/// it falls back to checking the metadata which requires a syscall.
-pub fn is_dir(entry: &DirEntry) -> Result<bool> {
-    match is_file(entry) {
-        Ok(is_file) => Ok(!is_file),
-        Err(e) => Err(e),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

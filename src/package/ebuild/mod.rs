@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-pub mod process;
+pub mod handler;
 
 lazy_static! {
     /// Regex to capture EAPI from ebuild files according to PMS 7.3.1.

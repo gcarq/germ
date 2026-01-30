@@ -1,6 +1,9 @@
+mod functions;
+
 use crate::consts::BASH_BINARY_PATH;
 use crate::package::Package;
 use crate::package::ebuild::Ebuild;
+use crate::package::ebuild::handler::functions::version::ver_cut;
 use crate::process::Process;
 use anyhow::{Context, Result, anyhow};
 use nix::sys::wait::WaitStatus;
@@ -11,14 +14,16 @@ pub enum EbuildPhase {
 }
 
 /// Manages the execution of an ebuild phase.
-pub struct EbuildProcess<'a> {
+pub struct EbuildPhaseHandler<'a> {
     package: &'a Package,
     phase: EbuildPhase,
-    process: Process,
+    args: Vec<String>,
+    env: HashMap<String, String>,
+    //process: Option<Process>,
 }
 
-impl<'a> EbuildProcess<'a> {
-    /// Spawns a new ebuild process for the given `package` and `phase`.
+impl<'a> EbuildPhaseHandler<'a> {
+    /// Create a new ebuild phase handler for the given `package` and `phase`.
     pub fn new(package: &'a Package, phase: EbuildPhase) -> Result<Self> {
         if package.ebuild.is_none() {
             return Err(anyhow!("no ebuild found for package: {package}"));
@@ -26,18 +31,57 @@ impl<'a> EbuildProcess<'a> {
         // Safe to unwrap as we check for ebuild presence above
         let args = Self::build_args(package.ebuild.as_ref().unwrap());
         let env = Self::create_ebuild_env(package)?;
-        let process = Process::new(&args, env).with_context(|| "unable to spawn ebuild process")?;
 
         Ok(Self {
             package,
             phase,
-            process,
+            args,
+            env,
+            //process: None,
         })
     }
 
-    /// Waits for the ebuild process to finish and returns its exit status.
-    pub fn wait(&mut self) -> Result<WaitStatus> {
-        self.process.wait()
+    /// Starts the process for the ebuild phase.
+    /// NOTE: This call blocks until the process has been finished.
+    pub fn execute(&mut self) -> Result<()> {
+        let mut process = Process::new(&self.args, &self.env)
+            .with_context(|| "unable to spawn ebuild process")?;
+        //self.process = Some(process);
+
+        loop {
+            if process.ipc.poll()? {
+                let data = match process.ipc.recv()? {
+                    Some(data) => data,
+                    // Got EOF, at this point the ebuild process should have already exited
+                    None => match process.wait()? {
+                        WaitStatus::Exited(_, code) => match code {
+                            0 => break,
+                            _ => return Err(anyhow!("ebuild process exited with code {code}")),
+                        },
+                        _ => return Err(anyhow!("ebuild process terminated abnormally")),
+                    },
+                };
+
+                let result = self.handle_request(&data)?;
+                process.ipc.send(&result)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Transforms the given response `data` received from the ebuild process
+    /// and returns the string that should be sent back.
+    fn handle_request(&self, data: &str) -> Result<String> {
+        let parts = data.split_ascii_whitespace().collect::<Box<[&str]>>();
+        match parts.as_ref() {
+            ["FUNC", "ver_cut", args @ ..] => return ver_cut(self.package, args),
+            ["FUNC", func_name, args @ ..] => {
+                println!("EBUILD FUNC CALL: {func_name} with args: {:?}", args);
+            }
+            _ => {}
+        };
+        Err(anyhow!("unknown ebuild IPC request: {data}"))
     }
 
     /// Creates environment variables for the given `package` according to PMS section 11.1.
@@ -72,7 +116,7 @@ impl<'a> EbuildProcess<'a> {
     /// Builds the list of `args` to be passed to bash for the ebuild process.
     /// Also sets shell options depending on the EAPI.
     /// See https://www.gnu.org/software/bash/manual/html_node/The-Shopt-Builtin.html
-    fn build_args(ebuild: &Ebuild) -> Vec<&str> {
+    fn build_args(ebuild: &Ebuild) -> Vec<String> {
         // The "patsub_replacement" and "globskipdots" options were introduced
         // by bash-5.2. Both are default-enabled and change the behavior of
         // bash in a manner that is backwards-incompatible. Setting BASH_COMPAT
@@ -95,6 +139,6 @@ impl<'a> EbuildProcess<'a> {
             args.extend(vec!["-O", "failglob"]);
         }
         args.extend_from_slice(&["-c", "./bin/ebuild.sh"]);
-        args
+        args.into_iter().map(|arg| arg.to_owned()).collect()
     }
 }

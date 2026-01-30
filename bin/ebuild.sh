@@ -3,10 +3,18 @@
 
 
 funcs="ver_cut inherit llvm_gen_dep"
-for x in ${funcs} ; do
-    eval "${x} () { echo \"executing: '\${FUNCNAME} \$*'\"; exit 1; }"
-done
+for x in $funcs; do
+    eval "
+        $x() {
+            printf 'FUNC %s %s\n' \"\$FUNCNAME\" \"\$*\" >&11
 
+            local reply
+            IFS= read -r reply <&10 || exit 1
+
+            printf '%s\n' \"\$reply\"
+        }
+    "
+done
 ls -la /proc/$$/fd
 printenv
 whoami

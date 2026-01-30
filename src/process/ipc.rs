@@ -1,8 +1,10 @@
 use anyhow::{Context, Result, anyhow};
+use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::mem::ManuallyDrop;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
+use std::time::Duration;
 
 /// Handler for IPC communication with a bash child process.
 pub struct IpcHandler {
@@ -50,6 +52,18 @@ impl IpcHandler {
                 Ok(Some(buf))
             }
             Err(e) => Err(anyhow!(e)).with_context(|| "failed to read from child process"),
+        }
+    }
+
+    /// Waits for data to be available for reading from the child process.
+    /// Times out after 5 seconds.
+    /// Returns `Ok(true)` if data is available, `Ok(false)` if timed out.
+    pub fn poll(&mut self) -> Result<bool> {
+        let timeout = PollTimeout::try_from(Duration::from_secs(5))?;
+        let fd = PollFd::new(self.reader.get_ref().as_fd(), PollFlags::POLLIN);
+        match poll(&mut [fd], timeout)? {
+            0 => Ok(false),
+            _ => Ok(true),
         }
     }
 }

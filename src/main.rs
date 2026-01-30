@@ -1,7 +1,7 @@
 use crate::conf::PortageConf;
 use crate::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
 use crate::deps::Atom;
-use crate::package::ebuild::process::{EbuildPhase, EbuildProcess};
+use crate::package::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
 use crate::vdb::Vdb;
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
@@ -100,9 +100,9 @@ fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
         None => return Err(anyhow!("No matching package found for atom '{atom}'")),
     };
 
-    let mut proc = EbuildProcess::new(&pkg, EbuildPhase::Metadata)
+    let mut handler = EbuildPhaseHandler::new(&pkg, EbuildPhase::Metadata)
         .with_context(|| format!("Unable to install package '{pkg}'"))?;
-    proc.wait()?;
+    handler.execute()?;
 
     Ok(())
 }
