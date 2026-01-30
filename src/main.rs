@@ -1,12 +1,13 @@
 use crate::conf::PortageConf;
 use crate::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
-use crate::package::Package;
-use crate::package::version::PackageVersion;
-use anyhow::Result;
-use clap::Parser;
-use colored::Colorize;
+use crate::deps::Atom;
+use crate::package::ebuild::process::{EbuildPhase, EbuildProcess};
+use crate::vdb::Vdb;
+use anyhow::{Context, Result, anyhow};
+use clap::{Parser, Subcommand};
 use makenv::EnvValue;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 mod conf;
 mod consts;
@@ -15,6 +16,7 @@ mod eapi;
 mod linefile;
 pub mod makenv;
 pub mod package;
+pub mod process;
 mod profile;
 mod regex;
 mod repository;
@@ -25,78 +27,82 @@ mod vdb;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Provides information about the system, useful for troubleshooting
-    #[arg(long)]
-    info: bool,
-
     /// Increases verbosity
     #[arg(short, long)]
     verbose: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Provides information about the system, useful for troubleshooting
+    Info {
+        /// Package atom e.g. dev-lang/rust
+        #[arg(value_name = "atom")]
+        atom: Option<Atom>,
+    },
+    /// Install a package
+    Install {
+        /// Package atom to install, e.g. dev-lang/rust
+        #[arg(value_name = "atom")]
+        atom: Atom,
+    },
 }
 
 fn main() -> Result<()> {
-    let args = Args::parse();
     let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH))?;
 
-    if args.info {
-        info(&conf);
-    } else {
-        println!("{}", "Masked packages:".blue().bold());
-        for atom in conf.mask_manager.mask.values().flatten() {
-            println!("{atom}");
-        }
-        println!("\n{}", "Unmasked packages:".blue().bold());
-        for atom in conf.mask_manager.unmask.values().flatten() {
-            println!("{atom}");
-        }
-        for pkg in conf
-            .repos_conf
-            .repositories()
-            .iter()
-            .flat_map(|r| r.packages.iter())
-        {
-            println!("{pkg}");
-        }
+    let args = Args::parse();
+    match args.command {
+        Some(Command::Info { atom }) => info(&conf, atom)?,
+        Some(Command::Install { atom }) => install(&conf, atom)?,
+        None => {}
     }
 
-    let rust_bin = Package::new(
-        "dev-lang",
-        "rust-bin",
-        PackageVersion::new("1.0.0", None, None)?,
-    )?;
-
-    println!();
-    println!(
-        "is_masked: {rust_bin} = {}",
-        conf.mask_manager.is_masked(&rust_bin)
-    );
-
-    conf.repos_conf.repositories().iter().for_each(|repo| {
-        println!("Repository: {}", repo.name);
-        println!(
-            "Eclasses: {}",
-            repo.eclasses
-                .iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    });
-
     Ok(())
-
-    // let vdb =
-    //     Vdb::from_path(PathBuf::from_str("/var/db/pkg")?).with_context(|| "Unable to build VDB")?;
-    // show_updates(repo, vdb);
-    // Ok(())
 }
 
-/// Prints information about the current portage configuration.
-fn info(conf: &PortageConf) {
+/// Prints information about the current portage `conf`.
+fn info(conf: &PortageConf, atom: Option<Atom>) -> Result<()> {
     println!("Repositories:\n\n{}", conf.repos_conf);
     let mut make_env = conf.make_env.iter().collect::<Vec<(&String, &EnvValue)>>();
     make_env.sort_by_key(|(name, _)| *name);
     for (key, value) in make_env {
         println!("{key}=\"{value}\"");
     }
+
+    if let Some(atom) = atom {
+        let vdb = Vdb::from_path(PathBuf::from_str("/var/db/pkg")?)
+            .with_context(|| "Unable to build VDB")?;
+
+        println!("\nInstalled packages matching '{atom}':\n");
+        for pkg in vdb.packages.iter().filter(|pkg| atom.matches(pkg)) {
+            println!("{pkg}");
+        }
+    }
+
+    Ok(())
+}
+
+/// Installs the best matching package for the given `atom`.
+/// TODO: this is just a placeholder for now.
+fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
+    let pkg = conf
+        .repos_conf
+        .repositories()
+        .filter_map(|repo| repo.find_packages(&atom).first().map(|p| (*p).clone()))
+        .next();
+
+    let pkg = match pkg {
+        Some(pkg) => pkg,
+        None => return Err(anyhow!("No matching package found for atom '{atom}'")),
+    };
+
+    let mut proc = EbuildProcess::new(&pkg, EbuildPhase::Metadata)
+        .with_context(|| format!("Unable to install package '{pkg}'"))?;
+    proc.wait()?;
+
+    Ok(())
 }

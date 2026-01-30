@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 use ini::Ini;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::{fmt, fs};
+use std::{fmt, fs, iter};
 
 /// Holds all repository configuration that usually resides in /etc/portage/repos.conf.
 /// TODO implement missing functionality listed below.
@@ -55,8 +55,15 @@ impl ReposConf {
         self.repos.iter()
     }
 
-    pub fn repositories(&self) -> Vec<&Repository> {
-        self.repos.values().collect()
+    /// Returns an iterator over all repositories, with the main repository first.
+    pub fn repositories(&self) -> impl Iterator<Item = &Repository> {
+        iter::once(self.main_repo()).chain(self.repos.iter().filter_map(|(name, repo)| {
+            if name != &self.main_repo_name {
+                Some(repo)
+            } else {
+                None
+            }
+        }))
     }
 
     /// Loads the repos.conf configuration from the given path.

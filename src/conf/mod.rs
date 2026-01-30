@@ -33,7 +33,7 @@ impl PortageConf {
 
         let make_env = Self::init_make_env(path, &profile)?;
 
-        let repos = repos_conf.repositories();
+        let repos = repos_conf.repositories().collect::<Vec<_>>();
         let arch = make_env
             .get("ARCH")
             .with_context(|| "Missing ARCH variable")?

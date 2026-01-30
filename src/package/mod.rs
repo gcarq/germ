@@ -16,7 +16,7 @@ lazy_static! {
 
 /// Represents a package with its category, name, and available versions.
 /// TODO: add slot and repo information.
-#[derive(Eq, Debug)]
+#[derive(Clone, Eq, Debug)]
 pub struct Package {
     pub category: String,
     pub name: String,
@@ -91,13 +91,15 @@ impl Package {
 
 impl PartialEq<Self> for Package {
     fn eq(&self, other: &Self) -> bool {
-        self.qualified_name() == other.qualified_name()
+        self.category == other.category && self.name == other.name && self.version == other.version
     }
 }
 
 impl hash::Hash for Package {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.qualified_name().hash(state);
+        self.category.hash(state);
+        self.name.hash(state);
+        self.version.hash(state);
     }
 }
 

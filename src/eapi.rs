@@ -4,7 +4,7 @@ use std::fmt;
 
 /// An EAPI can be thought of as a ‘version’ of the PMS to which a package conforms.
 /// See PMS section 2 for more details.
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Eapi {
     pub version: String,
     pub profile_file_dirs: bool,

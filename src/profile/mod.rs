@@ -11,7 +11,7 @@ use std::fs;
 use std::path::Path;
 
 /// Represents a profile outlined in PMS section 5.
-#[derive(Debug, Default)]
+#[derive(Default, Debug)]
 pub struct Profile {
     eapi: Eapi,
     deprecated: Option<DeprecationInfo>,

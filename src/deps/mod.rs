@@ -1,7 +1,7 @@
 use crate::package::Package;
 use crate::package::version::PackageVersion;
 use crate::regex::{ATOM_OP, CAT_PKG, CAT_PKG_VER_REV, REPOSITORY, SLOT_LOOSE};
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 use std::fmt;
@@ -21,7 +21,7 @@ lazy_static! {
     static ref ATOM_STAR_RE: Regex = Regex::new(&format!(r"^={CAT_PKG_VER_REV}\*$")).unwrap();
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 enum Operator {
     Less,
     LessEqual,
@@ -62,7 +62,7 @@ impl fmt::Display for Operator {
     }
 }
 
-#[derive(Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Default, Clone, Debug, Eq, Hash, PartialEq)]
 pub enum AtomVariant {
     #[default]
     Simple,
@@ -74,7 +74,7 @@ pub enum AtomVariant {
 /// calculating relationships between packages.
 /// TODO:
 ///  * implement remaining atom variants (see man 5 ebuild)
-#[derive(Debug, PartialEq, Default, Hash, Eq)]
+#[derive(Default, Clone, Debug, PartialEq, Hash, Eq)]
 pub struct Atom {
     operator: Option<Operator>,
     category: String,
@@ -91,27 +91,25 @@ impl Atom {
     pub fn new(atom: &str) -> Result<Self> {
         if let Some(caps) = ATOM_OPERATOR_RE.captures(atom) {
             return Ok(
-                Self::from_regex_capture(&caps, AtomVariant::VersionOperator)
-                    .with_context(|| anyhow!("invalid atom: {atom}"))?
-                    .with_operator(match caps.name("operator") {
+                Self::from_regex_capture(&caps, AtomVariant::VersionOperator)?.with_operator(
+                    match caps.name("operator") {
                         Some(m) => Some(Operator::from_str(m.as_str())?),
                         None => None,
-                    }),
+                    },
+                ),
             );
         }
         if let Some(caps) = ATOM_STAR_RE.captures(atom) {
             return Ok(
-                Self::from_regex_capture(&caps, AtomVariant::VersionWildcard)
-                    .with_context(|| anyhow!("invalid atom: {atom}"))?
+                Self::from_regex_capture(&caps, AtomVariant::VersionWildcard)?
                     .with_operator(Some(Operator::Equal)),
             );
         }
         if let Some(caps) = ATOM_SIMPLE_RE.captures(atom) {
-            return Self::from_regex_capture(&caps, AtomVariant::Simple)
-                .with_context(|| anyhow!("invalid atom: {atom}"));
+            return Self::from_regex_capture(&caps, AtomVariant::Simple);
         }
 
-        Err(anyhow!("invalid atom: {atom}"))
+        Err(anyhow!("'{atom}' is not a valid package atom"))
     }
 
     /// Returns the qualified name for this atom in the format category/name e.g. app-editors/vim.
@@ -209,6 +207,14 @@ impl Atom {
     fn with_operator(mut self, operator: Option<Operator>) -> Self {
         self.operator = operator;
         self
+    }
+}
+
+impl FromStr for Atom {
+    type Err = anyhow::Error;
+
+    fn from_str(atom: &str) -> Result<Self> {
+        Atom::new(atom)
     }
 }
 

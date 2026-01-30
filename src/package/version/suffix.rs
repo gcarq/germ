@@ -6,7 +6,7 @@ use std::{fmt, hash};
 const SUFFIX_PREFIXES: [&str; 5] = ["alpha", "beta", "pre", "rc", "p"];
 
 /// Holds a list of version suffixes for a package version.
-#[derive(Eq, Debug, Default)]
+#[derive(Default, Clone, Eq, Debug)]
 pub struct VersionSuffixes(Vec<VersionSuffix>);
 
 impl VersionSuffixes {
@@ -89,7 +89,7 @@ impl fmt::Display for VersionSuffixes {
 }
 
 /// Represents the different types of package version suffixes outlined in section 3.2.
-#[derive(Eq, Debug)]
+#[derive(Clone, Eq, Debug)]
 pub enum VersionSuffix {
     Alpha(Option<usize>),
     Beta(Option<usize>),

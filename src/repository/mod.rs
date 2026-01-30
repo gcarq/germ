@@ -1,6 +1,7 @@
 mod desc;
 mod eclass;
 
+use crate::deps::Atom;
 use crate::eapi::Eapi;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
@@ -57,6 +58,16 @@ impl Repository {
             .chain(main_repo.categories.iter().cloned())
             .collect::<Vec<_>>();
         Self::with_categories(path, categories)
+    }
+
+    /// Returns all packages in the repository that match the given `atom`.
+    /// TODO: Order the returned packages by version
+    /// TODO: Consider returning an iterator
+    pub fn find_packages(&self, atom: &Atom) -> Vec<&Package> {
+        self.packages
+            .iter()
+            .filter(|pkg| atom.matches(pkg))
+            .collect()
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.

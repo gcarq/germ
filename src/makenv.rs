@@ -32,7 +32,7 @@ const INCREMENTAL_VARIABLES: [&str; 14] = [
 ];
 
 /// Holds all environment variables defined in a make.conf or make.defaults file.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct MakeEnv {
     vars: HashMap<String, EnvValue>,
 }
@@ -118,7 +118,7 @@ impl Inherit for MakeEnv {
 /// It supports simple shell-like expansion in the form "${VAR}" or "$VAR".
 /// A value can be either a literal or incremental value.
 /// See `man make.conf` for more information.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum EnvValue {
     Literal(Vec<String>),
     Incremental(Vec<String>),

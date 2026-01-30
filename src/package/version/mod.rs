@@ -10,7 +10,7 @@ pub mod suffix;
 /// Represents a package version according to PMS section 3.2 and 3.3.
 /// This includes the base version components (e.g., "1.2.3a"), any suffixes
 /// (e.g., "_alpha1", "_p20240101"), and the revision number (e.g., "-r1").
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct PackageVersion {
     pub number: VersionNumber,
     pub suffixes: VersionSuffixes,

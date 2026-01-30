@@ -6,7 +6,7 @@ use anyhow::Result;
 /// Lines beginning with a hyphen clear the content of previous lines that are equal to the
 /// remainder of that line.
 /// TODO: consider saving relevant file path and line numbers for better error messages.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct LineBasedFile {
     lines: Vec<String>,
 }
