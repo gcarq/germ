@@ -1,11 +1,19 @@
 use crate::package::version::suffix::VersionSuffixes;
+use crate::regex::VER_REV;
 use anyhow::{Context, Result, anyhow};
+use lazy_static::lazy_static;
 use number::VersionNumber;
+use regex::Regex;
+use std::fmt;
 use std::str::FromStr;
-use std::{fmt, iter};
 
 pub mod number;
 pub mod suffix;
+
+lazy_static! {
+    /// Regex to validate and parse `version`, `suffixes` and the `revision`.
+    static ref VERSION_RE: Regex = Regex::new(&format!(r"^{VER_REV}$")).unwrap();
+}
 
 /// Represents a package version according to PMS section 3.2 and 3.3.
 /// This includes the base version components (e.g., "1.2.3a"), any suffixes
@@ -53,16 +61,22 @@ impl PackageVersion {
     pub fn pvr(&self) -> String {
         self.to_string()
     }
+}
 
-    /// Returns an iterator over the `PV` components.
-    /// See https://devmanual.gentoo.org/function-reference/version-functions/index.html
-    pub fn pv_iter(&self) -> impl Iterator<Item = String> {
-        self.number
-            .iter()
-            .chain(self.suffixes.iter().flat_map(|suffix| {
-                let (name, num) = suffix.deconstruct();
-                iter::once(name.to_owned()).chain(num.map(|n| n.to_string()))
-            }))
+impl TryFrom<&str> for PackageVersion {
+    type Error = anyhow::Error;
+
+    /// Create a `PackageVersion` from a full version string,
+    /// for example: `1.2.3_alpha1-r1`.
+    fn try_from(version: &str) -> Result<Self, Self::Error> {
+        let caps = VERSION_RE
+            .captures(version)
+            .ok_or_else(|| anyhow!("invalid version: '{version}'"))?;
+        Self::new(
+            &caps["version"],
+            Some(&caps["suffixes"]),
+            caps.name("revision").map(|m| m.as_str()),
+        )
     }
 }
 
@@ -112,24 +126,6 @@ mod tests {
         ];
         for version in test_cases {
             assert!(version.is_err(), "Expected error for: {}", version.unwrap());
-        }
-    }
-
-    #[test]
-    fn test_package_version_pv_iter() {
-        let test_cases = vec![
-            (
-                PackageVersion::new("1.2.3a", Some("alpha1_p20240101"), None).unwrap(),
-                vec!["1", "2", "3", "a", "alpha", "1", "p", "20240101"],
-            ),
-            (
-                PackageVersion::new("0.99.10", None, Some("2")).unwrap(),
-                vec!["0", "99", "10"],
-            ),
-        ];
-        for (pkg_version, expected) in test_cases {
-            let iter_result: Vec<String> = pkg_version.pv_iter().collect();
-            assert_eq!(iter_result, expected);
         }
     }
 

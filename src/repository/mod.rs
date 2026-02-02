@@ -3,9 +3,9 @@ mod eclass;
 
 use crate::deps::Atom;
 use crate::eapi::Eapi;
+use crate::ebuild::Ebuild;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
-use crate::package::ebuild::Ebuild;
 use crate::package::version::PackageVersion;
 use crate::regex::{PKG_VER_REV, REPOSITORY};
 use crate::repository::desc::ProfileDescription;

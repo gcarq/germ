@@ -1,9 +1,9 @@
 mod functions;
 
 use crate::consts::BASH_BINARY_PATH;
+use crate::ebuild::Ebuild;
+use crate::ebuild::handler::functions::exec_ebuild_fn;
 use crate::package::Package;
-use crate::package::ebuild::Ebuild;
-use crate::package::ebuild::handler::functions::version::ver_cut;
 use crate::process::Process;
 use anyhow::{Context, Result, anyhow};
 use nix::sys::wait::WaitStatus;
@@ -75,13 +75,9 @@ impl<'a> EbuildPhaseHandler<'a> {
     fn handle_request(&self, data: &str) -> Result<String> {
         let parts = data.split_ascii_whitespace().collect::<Box<[&str]>>();
         match parts.as_ref() {
-            ["FUNC", "ver_cut", args @ ..] => return ver_cut(self.package, args),
-            ["FUNC", func_name, args @ ..] => {
-                println!("EBUILD FUNC CALL: {func_name} with args: {:?}", args);
-            }
-            _ => {}
-        };
-        Err(anyhow!("unknown ebuild IPC request: {data}"))
+            ["FN", fn_name, args @ ..] => exec_ebuild_fn(self.package, fn_name, args),
+            _ => Err(anyhow!("unknown ebuild IPC request: {data}")),
+        }
     }
 
     /// Creates environment variables for the given `package` according to PMS section 11.1.

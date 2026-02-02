@@ -46,6 +46,16 @@ impl Eapi {
     pub fn has_ver_cut(&self) -> bool {
         matches!(self.version.as_str(), "7" | "8" | "9")
     }
+
+    /// Returns true if the EAPI supports `ver_rs` functionality.
+    pub fn has_ver_rs(&self) -> bool {
+        matches!(self.version.as_str(), "7" | "8" | "9")
+    }
+
+    /// Returns true if the EAPI supports `ver_test` functionality.
+    pub fn has_ver_test(&self) -> bool {
+        matches!(self.version.as_str(), "7" | "8" | "9")
+    }
 }
 
 impl Default for Eapi {

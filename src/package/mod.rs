@@ -1,7 +1,6 @@
-pub mod ebuild;
 pub mod version;
 
-use crate::package::ebuild::Ebuild;
+use crate::ebuild::Ebuild;
 use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY_RE, PACKAGE};
 use anyhow::{Result, anyhow};

@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 # TODO: this is a prototype for ebuild execution
 
-
-funcs="ver_cut inherit llvm_gen_dep"
+# Those functions are implemented in src/ebuild/handler/functions
+funcs="ver_cut ver_rs ver_test inherit"
 for x in $funcs; do
     eval "
         $x() {
-            printf 'FUNC %s %s\n' \"\$FUNCNAME\" \"\$*\" >&11
-
+            printf 'FN %s %s\n' \"\$FUNCNAME\" \"\$*\" >&11
             local reply
             IFS= read -r reply <&10 || exit 1
-
             printf '%s\n' \"\$reply\"
         }
     "

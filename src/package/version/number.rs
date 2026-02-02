@@ -154,7 +154,7 @@ impl Ord for NumberComponent {
             (NumberComponent::Alphabetic(a), NumberComponent::Alphabetic(b))
             | (NumberComponent::Numeric(a), NumberComponent::Alphabetic(b))
             | (NumberComponent::Alphabetic(a), NumberComponent::Numeric(b)) => {
-                a.trim_start_matches('0').cmp(b.trim_start_matches('0'))
+                a.trim_end_matches('0').cmp(b.trim_end_matches('0'))
             }
         }
     }
@@ -267,8 +267,8 @@ mod tests {
         let v2_0 = VersionNumber::from_str("2.0").unwrap();
         let v2025_11_22 = VersionNumber::from_str("20251122").unwrap();
 
+        assert!(v1_2_03 < v1_2_3);
         assert!(v1_2_3 < v1_2_4);
-        assert_eq!(v1_2_3, v1_2_03); // '03' vs '3' should compare as ascii
         assert!(v1_2_3 < v1_2_3a);
         assert!(v1_2_3a < v1_2_3b);
         assert!(v1_2_3b < v1_2_3_1);
@@ -300,8 +300,8 @@ mod tests {
         let alpha3 = NumberComponent::Alphabetic("3".into());
 
         assert!(num1 < num2);
-        assert_eq!(alpha03, alpha3); // '03' vs '3' should compare as ascii
-        assert!(num1 < alpha03); // Numeric vs Alphabetic comparison
+        assert!(alpha03 < alpha3); // '03' vs '3' should compare as ascii
+        assert!(alpha03 < num1); // Numeric vs Alphabetic comparison
         assert!(alpha3 > num2); // Alphabetic vs Numeric comparison
     }
 
