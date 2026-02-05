@@ -1,8 +1,10 @@
 mod functions;
 
-use crate::consts::BASH_BINARY_PATH;
+use crate::conf::PortageConf;
+use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
 use crate::ebuild::Ebuild;
 use crate::ebuild::handler::functions::exec_ebuild_fn;
+use crate::makenv::MakeEnv;
 use crate::package::Package;
 use crate::process::Process;
 use anyhow::{Context, Result, anyhow};
@@ -10,7 +12,15 @@ use nix::sys::wait::WaitStatus;
 use std::collections::HashMap;
 
 pub enum EbuildPhase {
-    Metadata,
+    Depend,
+}
+
+impl EbuildPhase {
+    pub fn as_str(&self) -> &str {
+        match self {
+            EbuildPhase::Depend => "depend",
+        }
+    }
 }
 
 /// Manages the execution of an ebuild phase.
@@ -19,25 +29,23 @@ pub struct EbuildPhaseHandler<'a> {
     phase: EbuildPhase,
     args: Vec<String>,
     env: HashMap<String, String>,
-    //process: Option<Process>,
 }
 
 impl<'a> EbuildPhaseHandler<'a> {
     /// Create a new ebuild phase handler for the given `package` and `phase`.
-    pub fn new(package: &'a Package, phase: EbuildPhase) -> Result<Self> {
+    pub fn new(package: &'a Package, conf: &PortageConf, phase: EbuildPhase) -> Result<Self> {
         if package.ebuild.is_none() {
             return Err(anyhow!("no ebuild found for package: {package}"));
         }
         // Safe to unwrap as we check for ebuild presence above
         let args = Self::build_args(package.ebuild.as_ref().unwrap());
-        let env = Self::create_ebuild_env(package)?;
+        let env = Self::create_ebuild_env(package, &conf.make_env, &phase)?;
 
         Ok(Self {
             package,
             phase,
             args,
             env,
-            //process: None,
         })
     }
 
@@ -46,7 +54,6 @@ impl<'a> EbuildPhaseHandler<'a> {
     pub fn execute(&mut self) -> Result<()> {
         let mut process = Process::new(&self.args, &self.env)
             .with_context(|| "unable to spawn ebuild process")?;
-        //self.process = Some(process);
 
         loop {
             if process.ipc.poll()? {
@@ -80,33 +87,42 @@ impl<'a> EbuildPhaseHandler<'a> {
         }
     }
 
-    /// Creates environment variables for the given `package` according to PMS section 11.1.
+    /// Creates environment variables for the given `package` and `hase` according to PMS 11.1.
     /// The caller must ensure the `package` has an associated ebuild set.
-    fn create_ebuild_env(package: &Package) -> Result<HashMap<String, String>> {
+    fn create_ebuild_env(
+        package: &Package,
+        env: &MakeEnv,
+        phase: &EbuildPhase,
+    ) -> Result<HashMap<String, String>> {
         // Safe to unwrap as we check for ebuild presence in `new()`
         let ebuild = package.ebuild.as_ref().unwrap();
-        let env = vec![
-            (
-                "BASH_COMPAT".to_owned(),
-                ebuild.eapi.supported_bash_version()?,
-            ),
-            // Force invalid paths for bashrc and bash_env to avoid sourcing user files.
-            ("BASHRC".to_owned(), "/dev/null".to_owned()),
-            ("BASH_ENV".to_owned(), "/dev/null".to_owned()),
-            // Ebuild variables
-            ("P".to_owned(), package.p()),
-            ("PF".to_owned(), package.pf()),
-            ("PN".to_owned(), package.pn()),
-            ("CATEGORY".to_owned(), package.category()),
-            ("PV".to_owned(), package.pv()),
-            ("PR".to_owned(), package.pr()),
-            ("PVR".to_owned(), package.pvr()),
-            (
-                "EBUILD".to_owned(),
-                ebuild.path.to_str().unwrap().to_owned(),
-            ),
-        ];
-        Ok(HashMap::from_iter(env))
+        let env = env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_string()))
+            .chain([
+                (
+                    "BASH_COMPAT".to_owned(),
+                    ebuild.eapi.supported_bash_version()?,
+                ),
+                // Force invalid paths for bashrc and bash_env to avoid sourcing user files.
+                ("BASHRC".to_owned(), "/dev/null".to_owned()),
+                ("BASH_ENV".to_owned(), "/dev/null".to_owned()),
+                ("EBUILD_PHASE".to_owned(), phase.as_str().to_owned()),
+                // Ebuild variables
+                ("P".to_owned(), package.p()),
+                ("PF".to_owned(), package.pf()),
+                ("PN".to_owned(), package.pn()),
+                ("CATEGORY".to_owned(), package.category()),
+                ("PV".to_owned(), package.pv()),
+                ("PR".to_owned(), package.pr()),
+                ("PVR".to_owned(), package.pvr()),
+                (
+                    "EBUILD".to_owned(),
+                    ebuild.path.to_str().unwrap().to_owned(),
+                ),
+            ])
+            .collect::<HashMap<String, String>>();
+        Ok(env)
     }
 
     /// Builds the list of `args` to be passed to bash for the ebuild process.
@@ -125,6 +141,7 @@ impl<'a> EbuildPhaseHandler<'a> {
         // https://bugs.gentoo.org/946193
         // https://bugs.gentoo.org/946179
         let mut args = vec![
+            SANDBOX_BINARY_PATH,
             BASH_BINARY_PATH,
             "+O",
             "patsub_replacement",

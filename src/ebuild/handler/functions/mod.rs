@@ -1,6 +1,7 @@
 use crate::ebuild::handler::functions::version::{ver_cut, ver_rs, ver_test};
 use crate::package::Package;
 use anyhow::{Result, anyhow};
+use std::process;
 
 mod version;
 
@@ -10,6 +11,11 @@ pub fn exec_ebuild_fn(pkg: &Package, name: &str, args: &[&str]) -> Result<String
     // TODO: Improve ergonomics of accessing ebuild
     let eapi = &pkg.ebuild.as_ref().unwrap().eapi;
     match name {
+        "die" => match args {
+            [message] => die(message, true),
+            ["-n", message] => die(message, false),
+            _ => Err(anyhow!("invalid arguments: die <message>")),
+        },
         "ver_cut" if eapi.has_ver_cut() => match args {
             [range] => ver_cut(pkg, range, None),
             [range, version] => ver_cut(pkg, range, Some(version)),
@@ -32,6 +38,21 @@ pub fn exec_ebuild_fn(pkg: &Package, name: &str, args: &[&str]) -> Result<String
             args.join(" ")
         )),
     }
+}
+
+/// Prints the given `message` to stderr and exits with code 1 if `fatal` is true.
+/// Otherwise, it returns "1" as a string.
+pub fn die(message: &str, fatal: bool) -> Result<String> {
+    eprintln!("die: {message}");
+    if fatal {
+        process::exit(1);
+    }
+    Ok("1".into())
+}
+
+/// Inherits the given eclasses for the provided package.
+pub fn inherit(pkg: &Package, eclass_names: &[&str]) -> Result<()> {
+    Ok(())
 }
 
 /// Converts the given `value` to a boolean value for bash
