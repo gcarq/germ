@@ -1,5 +1,5 @@
 use crate::eapi::Eapi;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::fs::File;
@@ -23,19 +23,23 @@ pub struct Ebuild {
 }
 
 impl Ebuild {
-    /// Creates an `Ebuild` instance from the given `path`
+    /// Creates an `Ebuild` instance from the given `path`.
+    /// Returns an `Err` if the EAPI is not found or unsupported for ebuilds.
     pub fn from_path(path: PathBuf) -> Result<Self> {
         let reader = BufReader::with_capacity(256, File::open(&path)?);
         for line in reader.lines() {
             let line = line?;
             if let Some(caps) = PMS_EAPI_RE.captures(&line) {
                 let eapi = Eapi::new(&caps["eapi"])?;
+                if !eapi.is_supported_for_ebuilds() {
+                    return Err(anyhow!(
+                        "EAPI '{}' is not supported for ebuilds",
+                        eapi.version
+                    ));
+                }
                 return Ok(Self { eapi, path });
             }
         }
-        Ok(Self {
-            eapi: Eapi::default(),
-            path,
-        })
+        Err(anyhow!("EAPI not found in ebuild: {}", path.display()))
     }
 }

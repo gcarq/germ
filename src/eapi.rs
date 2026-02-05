@@ -1,4 +1,4 @@
-use crate::consts::SUPPORTED_EAPIS;
+use crate::consts::{SUPPORTED_EBUILD_EAPIS, VALID_EAPIS};
 use anyhow::{Result, anyhow};
 use std::fmt;
 
@@ -14,7 +14,7 @@ impl Eapi {
     /// Creates a new instance from the given EAPI `version`.
     /// Returns an `Err` if the version is unsupported.
     pub fn new(version: &str) -> Result<Self> {
-        if !SUPPORTED_EAPIS.contains(&version) {
+        if !VALID_EAPIS.contains(&version) {
             return Err(anyhow::anyhow!("unsupported EAPI: {version}"));
         };
 
@@ -22,6 +22,11 @@ impl Eapi {
             version: version.to_owned(),
             profile_file_dirs: matches!(version, "7" | "8" | "9"),
         })
+    }
+
+    /// Returns `true` if this EAPI is supported for ebuilds.
+    pub fn is_supported_for_ebuilds(&self) -> bool {
+        SUPPORTED_EBUILD_EAPIS.contains(&self.version.as_str())
     }
 
     /// Returns the minimum supported bash version for this EAPI.
@@ -79,7 +84,7 @@ mod tests {
 
     #[test]
     fn test_eapi_new_ok() {
-        for version in SUPPORTED_EAPIS.iter() {
+        for version in VALID_EAPIS.iter() {
             let eapi = Eapi::new(version);
             assert!(eapi.is_ok());
             assert_eq!(eapi.unwrap().version.as_str(), *version);
