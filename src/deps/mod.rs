@@ -438,6 +438,7 @@ mod tests {
             "sys-devel",
             "gcc",
             PackageVersion::new("15.2.1", Some("p20251122"), Some("1")).unwrap(),
+            "gentoo",
         )
         .unwrap();
         for atom in atoms {
@@ -467,6 +468,7 @@ mod tests {
             "sys-devel",
             "gcc",
             PackageVersion::new("15.2.1", Some("p20251122"), Some("1")).unwrap(),
+            "gentoo",
         )
         .unwrap();
         for atom in atoms {

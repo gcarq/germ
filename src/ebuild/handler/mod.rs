@@ -1,9 +1,12 @@
 mod functions;
+mod prot;
 
 use crate::conf::PortageConf;
+use crate::conf::repos::ReposConf;
 use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
 use crate::ebuild::Ebuild;
-use crate::ebuild::handler::functions::exec_ebuild_fn;
+use crate::ebuild::handler::functions::handle_request;
+use crate::ebuild::handler::prot::Request;
 use crate::makenv::MakeEnv;
 use crate::package::Package;
 use crate::process::Process;
@@ -26,6 +29,7 @@ impl EbuildPhase {
 /// Manages the execution of an ebuild phase.
 pub struct EbuildPhaseHandler<'a> {
     package: &'a Package,
+    repos: &'a ReposConf,
     phase: EbuildPhase,
     args: Vec<String>,
     env: HashMap<String, String>,
@@ -33,7 +37,7 @@ pub struct EbuildPhaseHandler<'a> {
 
 impl<'a> EbuildPhaseHandler<'a> {
     /// Create a new ebuild phase handler for the given `package` and `phase`.
-    pub fn new(package: &'a Package, conf: &PortageConf, phase: EbuildPhase) -> Result<Self> {
+    pub fn new(package: &'a Package, conf: &'a PortageConf, phase: EbuildPhase) -> Result<Self> {
         if package.ebuild.is_none() {
             return Err(anyhow!("no ebuild found for package: {package}"));
         }
@@ -42,6 +46,7 @@ impl<'a> EbuildPhaseHandler<'a> {
         let env = Self::create_ebuild_env(package, &conf.make_env, &phase)?;
 
         Ok(Self {
+            repos: &conf.repos_conf,
             package,
             phase,
             args,
@@ -58,7 +63,10 @@ impl<'a> EbuildPhaseHandler<'a> {
         loop {
             if process.ipc.poll()? {
                 let data = match process.ipc.recv()? {
-                    Some(data) => data,
+                    Some(data) => shlex::split(&data)
+                        .ok_or_else(|| anyhow!("Unable to split text due to syntax errors"))?
+                        .into_iter()
+                        .collect::<Vec<_>>(),
                     // Got EOF, at this point the ebuild process should have already exited
                     None => match process.wait()? {
                         WaitStatus::Exited(_, code) => match code {
@@ -69,22 +77,14 @@ impl<'a> EbuildPhaseHandler<'a> {
                     },
                 };
 
-                let result = self.handle_request(&data)?;
-                process.ipc.send(&result)?;
+                let data = data.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+                let request = Request::new(&data)?;
+                let response = handle_request(self.package, self.repos, &request)?;
+                process.ipc.send(&response)?;
             }
         }
 
         Ok(())
-    }
-
-    /// Transforms the given response `data` received from the ebuild process
-    /// and returns the string that should be sent back.
-    fn handle_request(&self, data: &str) -> Result<String> {
-        let parts = data.split_ascii_whitespace().collect::<Box<[&str]>>();
-        match parts.as_ref() {
-            ["FN", fn_name, args @ ..] => exec_ebuild_fn(self.package, fn_name, args),
-            _ => Err(anyhow!("unknown ebuild IPC request: {data}")),
-        }
     }
 
     /// Creates environment variables for the given `package` and `hase` according to PMS 11.1.
@@ -147,10 +147,9 @@ impl<'a> EbuildPhaseHandler<'a> {
             "patsub_replacement",
             "+O",
             "globskipdots",
+            "-O",
+            "failglob",
         ];
-        if ebuild.eapi.enables_failglob() {
-            args.extend(vec!["-O", "failglob"]);
-        }
         args.extend_from_slice(&["-c", "./bin/ebuild.sh"]);
         args.into_iter().map(|arg| arg.to_owned()).collect()
     }

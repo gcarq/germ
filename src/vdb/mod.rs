@@ -70,7 +70,7 @@ impl Vdb {
                     Some(&caps["suffixes"]),
                     caps.name("revision").map(|m| m.as_str()),
                 )?;
-                let package = Package::new(&category, &caps["package"], version)?;
+                let package = Package::new(&category, &caps["package"], version, "gentoo")?;
                 packages.insert(package);
             }
         }

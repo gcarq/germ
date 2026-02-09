@@ -50,6 +50,8 @@ enum Command {
         #[arg(value_name = "atom")]
         atom: Atom,
     },
+    /// Sync the repositories
+    Sync,
 }
 
 fn main() -> Result<()> {
@@ -59,6 +61,7 @@ fn main() -> Result<()> {
     match args.command {
         Some(Command::Info { atom }) => info(&conf, atom)?,
         Some(Command::Install { atom }) => install(&conf, atom)?,
+        Some(Command::Sync) => sync(&conf)?,
         None => {}
     }
 
@@ -105,5 +108,13 @@ fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
         .with_context(|| format!("Unable to install package '{pkg}'"))?;
     handler.execute()?;
 
+    Ok(())
+}
+
+/// Syncs all repositories defined in the portage `conf`.
+fn sync(conf: &PortageConf) -> Result<()> {
+    for repo in conf.repos_conf.repositories() {
+        repo.sync()?;
+    }
     Ok(())
 }

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::mem::ManuallyDrop;
@@ -25,21 +26,21 @@ impl IpcHandler {
         }
     }
 
-    /// Sends the given `line` of text to the bash process.
-    /// The line should not include a newline character; one will be added automatically.
-    pub fn send(&mut self, line: &str) -> Result<()> {
+    /// Sends the given `Resp` of text to the bash process.
+    /// The data sent should not include a newline character; one will be added automatically.
+    pub fn send<Resp: fmt::Display>(&mut self, response: &Resp) -> Result<()> {
         let to_bash = match &mut self.writer {
             Some(writer) => writer,
             None => return Err(anyhow!("bash writer is closed")),
         };
         to_bash
-            .write_all(line.as_bytes())
+            .write_all(response.to_string().as_bytes())
             .and_then(|_| to_bash.write_all(b"\n"))
             .and_then(|_| to_bash.flush())
             .with_context(|| "failed to write to bash")
     }
 
-    /// Receives a line of text from the child process.
+    /// Receives a line of text from the child process without the ending newline.
     /// Returns `Ok(None)` if EOF is reached.
     pub fn recv(&mut self) -> Result<Option<String>> {
         let mut buf = String::new();

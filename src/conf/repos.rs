@@ -3,7 +3,7 @@ use crate::utils;
 use anyhow::{Context, Result, anyhow};
 use ini::Ini;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::{fmt, fs, iter};
 
 /// Holds all repository configuration that usually resides in /etc/portage/repos.conf.
@@ -18,7 +18,6 @@ use std::{fmt, fs, iter};
 ///
 ///
 ///
-#[derive(Debug)]
 pub struct ReposConf {
     main_repo_name: String,
     repos: HashMap<String, Repository>,
@@ -40,7 +39,7 @@ impl ReposConf {
         })
     }
 
-    /// Returns the repository with the given name, if it exists.
+    /// Returns the repository with the given `name` if it exists.
     pub fn get(&self, name: &str) -> Option<&Repository> {
         self.repos.get(name)
     }
@@ -55,7 +54,7 @@ impl ReposConf {
         self.repos.iter()
     }
 
-    /// Returns an iterator over all repositories, with the main repository first.
+    /// Returns an `Iterator` over all repositories, with the main repository first.
     pub fn repositories(&self) -> impl Iterator<Item = &Repository> {
         iter::once(self.main_repo()).chain(self.repos.iter().filter_map(|(name, repo)| {
             if name != &self.main_repo_name {
@@ -94,16 +93,15 @@ impl ReposConf {
             .get("main-repo")
             .ok_or_else(|| anyhow!("DEFAULT section missing main-repo property"))?;
 
-        conf.section(Some(name))
-            .ok_or_else(|| anyhow!("missing the section for '{name}'"))?
-            .get("location")
-            .map(PathBuf::from)
-            .ok_or_else(|| anyhow!("missing location property for repo '{name}'"))
-            .and_then(Repository::build_main_repo_from_path)
+        let properties = conf
+            .section(Some(name))
+            .ok_or_else(|| anyhow!("missing the section for '{name}'"))?;
+        Repository::build_main_repository(properties)
+            .with_context(|| anyhow!("failed to build main repo '{name}'"))
     }
 
     /// Collects all overlay repositories from the given repo `conf`,
-    /// excluding the main repository.
+    /// excluding the main repository specified by `main_repo`.
     fn collect_overlays(conf: &Ini, main_repo: &Repository) -> Result<HashMap<String, Repository>> {
         let mut repos = HashMap::new();
         for (section, properties) in conf.iter() {
@@ -114,11 +112,7 @@ impl ReposConf {
                             "TODO: Repository {name} specifies masters, which is not supported yet"
                         ));
                     }
-                    let path = properties
-                        .get("location")
-                        .map(PathBuf::from)
-                        .ok_or_else(|| anyhow!("missing location property for repo '{}'", name))?;
-                    let repo = Repository::build_overlay_from_path(path, main_repo)
+                    let repo = Repository::build_overlay(properties, main_repo)
                         .with_context(|| anyhow!("failed to build overlay '{name}'"))?;
                     repos.insert(repo.name.clone(), repo);
                 }
@@ -129,10 +123,20 @@ impl ReposConf {
     }
 }
 
+/// This default implementation should only be used for testing.
+impl Default for ReposConf {
+    fn default() -> Self {
+        Self {
+            main_repo_name: "gentoo".to_string(),
+            repos: HashMap::new(),
+        }
+    }
+}
+
 impl fmt::Display for ReposConf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (name, repo) in &self.repos {
-            writeln!(f, "{}\n    location: {}\n", name, repo.path.display())?;
+            writeln!(f, "{}\n    location: {}\n", name, repo.location.display())?;
         }
         Ok(())
     }

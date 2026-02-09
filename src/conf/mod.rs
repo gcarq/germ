@@ -13,7 +13,6 @@ use manager::MaskManager;
 use std::path::Path;
 
 /// Holds the portage configuration that usually resides in /etc/portage.
-#[derive(Debug)]
 pub struct PortageConf {
     pub make_env: MakeEnv,
     pub repos_conf: ReposConf,
@@ -88,7 +87,7 @@ impl PortageConf {
     fn validate_profile(path: &Path, arch: &str, repos: &[&Repository]) -> Result<()> {
         let profile_path = path.canonicalize()?.display().to_string();
         for repo in repos {
-            let profile_prefix = format!("{}/profiles/", repo.path.canonicalize()?.display());
+            let profile_prefix = format!("{}/profiles/", repo.location.canonicalize()?.display());
             if let Some(p) = profile_path.strip_prefix(&profile_prefix)
                 && repo.is_known_profile(arch, p)
             {

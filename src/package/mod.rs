@@ -21,12 +21,18 @@ pub struct Package {
     pub name: String,
     pub version: PackageVersion,
     pub ebuild: Option<Ebuild>,
+    pub repository: String,
 }
 
 impl Package {
     /// Creates a new [`Package`] from the given `category`, `name`, and `version`.
     /// Returns `Err` if `category` or `name` are invalid according to PMS 3.1.1 and 3.1.2.
-    pub fn new(category: &str, name: &str, version: PackageVersion) -> Result<Self> {
+    pub fn new(
+        category: &str,
+        name: &str,
+        version: PackageVersion,
+        repository: &str,
+    ) -> Result<Self> {
         if !CATEGORY_RE.is_match(category) {
             return Err(anyhow!("invalid category name: '{category}'"));
         }
@@ -38,6 +44,7 @@ impl Package {
             name: name.to_owned(),
             version,
             ebuild: None,
+            repository: repository.to_owned(),
         })
     }
 
@@ -118,6 +125,7 @@ mod tests {
             "app-editors",
             "vim",
             PackageVersion::new("1.0.0", None, None).unwrap(),
+            "gentoo",
         );
         assert!(package.is_ok());
     }
@@ -128,6 +136,7 @@ mod tests {
             "app-editors",
             "memtest86-",
             PackageVersion::new("1.0.0", None, None).unwrap(),
+            "gentoo",
         );
         assert!(package.is_err());
     }
@@ -138,6 +147,7 @@ mod tests {
             "app-editors",
             "vim",
             PackageVersion::new("7.0.174", None, Some("1")).unwrap(),
+            "gentoo",
         )
         .unwrap();
         assert_eq!(package.to_string(), "app-editors/vim-7.0.174-r1");

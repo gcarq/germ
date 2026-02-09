@@ -1,3 +1,4 @@
+use crate::ebuild::handler::prot::Response;
 use crate::package::Package;
 use crate::package::version::PackageVersion;
 use anyhow::{Result, anyhow};
@@ -10,7 +11,7 @@ use std::cmp::Ordering;
 /// The `range` specifies which components to extract from the version.
 /// If `version` is `None`, the package's PV is used.
 /// Returns `Err` if the EAPI does not support `ver_cut`.
-pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<String> {
+pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<Response> {
     // Use PV as fallback if
     let version = match version {
         Some(v) => v,
@@ -25,7 +26,7 @@ pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<Stri
     }
     let end = end * 2;
     if start >= end {
-        return Ok(String::new());
+        return Ok(Response::Ok(Some(String::new())));
     }
     let flat_components = parts
         .into_iter()
@@ -33,7 +34,7 @@ pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<Stri
         .skip(start)
         .take(end - start)
         .collect::<String>();
-    Ok(flat_components)
+    Ok(Response::Ok(Some(flat_components)))
 }
 
 /// Implements the `ver_rs` function for ebuilds that replaces separators for the given ranges,
@@ -43,7 +44,7 @@ pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<Stri
 /// If the len of `args` is odd, the last element is treated as the version string,
 /// otherwise the package's PV is used.
 /// Returns the modified version string or an `Err` if parsing fails.
-pub fn ver_rs(pkg: &Package, args: &[&str]) -> Result<String> {
+pub fn ver_rs(pkg: &Package, args: &[&str]) -> Result<Response> {
     if args.len() < 2 {
         return Err(anyhow!("ver_rs requires at least two arguments"));
     }
@@ -79,10 +80,11 @@ pub fn ver_rs(pkg: &Package, args: &[&str]) -> Result<String> {
             *sep = (*repl).to_owned();
         }
     }
-    Ok(parts
+    let result = parts
         .into_iter()
         .map(|(sep, comp)| format!("{sep}{comp}"))
-        .collect())
+        .collect();
+    Ok(Response::Ok(Some(result)))
 }
 
 /// Implements the `ver_test` function for ebuilds that checks if the relation
@@ -93,22 +95,28 @@ pub fn ver_rs(pkg: &Package, args: &[&str]) -> Result<String> {
 /// The operator `op` must be one of: `"-gt"`, `"-ge"`, `"-eq"`, `"-ne"`, `"-le"` or `"-lt"`.
 /// Returns `Ok(true)` if the comparison holds, `Ok(false)` otherwise.
 ///
-pub fn ver_test(pkg: &Package, version1: Option<&str>, op: &str, version2: &str) -> Result<bool> {
+pub fn ver_test(
+    pkg: &Package,
+    version1: Option<&str>,
+    op: &str,
+    version2: &str,
+) -> Result<Response> {
     let v1 = match version1 {
         Some(v) => &PackageVersion::try_from(v)?,
         None => &pkg.version,
     };
     let v2 = &PackageVersion::try_from(version2)?;
 
-    match op {
-        "-gt" => Ok(v1.cmp(v2) == Ordering::Greater),
-        "-ge" => Ok(v1.cmp(v2) != Ordering::Less),
-        "-eq" => Ok(v1.cmp(v2) == Ordering::Equal),
-        "-ne" => Ok(v1.cmp(v2) != Ordering::Equal),
-        "-le" => Ok(v1.cmp(v2) != Ordering::Greater),
-        "-lt" => Ok(v1.cmp(v2) == Ordering::Less),
-        _ => Err(anyhow!("invalid operator: '{op}'")),
-    }
+    let does_match = match op {
+        "-gt" => v1.cmp(v2) == Ordering::Greater,
+        "-ge" => v1.cmp(v2) != Ordering::Less,
+        "-eq" => v1.cmp(v2) == Ordering::Equal,
+        "-ne" => v1.cmp(v2) != Ordering::Equal,
+        "-le" => v1.cmp(v2) != Ordering::Greater,
+        "-lt" => v1.cmp(v2) == Ordering::Less,
+        _ => Err(anyhow!("invalid operator: '{op}'"))?,
+    };
+    Ok(Response::from_bool(does_match))
 }
 
 /// Splits the given `version` into its components,
@@ -212,14 +220,16 @@ mod tests {
             "app-editors",
             "vim",
             PackageVersion::new("1.2.3b", Some("alpha4"), None).unwrap(),
+            "gentoo",
         )
         .unwrap();
         for (range, version, expected) in test_cases {
+            let response = Response::Ok(Some(expected.to_owned()));
             assert_eq!(
                 ver_cut(&pkg, range, version).unwrap_or_else(|_| panic!(
                     "Failed for input range: {range}, version: {version:?}"
                 )),
-                expected,
+                response,
                 "Failed for input range: {range}, version: {version:?}",
             );
         }
@@ -231,6 +241,7 @@ mod tests {
             "app-editors",
             "vim",
             PackageVersion::new("1.2.3b", Some("alpha4"), None).unwrap(),
+            "gentoo",
         )
         .unwrap();
         let test_cases = ["-2", "3-2", "foo", "2-bar"];
@@ -269,12 +280,14 @@ mod tests {
             "app-editors",
             "vim",
             PackageVersion::new("1.2", Some("alpha4"), None).unwrap(),
+            "gentoo",
         )
         .unwrap();
         for (args, expected) in test_cases {
+            let response = Response::Ok(Some(expected.to_owned()));
             assert_eq!(
                 ver_rs(&pkg, &args).unwrap_or_else(|_| panic!("Failed for input args: {args:?}")),
-                expected,
+                response,
                 "Failed for input args: {args:?}"
             );
         }
@@ -286,6 +299,7 @@ mod tests {
             "app-editors",
             "vim",
             PackageVersion::new("1.2b", Some("alpha4"), None).unwrap(),
+            "gentoo",
         )
         .unwrap();
         let test_cases = [vec![], vec!["1"], vec!["foo", "-"]];
@@ -397,14 +411,16 @@ mod tests {
             "sys-apps",
             "coreutils",
             PackageVersion::new("1.0", None, None).unwrap(),
+            "gentoo",
         )
         .unwrap();
         for (version1, op, version2, expected) in test_cases {
+            let response = Response::from_bool(expected);
             assert_eq!(
                 ver_test(&pkg, version1, op, version2).unwrap_or_else(|_| panic!(
                     "Failed for input version1: {version1:?}, op: {op}, version2: {version2}"
                 )),
-                expected,
+                response,
                 "Failed for input version1: {version1:?}, op: {op}, version2: {version2}"
             );
         }
@@ -416,6 +432,7 @@ mod tests {
             "sys-apps",
             "coreutils",
             PackageVersion::new("1.0", None, None).unwrap(),
+            "gentoo",
         )
         .unwrap();
         let test_cases = [

@@ -159,7 +159,7 @@ impl Profile {
                     let repo = repos.get(name).ok_or_else(|| {
                         anyhow!("Referenced Repository {name} not found for profile {profile}")
                     })?;
-                    repo.path.join("profiles").join(path)
+                    repo.location.join("profiles").join(path)
                 }
                 None => path.join(profile),
             };

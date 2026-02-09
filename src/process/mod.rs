@@ -108,7 +108,7 @@ mod tests {
         let env: HashMap<String, String> =
             HashMap::from_iter([("TEST_VARIABLE".into(), "42".into())]);
         let mut proc = Process::new(&args, &env).unwrap();
-        proc.ipc.send("sync").unwrap();
+        proc.ipc.send(&String::from("sync")).unwrap();
         let resp = proc.ipc.recv().unwrap();
         assert_eq!(resp, Some("sync".to_owned()), "expected echoed line");
         let resp = proc.ipc.recv().unwrap();

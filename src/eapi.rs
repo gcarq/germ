@@ -42,24 +42,12 @@ impl Eapi {
         Ok(version.to_owned())
     }
 
-    /// Returns true if the EAPI enables the `failglob` shell option in global scope.
-    pub fn enables_failglob(&self) -> bool {
-        matches!(self.version.as_str(), "6" | "7" | "8" | "9")
+    pub fn is_hasv_supported(&self) -> bool {
+        self.version == "7"
     }
 
-    /// Returns true if the EAPI supports `ver_cut` functionality.
-    pub fn has_ver_cut(&self) -> bool {
-        matches!(self.version.as_str(), "7" | "8" | "9")
-    }
-
-    /// Returns true if the EAPI supports `ver_rs` functionality.
-    pub fn has_ver_rs(&self) -> bool {
-        matches!(self.version.as_str(), "7" | "8" | "9")
-    }
-
-    /// Returns true if the EAPI supports `ver_test` functionality.
-    pub fn has_ver_test(&self) -> bool {
-        matches!(self.version.as_str(), "7" | "8" | "9")
+    pub fn is_hasq_supported(&self) -> bool {
+        self.version == "7"
     }
 }
 
@@ -115,27 +103,6 @@ mod tests {
             let eapi = Eapi::new(version).unwrap();
             let bash_version = eapi.supported_bash_version().unwrap();
             assert_eq!(bash_version, exp_bash_version);
-        }
-    }
-
-    #[test]
-    fn test_eapi_enables_failglob() {
-        let test_cases = vec![
-            ("0", false),
-            ("1", false),
-            ("2", false),
-            ("3", false),
-            ("4", false),
-            ("5", false),
-            ("6", true),
-            ("7", true),
-            ("8", true),
-            ("9", true),
-        ];
-        for (version, exp_enables) in test_cases {
-            let eapi = Eapi::new(version).unwrap();
-            let enables = eapi.enables_failglob();
-            assert_eq!(enables, exp_enables);
         }
     }
 }
