@@ -35,6 +35,7 @@ lazy_static! {
 pub struct Repository {
     pub location: PathBuf,
     pub name: String,
+    pub priority: isize,
     pub eapi: Eapi,
     pub categories: Vec<String>,
     pub packages: HashSet<Package>,
@@ -52,10 +53,8 @@ impl Repository {
     pub fn build_main_repository(properties: &ini::Properties) -> Result<Self> {
         let location = Self::parse_location(properties)?;
         Self::validate_repository(&location)?;
-
         let categories = Self::collect_categories(&location)?;
-        let sync_handler = build_sync_handler(properties)?;
-        Self::new(location, categories, sync_handler)
+        Self::new(location, categories, properties)
     }
 
     /// Builds an overlay repository from the given INI `properties` coming from `repos.conf`
@@ -67,8 +66,7 @@ impl Repository {
             .into_iter()
             .chain(main_repo.categories.iter().cloned())
             .collect::<Vec<_>>();
-        let sync_handler = build_sync_handler(properties)?;
-        Self::new(location, categories, sync_handler)
+        Self::new(location, categories, properties)
     }
 
     /// Synchronizes the repository using its [`SyncHandler`].
@@ -107,11 +105,11 @@ impl Repository {
             .ok_or_else(|| anyhow!("missing location property"))
     }
 
-    /// Builds a new [`Repository`] with the given `location` and `categories`.
+    /// Builds a new [`Repository`] with the given `location` and INI `properties`.
     fn new(
         location: PathBuf,
         categories: Vec<String>,
-        sync_handler: Option<Box<dyn SyncHandler>>,
+        properties: &ini::Properties,
     ) -> Result<Self> {
         let eapi = Self::read_eapi(&location)?;
         let profiles = location.join("profiles");
@@ -139,11 +137,17 @@ impl Repository {
                 .into_iter()
                 .map(|line| ProfileDescription::from_line(&line))
                 .collect::<Result<_>>()?,
+            sync_handler: build_sync_handler(properties)?,
+            priority: properties
+                .get("priority")
+                .map(|s| s.parse::<isize>())
+                .transpose()
+                .with_context(|| "invalid priority value")?
+                .unwrap_or(0),
             name,
             location,
             eapi,
             categories,
-            sync_handler,
         };
         Ok(repository)
     }
