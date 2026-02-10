@@ -1,10 +1,10 @@
 mod deprecation;
 
-use crate::conf::repos::ReposConf;
 use crate::eapi::Eapi;
 use crate::linefile::LineBasedFile;
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
+use crate::repository::manager::RepoManager;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use std::fs;
@@ -44,9 +44,9 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Builds a profile from the given `path` and all available repositories from `repos`.
+    /// Builds a profile from the given `path` and all available repositories from `repo_manager`.
     /// An error is returned if the `path` doesn't exist or the profile directory is invalid.
-    pub fn new(path: &Path, repos: &ReposConf) -> Result<Self> {
+    pub fn new(path: &Path, repo_manager: &RepoManager) -> Result<Self> {
         let eapi = Self::read_eapi(&path.join("eapi"))?;
 
         // TODO: remove debug print
@@ -121,7 +121,7 @@ impl Profile {
             )?,
             eapi,
         };
-        for parent in Self::resolve_parents(path, repos)? {
+        for parent in Self::resolve_parents(path, repo_manager)? {
             profile.inherit_from(&parent);
         }
 
@@ -135,8 +135,9 @@ impl Profile {
     }
 
     /// Takes a `path` to a profile directory and resolves all profiles listed in the parent file.
+    /// Also takes a `repo_manager` to resolve profiles that reference a specific repository.
     /// Parents are returned in the order they are listed or an empty vec if there are none.
-    fn resolve_parents(path: &Path, repos: &ReposConf) -> Result<Vec<Self>> {
+    fn resolve_parents(path: &Path, repo_manager: &RepoManager) -> Result<Vec<Self>> {
         let parent = path.join("parent");
         if !parent.exists() {
             return Ok(Vec::new());
@@ -156,14 +157,14 @@ impl Profile {
             // see https://bugs.gentoo.org/515666
             let path = match profile.split_once(':') {
                 Some((repo_name, profile_path)) => {
-                    let repo = repos.get(repo_name).ok_or_else(|| {
+                    let repo = repo_manager.get(repo_name).ok_or_else(|| {
                         anyhow!("Repository '{repo_name}' not found for profile '{profile}'")
                     })?;
                     repo.location.join("profiles").join(profile_path)
                 }
                 None => path.join(profile),
             };
-            profiles.push(Profile::new(&path, repos)?);
+            profiles.push(Profile::new(&path, repo_manager)?);
         }
         Ok(profiles)
     }

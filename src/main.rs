@@ -90,7 +90,7 @@ fn main() -> Result<()> {
 
 /// Prints information about the current portage `conf`.
 fn info(conf: &PortageConf, atom: Option<Atom>) -> Result<()> {
-    println!("Repositories:\n\n{}", conf.repos_conf);
+    println!("Repositories:\n\n{}", conf.repo_manager);
     let mut make_env = conf.make_env.iter().collect::<Vec<(&String, &EnvValue)>>();
     make_env.sort_by_key(|(name, _)| *name);
     for (key, value) in make_env {
@@ -114,7 +114,7 @@ fn info(conf: &PortageConf, atom: Option<Atom>) -> Result<()> {
 /// TODO: this is just a placeholder for now.
 fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
     let pkg = conf
-        .repos_conf
+        .repo_manager
         .repositories()
         .filter_map(|repo| repo.find_packages(&atom).first().map(|p| (*p).clone()))
         .next();
@@ -123,7 +123,7 @@ fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
         Some(pkg) => pkg,
         None => return Err(anyhow!("No matching package found for atom '{atom}'")),
     };
-    let ebuild = conf.repos_conf.resolve_ebuild(&pkg)?;
+    let ebuild = conf.repo_manager.resolve_ebuild(&pkg)?;
 
     let mut handler = EbuildPhaseHandler::new(&ebuild, conf, EbuildPhase::Depend)
         .with_context(|| format!("Unable to install package '{pkg}' using {ebuild}"))?;
@@ -134,7 +134,7 @@ fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
 
 /// Syncs all repositories defined in the portage `conf`.
 fn sync(conf: &PortageConf) -> Result<()> {
-    for repo in conf.repos_conf.repositories() {
+    for repo in conf.repo_manager.repositories() {
         repo.sync()?;
     }
     Ok(())

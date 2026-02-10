@@ -2,13 +2,13 @@ mod functions;
 mod prot;
 
 use crate::conf::PortageConf;
-use crate::conf::repos::ReposConf;
 use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
 use crate::ebuild::Ebuild;
 use crate::ebuild::handler::functions::handle_request;
 use crate::ebuild::handler::prot::Request;
 use crate::makenv::MakeEnv;
 use crate::process::Process;
+use crate::repository::manager::RepoManager;
 use anyhow::{Context, Result, anyhow};
 use nix::sys::wait::WaitStatus;
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ impl EbuildPhase {
 /// Manages the execution of an ebuild phase.
 pub struct EbuildPhaseHandler<'a> {
     ebuild: &'a Ebuild<'a>,
-    repos: &'a ReposConf,
+    repo_manager: &'a RepoManager,
     phase: EbuildPhase,
     args: Vec<String>,
     env: HashMap<String, String>,
@@ -38,10 +38,10 @@ impl<'a> EbuildPhaseHandler<'a> {
     /// Create a new ebuild phase handler for the given `ebuild` and `phase`.
     pub fn new(ebuild: &'a Ebuild, conf: &'a PortageConf, phase: EbuildPhase) -> Result<Self> {
         let args = Self::build_args();
-        let env = Self::create_ebuild_env(ebuild, &conf.make_env, &phase)?;
+        let env = Self::extend_env(ebuild, &conf.make_env, &phase)?;
 
         Ok(Self {
-            repos: &conf.repos_conf,
+            repo_manager: &conf.repo_manager,
             ebuild,
             phase,
             args,
@@ -74,7 +74,7 @@ impl<'a> EbuildPhaseHandler<'a> {
 
                 let data = data.iter().map(|s| s.as_str()).collect::<Vec<_>>();
                 let request = Request::new(&data)?;
-                let response = handle_request(self.ebuild, self.repos, &request)?;
+                let response = handle_request(self.ebuild, self.repo_manager, &request)?;
                 process.ipc.send(&response)?;
             }
         }
@@ -84,7 +84,7 @@ impl<'a> EbuildPhaseHandler<'a> {
 
     /// Extends given environment variables `env` for the given `ebuild` and `phase`
     /// according to PMS 11.1.
-    fn create_ebuild_env(
+    fn extend_env(
         ebuild: &Ebuild,
         env: &MakeEnv,
         phase: &EbuildPhase,

@@ -1,47 +1,45 @@
 mod manager;
-pub mod repos;
 
-use crate::conf::repos::ReposConf;
 use crate::consts::DEFAULT_PORTAGE_CONF_PATH;
 use crate::linefile::LineBasedFile;
 use crate::makenv::MakeEnv;
 use crate::profile::Profile;
 use crate::repository::Repository;
+use crate::repository::manager::RepoManager;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use manager::MaskManager;
 use std::path::Path;
 
-/// Holds the portage configuration that usually resides in /etc/portage.
+/// Holds the portage configuration that usually resides in `/etc/portage`.
 pub struct PortageConf {
     pub make_env: MakeEnv,
-    pub repos_conf: ReposConf,
+    pub repo_manager: RepoManager,
     profile: Profile,
     pub mask_manager: MaskManager,
 }
 
 impl PortageConf {
-    /// Builds a [`PortageConf`] from the given portage configuration path.
+    /// Builds a [`PortageConf`] from the given portage configuration `path`.
     pub fn new(path: &Path) -> Result<Self> {
-        let repos_conf = ReposConf::new(&path.join("repos.conf"))
+        let repo_manager = RepoManager::new(&path.join("repos.conf"))
             .with_context(|| "Unable to process repos.conf")?;
 
         let profile_path = path.join("make.profile");
-        let profile = Profile::new(&profile_path, &repos_conf)
+        let profile = Profile::new(&profile_path, &repo_manager)
             .with_context(|| "Unable to build profile from make.profile")?;
 
         let make_env = Self::init_make_env(path, &profile)?;
 
-        let repos = repos_conf.repositories().collect::<Vec<_>>();
         let arch = make_env
             .get("ARCH")
             .with_context(|| "Missing ARCH variable")?
             .to_string();
-        Self::validate_arch(&arch, &repos)?;
-        Self::validate_profile(&profile_path, &arch, &repos)?;
+        Self::validate_arch(&arch, &mut repo_manager.repositories())?;
+        Self::validate_profile(&profile_path, &arch, &mut repo_manager.repositories())?;
 
         let mask_manager = MaskManager::new(
-            &repos,
+            &mut repo_manager.repositories(),
             &profile,
             LineBasedFile::from_path(&path.join("package.mask"), true, true)?,
             LineBasedFile::from_path(&path.join("package.unmask"), true, true)?,
@@ -50,7 +48,7 @@ impl PortageConf {
 
         Ok(PortageConf {
             make_env,
-            repos_conf,
+            repo_manager,
             profile,
             mask_manager,
         })
@@ -73,9 +71,13 @@ impl PortageConf {
         Ok(make_env)
     }
 
-    /// Sanity check to ensure the given ARCH is supported by at least one repository.
-    fn validate_arch(arch: &str, repos: &[&Repository]) -> Result<()> {
-        match repos.iter().any(|repo| repo.arch_list.contains(arch)) {
+    /// Sanity check to ensure the given `ARCH` is supported by at least one repository
+    /// for the given `repos`.
+    fn validate_arch<'a>(
+        arch: &str,
+        repos: &mut impl Iterator<Item = &'a Repository>,
+    ) -> Result<()> {
+        match repos.any(|repo| repo.arch_list.contains(arch)) {
             true => Ok(()),
             false => Err(anyhow!(
                 "ARCH value '{arch}' is not supported by any configured repository"
@@ -83,9 +85,14 @@ impl PortageConf {
         }
     }
 
-    /// Sanity check to ensure the given profile is valid for at least one repository.
-    fn validate_profile(path: &Path, arch: &str, repos: &[&Repository]) -> Result<()> {
-        let profile_path = path.canonicalize()?.display().to_string();
+    /// Sanity check to ensure the profile at `location` is valid for at least one repository
+    /// for the given `ARCH` and `repos`.
+    fn validate_profile<'a>(
+        location: &Path,
+        arch: &str,
+        repos: &mut impl Iterator<Item = &'a Repository>,
+    ) -> Result<()> {
+        let profile_path = location.canonicalize()?.display().to_string();
         for repo in repos {
             let profile_prefix = format!("{}/profiles/", repo.location.canonicalize()?.display());
             if let Some(p) = profile_path.strip_prefix(&profile_prefix)

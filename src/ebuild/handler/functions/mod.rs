@@ -1,20 +1,24 @@
-use crate::conf::repos::ReposConf;
 use crate::ebuild::Ebuild;
 use crate::ebuild::handler::functions::version::{ver_cut, ver_rs, ver_test};
 use crate::ebuild::handler::prot::{FuncType, Request, Response};
 use crate::package::Package;
+use crate::repository::manager::RepoManager;
 use anyhow::{Result, anyhow};
 use std::process;
 
 mod version;
 
-/// Takes `ebuild` and `repos` and executes an ebuild function for the given `request`.
+/// Takes `ebuild` and `repo_manager` and executes an ebuild function for the given `request`.
 /// Returns a [`Response`] with the result of the function or an `Err` if the request is invalid or
 /// the function execution fails.
-pub fn handle_request(ebuild: &Ebuild, repos: &ReposConf, request: &Request) -> Result<Response> {
+pub fn handle_request(
+    ebuild: &Ebuild,
+    repo_manager: &RepoManager,
+    request: &Request,
+) -> Result<Response> {
     match request.func {
         FuncType::ResolveEclass => match request.args {
-            [name] => resolve_eclass(ebuild.pkg, repos, name),
+            [name] => resolve_eclass(ebuild.pkg, repo_manager, name),
             _ => Err(anyhow!(
                 "invalid arguments: __resolve_eclass <name>: {:?}",
                 request.args
@@ -113,12 +117,12 @@ fn die(args: &[&str], fatal: bool) -> Response {
 }
 
 /// Resolves the given eclass `name` and returns the path as string.
-fn resolve_eclass(pkg: &Package, repos: &ReposConf, name: &str) -> Result<Response> {
-    let eclass = match repos.get(&pkg.repo) {
+fn resolve_eclass(pkg: &Package, repo_manager: &RepoManager, name: &str) -> Result<Response> {
+    let eclass = match repo_manager.get(&pkg.repo) {
         Some(repo) => match repo.eclasses.get(name) {
             Some(eclass) => eclass,
             // If the eclass is not in the same repository, we check the main repository
-            None => match repos.main_repo().eclasses.get(name) {
+            None => match repo_manager.main_repo().eclasses.get(name) {
                 Some(eclass) => eclass,
                 None => Err(anyhow!("eclass '{name}' not found"))?,
             },
@@ -192,7 +196,7 @@ mod tests {
         for (data, response) in test_data {
             let request = Request::new(&data).unwrap();
             assert_eq!(
-                handle_request(&ebuild, &ReposConf::default(), &request).unwrap(),
+                handle_request(&ebuild, &RepoManager::default(), &request).unwrap(),
                 response
             )
         }

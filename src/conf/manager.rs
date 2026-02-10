@@ -21,8 +21,8 @@ impl MaskManager {
     /// 1. Repository
     /// 2. Profile
     /// 3. User defined
-    pub fn new(
-        repos: &[&Repository],
+    pub fn new<'a>(
+        repos: &mut impl Iterator<Item = &'a Repository>,
         profile: &Profile,
         user_mask: LineBasedFile,
         user_unmask: LineBasedFile,
@@ -82,7 +82,14 @@ mod tests {
     fn test_is_masked() {
         let mask_lines = LineBasedFile::from_iter(["dev-lang/rust", "app-editors/vim"]);
         let unmask_lines = LineBasedFile::from_iter(["=dev-lang/rust-1.50"]);
-        let manager = MaskManager::new(&[], &Profile::default(), mask_lines, unmask_lines).unwrap();
+        let repos = Vec::new();
+        let manager = MaskManager::new(
+            &mut repos.iter(),
+            &Profile::default(),
+            mask_lines,
+            unmask_lines,
+        )
+        .unwrap();
 
         let pkg1 = Package::new(
             "dev-lang",

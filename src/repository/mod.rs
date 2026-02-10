@@ -1,5 +1,6 @@
 mod desc;
 mod eclass;
+pub mod manager;
 mod sync;
 
 use crate::deps::Atom;
