@@ -1,4 +1,5 @@
 use crate::conf::repos::ReposConf;
+use crate::ebuild::Ebuild;
 use crate::ebuild::handler::functions::version::{ver_cut, ver_rs, ver_test};
 use crate::ebuild::handler::prot::{FuncType, Request, Response};
 use crate::package::Package;
@@ -7,13 +8,13 @@ use std::process;
 
 mod version;
 
-/// Takes a `pkg`, `repos`and executes a ebuild function for the given `request`.
-pub fn handle_request(pkg: &Package, repos: &ReposConf, request: &Request) -> Result<Response> {
-    // At this point the package should have a resolved ebuild
-    let eapi = &pkg.ebuild.as_ref().unwrap().eapi;
+/// Takes `ebuild` and `repos` and executes an ebuild function for the given `request`.
+/// Returns a [`Response`] with the result of the function or an `Err` if the request is invalid or
+/// the function execution fails.
+pub fn handle_request(ebuild: &Ebuild, repos: &ReposConf, request: &Request) -> Result<Response> {
     match request.func {
         FuncType::ResolveEclass => match request.args {
-            [name] => resolve_eclass(pkg, repos, name),
+            [name] => resolve_eclass(ebuild.pkg, repos, name),
             _ => Err(anyhow!(
                 "invalid arguments: __resolve_eclass <name>: {:?}",
                 request.args
@@ -40,7 +41,7 @@ pub fn handle_request(pkg: &Package, repos: &ReposConf, request: &Request) -> Re
                 request.args
             )),
         },
-        FuncType::HasV if eapi.is_hasv_supported() => match request.args {
+        FuncType::HasV if ebuild.eapi.is_hasv_supported() => match request.args {
             [word, args @ ..] => match args.contains(word) {
                 true => Ok(Response::Ok(Some(word.to_string()))),
                 false => Ok(Response::Err(None)),
@@ -50,7 +51,7 @@ pub fn handle_request(pkg: &Package, repos: &ReposConf, request: &Request) -> Re
                 request.args
             )),
         },
-        FuncType::HasQ if eapi.is_hasq_supported() => match request.args {
+        FuncType::HasQ if ebuild.eapi.is_hasq_supported() => match request.args {
             [word, args @ ..] => match args.contains(word) {
                 true => Ok(Response::Ok(None)),
                 false => Ok(Response::Err(None)),
@@ -61,25 +62,26 @@ pub fn handle_request(pkg: &Package, repos: &ReposConf, request: &Request) -> Re
             )),
         },
         FuncType::VerCut => match request.args {
-            [range] => ver_cut(pkg, range, None),
-            [range, version] => ver_cut(pkg, range, Some(version)),
+            [range] => ver_cut(ebuild.pkg, range, None),
+            [range, version] => ver_cut(ebuild.pkg, range, Some(version)),
             _ => Err(anyhow!(
                 "invalid arguments: ver_cut <range> [<version>]: {:?}",
                 request.args
             )),
         },
-        FuncType::VerRs => ver_rs(pkg, request.args),
+        FuncType::VerRs => ver_rs(ebuild.pkg, request.args),
         FuncType::VerTest => match request.args {
-            [op, v2] => ver_test(pkg, None, op, v2),
-            [v1, op, v2] => ver_test(pkg, Some(v1), op, v2),
+            [op, v2] => ver_test(ebuild.pkg, None, op, v2),
+            [v1, op, v2] => ver_test(ebuild.pkg, Some(v1), op, v2),
             _ => Err(anyhow!(
                 "invalid arguments: ver_test [<v1>] op <v2>: {:?}",
                 request.args
             )),
         },
         FuncType::HasV | FuncType::HasQ => Err(anyhow!(
-            "unsupported function '{}' for EAPI '{eapi}'",
+            "unsupported function '{}' for EAPI '{}'",
             request.func,
+            ebuild.eapi,
         )),
     }
 }
@@ -151,11 +153,13 @@ mod tests {
             PackageVersion::new("1.2.3b", Some("alpha4"), None).unwrap(),
             "gentoo",
         )
-        .unwrap()
-        .with_ebuild(Ebuild {
+        .unwrap();
+
+        let ebuild = Ebuild {
             path: PathBuf::default(),
             eapi: Eapi::new("8").unwrap(),
-        });
+            pkg: &pkg,
+        };
 
         // (request data, expected response)
         let test_data = [
@@ -188,7 +192,7 @@ mod tests {
         for (data, response) in test_data {
             let request = Request::new(&data).unwrap();
             assert_eq!(
-                handle_request(&pkg, &ReposConf::default(), &request).unwrap(),
+                handle_request(&ebuild, &ReposConf::default(), &request).unwrap(),
                 response
             )
         }

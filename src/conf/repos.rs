@@ -1,3 +1,5 @@
+use crate::ebuild::Ebuild;
+use crate::package::Package;
 use crate::repository::Repository;
 use crate::utils;
 use anyhow::{Context, Result, anyhow};
@@ -60,6 +62,22 @@ impl ReposConf {
                 None
             }
         }))
+    }
+
+    /// Resolves the ebuild for the given `package` by searching through all repositories.
+    /// Returns Err if the package or repository doesn't exist, or if the ebuild cannot be
+    /// resolved for any reason.
+    pub fn resolve_ebuild<'a>(&self, package: &'a Package) -> Result<Ebuild<'a>> {
+        let repo = self
+            .get(&package.repo)
+            .ok_or_else(|| anyhow!("repository {} doesn't exist", package.name))?;
+
+        if !repo.packages.contains(package) {
+            return Err(anyhow!("unable to find {package} in {repo}"));
+        }
+
+        repo.resolve_ebuild(package)
+            .with_context(|| anyhow!("unable to resolve ebuild for {package}"))
     }
 
     /// Loads the repos.conf configuration from the given `location`.

@@ -1,6 +1,5 @@
 pub mod version;
 
-use crate::ebuild::Ebuild;
 use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY_RE, PACKAGE};
 use anyhow::{Result, anyhow};
@@ -20,7 +19,6 @@ pub struct Package {
     pub category: String,
     pub name: String,
     pub version: PackageVersion,
-    pub ebuild: Option<Ebuild>,
     pub repo: String,
 }
 
@@ -38,14 +36,8 @@ impl Package {
             category: category.to_owned(),
             name: name.to_owned(),
             version,
-            ebuild: None,
             repo: repo.to_owned(),
         })
-    }
-
-    pub fn with_ebuild(mut self, ebuild: Ebuild) -> Self {
-        self.ebuild = Some(ebuild);
-        self
     }
 
     /// Returns the qualified name of the package in the format `category/name`

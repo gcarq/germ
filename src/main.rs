@@ -123,9 +123,10 @@ fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
         Some(pkg) => pkg,
         None => return Err(anyhow!("No matching package found for atom '{atom}'")),
     };
+    let ebuild = conf.repos_conf.resolve_ebuild(&pkg)?;
 
-    let mut handler = EbuildPhaseHandler::new(&pkg, conf, EbuildPhase::Depend)
-        .with_context(|| format!("Unable to install package '{pkg}'"))?;
+    let mut handler = EbuildPhaseHandler::new(&ebuild, conf, EbuildPhase::Depend)
+        .with_context(|| format!("Unable to install package '{pkg}' using {ebuild}"))?;
     handler.execute()?;
 
     Ok(())

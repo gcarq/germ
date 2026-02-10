@@ -8,7 +8,6 @@ use crate::ebuild::Ebuild;
 use crate::ebuild::handler::functions::handle_request;
 use crate::ebuild::handler::prot::Request;
 use crate::makenv::MakeEnv;
-use crate::package::Package;
 use crate::process::Process;
 use anyhow::{Context, Result, anyhow};
 use nix::sys::wait::WaitStatus;
@@ -28,7 +27,7 @@ impl EbuildPhase {
 
 /// Manages the execution of an ebuild phase.
 pub struct EbuildPhaseHandler<'a> {
-    package: &'a Package,
+    ebuild: &'a Ebuild<'a>,
     repos: &'a ReposConf,
     phase: EbuildPhase,
     args: Vec<String>,
@@ -36,18 +35,14 @@ pub struct EbuildPhaseHandler<'a> {
 }
 
 impl<'a> EbuildPhaseHandler<'a> {
-    /// Create a new ebuild phase handler for the given `package` and `phase`.
-    pub fn new(package: &'a Package, conf: &'a PortageConf, phase: EbuildPhase) -> Result<Self> {
-        if package.ebuild.is_none() {
-            return Err(anyhow!("no ebuild found for package: {package}"));
-        }
-        // Safe to unwrap as we check for ebuild presence above
-        let args = Self::build_args(package.ebuild.as_ref().unwrap());
-        let env = Self::create_ebuild_env(package, &conf.make_env, &phase)?;
+    /// Create a new ebuild phase handler for the given `ebuild` and `phase`.
+    pub fn new(ebuild: &'a Ebuild, conf: &'a PortageConf, phase: EbuildPhase) -> Result<Self> {
+        let args = Self::build_args();
+        let env = Self::create_ebuild_env(ebuild, &conf.make_env, &phase)?;
 
         Ok(Self {
             repos: &conf.repos_conf,
-            package,
+            ebuild,
             phase,
             args,
             env,
@@ -79,7 +74,7 @@ impl<'a> EbuildPhaseHandler<'a> {
 
                 let data = data.iter().map(|s| s.as_str()).collect::<Vec<_>>();
                 let request = Request::new(&data)?;
-                let response = handle_request(self.package, self.repos, &request)?;
+                let response = handle_request(self.ebuild, self.repos, &request)?;
                 process.ipc.send(&response)?;
             }
         }
@@ -87,15 +82,13 @@ impl<'a> EbuildPhaseHandler<'a> {
         Ok(())
     }
 
-    /// Creates environment variables for the given `package` and `hase` according to PMS 11.1.
-    /// The caller must ensure the `package` has an associated ebuild set.
+    /// Extends given environment variables `env` for the given `ebuild` and `phase`
+    /// according to PMS 11.1.
     fn create_ebuild_env(
-        package: &Package,
+        ebuild: &Ebuild,
         env: &MakeEnv,
         phase: &EbuildPhase,
     ) -> Result<HashMap<String, String>> {
-        // Safe to unwrap as we check for ebuild presence in `new()`
-        let ebuild = package.ebuild.as_ref().unwrap();
         let env = env
             .iter()
             .map(|(k, v)| (k.clone(), v.to_string()))
@@ -109,13 +102,13 @@ impl<'a> EbuildPhaseHandler<'a> {
                 ("BASH_ENV".to_owned(), "/dev/null".to_owned()),
                 ("EBUILD_PHASE".to_owned(), phase.as_str().to_owned()),
                 // Ebuild variables
-                ("P".to_owned(), package.p()),
-                ("PF".to_owned(), package.pf()),
-                ("PN".to_owned(), package.pn()),
-                ("CATEGORY".to_owned(), package.category()),
-                ("PV".to_owned(), package.pv()),
-                ("PR".to_owned(), package.pr()),
-                ("PVR".to_owned(), package.pvr()),
+                ("P".to_owned(), ebuild.pkg.p()),
+                ("PF".to_owned(), ebuild.pkg.pf()),
+                ("PN".to_owned(), ebuild.pkg.pn()),
+                ("CATEGORY".to_owned(), ebuild.pkg.category()),
+                ("PV".to_owned(), ebuild.pkg.pv()),
+                ("PR".to_owned(), ebuild.pkg.pr()),
+                ("PVR".to_owned(), ebuild.pkg.pvr()),
                 (
                     "EBUILD".to_owned(),
                     ebuild.path.to_str().unwrap().to_owned(),
@@ -125,10 +118,10 @@ impl<'a> EbuildPhaseHandler<'a> {
         Ok(env)
     }
 
-    /// Builds the list of `args` to be passed to bash for the ebuild process.
+    /// Builds the list of args to be passed to bash for the ebuild process.
     /// Also sets shell options depending on the EAPI.
     /// See <https://www.gnu.org/software/bash/manual/html_node/The-Shopt-Builtin.html>
-    fn build_args(ebuild: &Ebuild) -> Vec<String> {
+    fn build_args() -> Vec<String> {
         // The "patsub_replacement" and "globskipdots" options were introduced
         // by bash-5.2. Both are default-enabled and change the behavior of
         // bash in a manner that is backwards-incompatible. Setting BASH_COMPAT

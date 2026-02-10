@@ -1,7 +1,9 @@
 use crate::eapi::Eapi;
+use crate::package::Package;
 use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -17,15 +19,16 @@ lazy_static! {
 
 /// Represents an ebuild defined in PMS 6 and 7
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Ebuild {
+pub struct Ebuild<'a> {
     pub path: PathBuf,
     pub eapi: Eapi,
+    pub pkg: &'a Package,
 }
 
-impl Ebuild {
-    /// Creates an `Ebuild` instance from the given `path`.
+impl<'a> Ebuild<'a> {
+    /// Creates an [`Ebuild`] from the given `path` and `pkg` it relates to.
     /// Returns an `Err` if the EAPI is not found or unsupported for ebuilds.
-    pub fn from_path(path: PathBuf) -> Result<Self> {
+    pub fn new(path: PathBuf, pkg: &'a Package) -> Result<Self> {
         let reader = BufReader::with_capacity(256, File::open(&path)?);
         for line in reader.lines() {
             let line = line?;
@@ -37,9 +40,15 @@ impl Ebuild {
                         eapi.version
                     ));
                 }
-                return Ok(Self { eapi, path });
+                return Ok(Self { eapi, path, pkg });
             }
         }
         Err(anyhow!("EAPI not found in ebuild: {}", path.display()))
+    }
+}
+
+impl fmt::Display for Ebuild<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.path.display())
     }
 }

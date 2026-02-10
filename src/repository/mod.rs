@@ -18,8 +18,8 @@ use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{fmt, fs};
 
 lazy_static! {
     /// Regex to validate repository names.
@@ -86,6 +86,17 @@ impl Repository {
             .iter()
             .filter(|pkg| atom.matches(pkg))
             .collect()
+    }
+
+    /// Resolves the [`Ebuild`] for the given `package`.
+    /// Returns Err if the ebuild file doesn't exist or is invalid.
+    pub fn resolve_ebuild<'a>(&self, package: &'a Package) -> Result<Ebuild<'a>> {
+        let path = self
+            .location
+            .join(&package.category)
+            .join(&package.name)
+            .join(format!("{}-{}.ebuild", package.name, package.version));
+        Ebuild::new(path, package)
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
@@ -269,14 +280,18 @@ impl Repository {
                         Some(&caps["suffixes"]),
                         caps.name("revision").map(|m| m.as_str()),
                     )?;
-                    let ebuild = Ebuild::from_path(file_path)?;
-                    let pkg =
-                        Package::new(category, pkg_name, version, repo_name)?.with_ebuild(ebuild);
+                    let pkg = Package::new(category, pkg_name, version, repo_name)?;
                     packages.push(pkg);
                 }
             }
         }
         Ok(packages)
+    }
+}
+
+impl fmt::Display for Repository {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
     }
 }
 
