@@ -5,7 +5,8 @@ use std::{fmt, hash};
 
 const SUFFIX_PREFIXES: [&str; 5] = ["alpha", "beta", "pre", "rc", "p"];
 
-/// Holds a list of version suffixes for a package version.
+/// Holds a list of [`VersionSuffix`] for a package version.
+/// For example, `"_rc1_p20"`.
 #[derive(Default, Clone, Eq, Debug)]
 pub struct VersionSuffixes(Vec<VersionSuffix>);
 
@@ -88,7 +89,8 @@ impl fmt::Display for VersionSuffixes {
     }
 }
 
-/// Represents the different types of package version suffixes outlined in section 3.2.
+/// Represents the different package version suffixes outlined in section 3.2.
+/// For example: `"alpha1", "beta2", "pre", "rc", "p20230101"`.
 #[derive(Clone, Eq, Debug)]
 pub enum VersionSuffix {
     Alpha(Option<usize>),

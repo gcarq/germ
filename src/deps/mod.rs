@@ -117,48 +117,57 @@ impl Atom {
         format!("{}/{}", self.category, self.package)
     }
 
-    /// Checks if the given package matches this atom.
-    /// TODO: implement wildcard operator, slot and repo matching
+    /// Checks if the given `pkg` matches this atom.
+    /// TODO: implement wildcard operator and slot matching
     pub fn matches(&self, pkg: &Package) -> bool {
         if self.category != pkg.category || self.package != pkg.name {
             return false;
         }
-        if let Some(version) = &self.version {
-            let matches = match self.variant {
-                AtomVariant::Simple => version == &pkg.version,
-                AtomVariant::VersionOperator => match self.operator {
-                    Some(Operator::Less) => pkg.version < *version,
-                    Some(Operator::LessEqual) => pkg.version <= *version,
-                    Some(Operator::Equal) => {
-                        // Equality requires all defined components in the atom to match
-                        pkg.version
-                            .number
-                            .components
-                            .iter()
-                            .zip(&version.number.components)
-                            .all(|(a, b)| a == b)
-                            && pkg
-                                .version
-                                .suffixes
-                                .iter()
-                                .zip(version.suffixes.iter())
-                                .all(|(a, b)| a == b)
-                    }
-                    Some(Operator::Greater) => pkg.version > *version,
-                    Some(Operator::GreaterEqual) => pkg.version >= *version,
-                    Some(Operator::Approximate) => {
-                        pkg.version.number == version.number
-                            && pkg.version.suffixes == version.suffixes
-                    }
-                    None => unreachable!("BUG: atom is expected to have an operator"),
-                },
-                AtomVariant::VersionWildcard => todo!("wildcard matching not implemented"),
-            };
-            if !matches {
-                return false;
-            }
+        if let Some(repo) = &self.repo
+            && repo != &pkg.repo
+        {
+            return false;
         }
-        true
+
+        self.matches_version(&pkg.version)
+    }
+
+    /// Checks if the given `pkg_ver` matches the this atoms [`PackageVersion`].
+    fn matches_version(&self, pkg_ver: &PackageVersion) -> bool {
+        let atom_ver = match &self.version {
+            Some(v) => v,
+            // If the atom doesn't specify a version, it matches any version
+            None => return true,
+        };
+        match self.variant {
+            AtomVariant::Simple => atom_ver == pkg_ver,
+            AtomVariant::VersionOperator => match self.operator {
+                Some(Operator::Less) => pkg_ver < atom_ver,
+                Some(Operator::LessEqual) => pkg_ver <= atom_ver,
+                Some(Operator::Equal) => {
+                    // Requires equality of all defined components and suffixes
+                    let components_match = pkg_ver
+                        .number
+                        .components
+                        .iter()
+                        .zip(&atom_ver.number.components)
+                        .all(|(a, b)| a == b);
+                    let suffixes_match = pkg_ver
+                        .suffixes
+                        .iter()
+                        .zip(atom_ver.suffixes.iter())
+                        .all(|(a, b)| a == b);
+                    components_match && suffixes_match
+                }
+                Some(Operator::Greater) => pkg_ver > atom_ver,
+                Some(Operator::GreaterEqual) => pkg_ver >= atom_ver,
+                Some(Operator::Approximate) => {
+                    pkg_ver.number == atom_ver.number && pkg_ver.suffixes == atom_ver.suffixes
+                }
+                None => unreachable!("BUG: atom is expected to have an operator"),
+            },
+            AtomVariant::VersionWildcard => todo!("wildcard matching not implemented"),
+        }
     }
 
     /// Creates an Atom from the given regex captures.
@@ -291,12 +300,12 @@ mod tests {
     fn test_atom_from_str_operator() {
         let test_cases = vec![
             (
-                "=dev-lang/rust-1.70.0",
+                "=sys-apps/memtest86+-7.2.0",
                 Atom {
                     operator: Some(Operator::Equal),
-                    category: "dev-lang".into(),
-                    package: "rust".into(),
-                    version: PackageVersion::new("1.70.0", None, None).ok(),
+                    category: "sys-apps".into(),
+                    package: "memtest86+".into(),
+                    version: PackageVersion::new("7.2.0", None, None).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -420,9 +429,10 @@ mod tests {
 
     #[test]
     fn test_atom_matches_true() {
-        // TODO: test wildcards and slot/repo matching
+        // TODO: test wildcards and slot matching
         let atoms = vec![
             "sys-devel/gcc",
+            "sys-devel/gcc::gentoo",
             "=sys-devel/gcc-15",
             "=sys-devel/gcc-15.2",
             "=sys-devel/gcc-15.2.1",
@@ -450,6 +460,7 @@ mod tests {
     #[test]
     fn test_atom_matches_false() {
         let atoms = vec![
+            "sys-devel/gcc::local",
             "sys-devel/binutils",
             "virtual/gcc",
             "<sys-devel/gcc-15",

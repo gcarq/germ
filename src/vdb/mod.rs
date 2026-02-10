@@ -57,9 +57,10 @@ impl Vdb {
                     continue;
                 }
                 let file_name = entry.file_name();
-                let pvr = file_name.as_os_str().to_str().with_context(|| {
-                    anyhow!("unable to convert '{:?}' to string", entry.file_name())
-                })?;
+                let pvr = file_name
+                    .as_os_str()
+                    .to_str()
+                    .with_context(|| anyhow!("path contains invalid unicode"))?;
                 let caps = match PKG_VER_REV_RE.captures(pvr) {
                     Some(caps) => caps,
                     None => continue,
@@ -70,7 +71,8 @@ impl Vdb {
                     Some(&caps["suffixes"]),
                     caps.name("revision").map(|m| m.as_str()),
                 )?;
-                let package = Package::new(&category, &caps["package"], version, "gentoo")?;
+                let repo = fs::read_to_string(entry.path().join("repository"))?;
+                let package = Package::new(&category, &caps["package"], version, &repo)?;
                 packages.insert(package);
             }
         }

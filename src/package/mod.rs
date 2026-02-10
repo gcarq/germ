@@ -13,26 +13,21 @@ lazy_static! {
     static ref PKG_RE: Regex = Regex::new(&format!(r"^{PACKAGE}$")).unwrap();
 }
 
-/// Represents a package with its category, name, and available versions.
-/// TODO: add slot and repo information.
+/// Represents a package with its category, name, version and repository.
+/// TODO: add slot information.
 #[derive(Clone, Eq, Debug)]
 pub struct Package {
     pub category: String,
     pub name: String,
     pub version: PackageVersion,
     pub ebuild: Option<Ebuild>,
-    pub repository: String,
+    pub repo: String,
 }
 
 impl Package {
-    /// Creates a new [`Package`] from the given `category`, `name`, and `version`.
+    /// Creates a new [`Package`] from the given `category`, `name`, `version` and `repo`.
     /// Returns `Err` if `category` or `name` are invalid according to PMS 3.1.1 and 3.1.2.
-    pub fn new(
-        category: &str,
-        name: &str,
-        version: PackageVersion,
-        repository: &str,
-    ) -> Result<Self> {
+    pub fn new(category: &str, name: &str, version: PackageVersion, repo: &str) -> Result<Self> {
         if !CATEGORY_RE.is_match(category) {
             return Err(anyhow!("invalid category name: '{category}'"));
         }
@@ -44,7 +39,7 @@ impl Package {
             name: name.to_owned(),
             version,
             ebuild: None,
-            repository: repository.to_owned(),
+            repo: repo.to_owned(),
         })
     }
 

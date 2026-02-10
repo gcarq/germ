@@ -112,7 +112,7 @@ fn die(args: &[&str], fatal: bool) -> Response {
 
 /// Resolves the given eclass `name` and returns the path as string.
 fn resolve_eclass(pkg: &Package, repos: &ReposConf, name: &str) -> Result<Response> {
-    let eclass = match repos.get(&pkg.repository) {
+    let eclass = match repos.get(&pkg.repo) {
         Some(repo) => match repo.eclasses.get(name) {
             Some(eclass) => eclass,
             // If the eclass is not in the same repository, we check the main repository
@@ -123,7 +123,7 @@ fn resolve_eclass(pkg: &Package, repos: &ReposConf, name: &str) -> Result<Respon
         },
         None => Err(anyhow!(
             "repository '{}' assigned to package not found",
-            pkg.repository
+            pkg.repo
         ))?,
     };
 
