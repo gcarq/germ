@@ -96,10 +96,10 @@ impl IpcHandler {
     }
 
     /// Waits for data to be available for reading from the child process.
-    /// Times out after 5 seconds.
+    /// Times out after 500 milliseconds.
     /// Returns `Ok(true)` if data is available, `Ok(false)` if timed out.
     pub fn poll(&mut self) -> Result<bool> {
-        let timeout = PollTimeout::try_from(Duration::from_secs(5))?;
+        let timeout = PollTimeout::try_from(Duration::from_millis(500))?;
         let fd = PollFd::new(self.reader.get_ref().as_fd(), PollFlags::POLLIN);
         match poll(&mut [fd], timeout)? {
             0 => Ok(false),

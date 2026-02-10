@@ -41,11 +41,11 @@ impl Process {
     }
 
     /// Checks if the child process is still alive.
-    pub fn is_alive(&self) -> Result<bool> {
-        match waitpid(self.pid, Some(WaitPidFlag::WNOHANG))? {
-            WaitStatus::StillAlive => Ok(true),
-            _ => Ok(false),
-        }
+    pub fn is_alive(&self) -> bool {
+        matches!(
+            waitpid(self.pid, Some(WaitPidFlag::WNOHANG)),
+            Ok(WaitStatus::StillAlive)
+        )
     }
 
     /// Waits for the child process to terminate and returns its exit status.
@@ -53,16 +53,13 @@ impl Process {
         waitpid(self.pid, None).with_context(|| anyhow!("unable to wait for process: {}", self.pid))
     }
 
-    /// Shuts down the child process by sending it a SIGTERM signal.
-    pub fn shutdown(&mut self) -> Result<()> {
-        match waitpid(self.pid, Some(WaitPidFlag::WNOHANG))? {
-            WaitStatus::StillAlive => {
-                let _ = kill(self.pid, Signal::SIGTERM);
-                let _ = waitpid(self.pid, None);
-                Ok(())
-            }
-            _ => Ok(()),
+    /// Stops the child process by sending it a `SIGTERM` signal.
+    pub fn stop(&mut self) -> Result<()> {
+        if let WaitStatus::StillAlive = waitpid(self.pid, Some(WaitPidFlag::WNOHANG))? {
+            let _ = kill(self.pid, Signal::SIGTERM);
+            let _ = waitpid(self.pid, None);
         }
+        Ok(())
     }
 
     /// Helper function to spawn a sub process with the given `args` and `env` and `actions`.
@@ -99,14 +96,11 @@ mod tests {
 
     #[test]
     fn test_process_new() {
-        let args = vec!["/usr/bin/true".into()];
+        let args = vec!["/usr/bin/sleep".into(), "infinity".into()];
         let mut proc = Process::new(&args, &HashMap::new()).unwrap();
-        assert!(proc.is_alive().unwrap(), "process should be alive");
-        let status = proc.wait().unwrap();
-        assert!(
-            matches!(status, WaitStatus::Exited(_, 0)),
-            "process should exit with code 0"
-        );
+        assert!(proc.is_alive(), "process should be alive");
+        proc.stop().unwrap();
+        assert!(!proc.is_alive(), "process should be stopped");
     }
 
     #[test]
@@ -131,6 +125,6 @@ mod tests {
         let resp = ipc.recv().unwrap();
         assert_eq!(resp, Some("42".into()), "expected value from env variable");
 
-        proc.shutdown().unwrap();
+        proc.stop().unwrap();
     }
 }
