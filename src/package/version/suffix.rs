@@ -108,7 +108,7 @@ impl VersionSuffix {
             .iter()
             .any(|prefix| suffix.starts_with(prefix))
         {
-            return Err(anyhow!("invalid version suffix: {}", suffix));
+            return Err(anyhow!("invalid version suffix: {suffix}"));
         }
         let split_index = suffix
             .find(|c: char| c.is_ascii_digit())
@@ -118,7 +118,7 @@ impl VersionSuffix {
             match number.is_empty() {
                 true => None,
                 false => Some(number.parse::<usize>().with_context(|| {
-                    anyhow!("unable to parse version suffix number: {}", number)
+                    anyhow!("unable to parse version suffix number: '{number}'")
                 })?),
             };
         let suffix = match suffix {

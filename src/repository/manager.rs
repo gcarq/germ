@@ -89,13 +89,13 @@ impl RepoManager {
     /// except files starting with `.` or ending with `~`.
     fn load_conf(location: &Path) -> Result<String> {
         if location.metadata()?.is_file() {
-            return fs::read_to_string(location).with_context(|| "Failed to load repos.conf");
+            return fs::read_to_string(location).with_context(|| "failed to load repos.conf");
         }
 
         let merged_conf = utils::files_from_dir(location)?
             .map(|p| match p {
                 Ok(path) => fs::read_to_string(&path)
-                    .with_context(|| anyhow!("unable to read file {}", path.display())),
+                    .with_context(|| anyhow!("unable to read file '{}'", path.display())),
                 Err(err) => Err(err),
             })
             .collect::<Result<Vec<_>>>()?
@@ -155,7 +155,7 @@ impl Default for RepoManager {
 impl fmt::Display for RepoManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (name, repo) in &self.repositories {
-            writeln!(f, "{}\n    location: {}\n", name, repo.location.display())?;
+            writeln!(f, "{name}\n    location: {}\n", repo.location.display())?;
         }
         Ok(())
     }

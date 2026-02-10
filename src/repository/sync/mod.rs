@@ -63,7 +63,7 @@ pub fn build_sync_handler(properties: &ini::Properties) -> Result<Option<Box<dyn
         .get("sync-type")
         .map(SyncType::new)
         .transpose()
-        .with_context(|| anyhow!("invalid sync-type value"))?;
+        .with_context(|| "invalid sync-type value")?;
 
     let handler = match sync_type {
         Some(SyncType::Git) => GitSyncHandler::new(properties)?,

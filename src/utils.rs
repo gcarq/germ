@@ -56,7 +56,7 @@ pub trait FileFromPath {
             .into_iter()
             .map(|p| {
                 fs::read_to_string(&p)
-                    .with_context(|| anyhow!("unable to read file {}", p.display()))
+                    .with_context(|| anyhow!("unable to read file '{}'", p.display()))
             })
             .collect::<Result<Vec<_>>>()?
             .join("\n");

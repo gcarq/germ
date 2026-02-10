@@ -53,7 +53,7 @@ impl PackageVersion {
     pub fn pr(&self) -> String {
         match self.revision {
             0 => "r0".to_owned(),
-            rev => format!("r{}", rev),
+            rev => format!("r{rev}"),
         }
     }
 

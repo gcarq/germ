@@ -23,17 +23,17 @@ impl PortageConf {
     /// Builds a [`PortageConf`] from the given portage configuration `path`.
     pub fn new(path: &Path) -> Result<Self> {
         let repo_manager = RepoManager::new(&path.join("repos.conf"))
-            .with_context(|| "Unable to process repos.conf")?;
+            .with_context(|| "unable to process repos.conf")?;
 
         let profile_path = path.join("make.profile");
         let profile = Profile::new(&profile_path, &repo_manager)
-            .with_context(|| "Unable to build profile from make.profile")?;
+            .with_context(|| "unable to build profile from make.profile")?;
 
         let make_env = Self::init_make_env(path, &profile)?;
 
         let arch = make_env
             .get("ARCH")
-            .with_context(|| "Missing ARCH variable")?
+            .with_context(|| "missing ARCH variable")?
             .to_string();
         Self::validate_arch(&arch, &mut repo_manager.repositories())?;
         Self::validate_profile(&profile_path, &arch, &mut repo_manager.repositories())?;
@@ -44,7 +44,7 @@ impl PortageConf {
             LineBasedFile::from_path(&path.join("package.mask"), true, true)?,
             LineBasedFile::from_path(&path.join("package.unmask"), true, true)?,
         )
-        .with_context(|| "Unable to build MaskManager")?;
+        .with_context(|| "unable to build MaskManager")?;
 
         Ok(PortageConf {
             make_env,
@@ -59,10 +59,10 @@ impl PortageConf {
     fn init_make_env(path: &Path, profile: &Profile) -> Result<MakeEnv> {
         let globals_path = Path::new(DEFAULT_PORTAGE_CONF_PATH).join("make.globals");
         let make_globals = MakeEnv::from_path(&globals_path, true, false)
-            .with_context(|| "Unable to process make.globals")?;
+            .with_context(|| "unable to process make.globals")?;
         // TODO: make.conf: Variables prefixed with __ are local should not be propagated.
         let make_conf = MakeEnv::from_path(&path.join("make.conf"), true, false)
-            .with_context(|| "Unable to process make.conf")?;
+            .with_context(|| "unable to process make.conf")?;
 
         let mut make_env = MakeEnv::default();
         make_env.inherit_from(&make_globals);

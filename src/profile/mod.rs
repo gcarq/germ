@@ -51,9 +51,8 @@ impl Profile {
 
         // TODO: remove debug print
         println!(
-            "Loading profile from {} (EAPI: {})",
+            "Loading profile from {} (EAPI: {eapi})",
             path.canonicalize()?.display(),
-            eapi
         );
 
         let mut profile = Self {
@@ -143,7 +142,7 @@ impl Profile {
             return Ok(Vec::new());
         }
 
-        let content = fs::read_to_string(parent).with_context(|| "Unable to read parent file")?;
+        let content = fs::read_to_string(parent).with_context(|| "unable to read parent file")?;
         let parent_profiles = content
             .lines()
             .map(|line| line.trim())
@@ -176,10 +175,10 @@ impl Profile {
         }
         Eapi::new(
             fs::read_to_string(path)
-                .with_context(|| "Unable to read eapi file")?
+                .with_context(|| "unable to read eapi file")?
                 .lines()
                 .next()
-                .ok_or_else(|| anyhow!("Empty eapi file"))?,
+                .ok_or_else(|| anyhow!("empty eapi file"))?,
         )
     }
 }

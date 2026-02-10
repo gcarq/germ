@@ -99,7 +99,7 @@ fn info(conf: &PortageConf, atom: Option<Atom>) -> Result<()> {
 
     if let Some(atom) = atom {
         let vdb = Vdb::from_path(PathBuf::from_str("/var/db/pkg")?)
-            .with_context(|| "Unable to build VDB")?;
+            .with_context(|| "unable to build VDB")?;
 
         println!("\nInstalled packages matching '{atom}':\n");
         for pkg in vdb.packages.iter().filter(|pkg| atom.matches(pkg)) {
@@ -121,12 +121,12 @@ fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
 
     let pkg = match pkg {
         Some(pkg) => pkg,
-        None => return Err(anyhow!("No matching package found for atom '{atom}'")),
+        None => return Err(anyhow!("no matching package found for atom '{atom}'")),
     };
     let ebuild = conf.repo_manager.resolve_ebuild(&pkg)?;
 
     let mut handler = EbuildPhaseHandler::new(&ebuild, conf, EbuildPhase::Depend)
-        .with_context(|| format!("Unable to install package '{pkg}' using {ebuild}"))?;
+        .with_context(|| anyhow!("unable to install package '{pkg}' using {ebuild}"))?;
     handler.execute()?;
 
     Ok(())

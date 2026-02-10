@@ -241,7 +241,7 @@ impl Repository {
             return Ok(Vec::new());
         }
         let categories = fs::read_to_string(&path)
-            .with_context(|| anyhow!("Unable to read {}", path.display()))?
+            .with_context(|| anyhow!("unable to read '{}'", path.display()))?
             .lines()
             .map(|line| line.to_owned())
             .collect();

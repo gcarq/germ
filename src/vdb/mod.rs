@@ -60,7 +60,7 @@ impl Vdb {
                 let pvr = file_name
                     .as_os_str()
                     .to_str()
-                    .with_context(|| anyhow!("path contains invalid unicode"))?;
+                    .with_context(|| "path contains invalid unicode")?;
                 let caps = match PKG_VER_REV_RE.captures(pvr) {
                     Some(caps) => caps,
                     None => continue,

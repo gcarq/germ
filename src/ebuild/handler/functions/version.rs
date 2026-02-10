@@ -250,8 +250,7 @@ mod tests {
         for range in test_cases {
             assert!(
                 ver_cut(&pkg, range, None).is_err(),
-                "Expected error for input range: {}",
-                range
+                "Expected error for input range: {range}",
             );
         }
     }
@@ -504,8 +503,7 @@ mod tests {
         for input in test_cases {
             assert!(
                 parse_range(input, 3).is_err(),
-                "Expected error for input: {}",
-                input
+                "Expected error for input: {input}",
             );
         }
     }

@@ -17,7 +17,7 @@ impl DeprecationInfo {
         if !path.exists() {
             return Ok(None);
         }
-        let content = fs::read_to_string(path).with_context(|| "Unable to read deprecated file")?;
+        let content = fs::read_to_string(path).with_context(|| "unable to read deprecated file")?;
         Ok(Some(DeprecationInfo::from_file_content(content)?))
     }
 
