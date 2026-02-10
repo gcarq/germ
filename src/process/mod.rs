@@ -5,64 +5,39 @@ use anyhow::{Context, Result, anyhow};
 use nix::spawn::{PosixSpawnAttr, PosixSpawnFileActions, posix_spawn};
 use nix::sys::signal::{Signal, kill};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
-use nix::unistd::{Pid, pipe};
+use nix::unistd::Pid;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::mem;
-use std::os::fd::AsRawFd;
 
 /// Starts and manages a child process with IPC capabilities.
 /// The child process is started with `posix_spawn` and communicates via pipes.
 pub struct Process {
     pid: Pid,
-    pub ipc: IpcHandler,
+    pub ipc: Option<IpcHandler>,
 }
 
 impl Process {
-    /// Spawns a new process with the given `args` and `env`.
-    /// The first element in `args` is expected to be the full path to the binary to execute.
-    pub fn new(args: &[String], env: &HashMap<String, String>) -> Result<Self> {
-        if args.is_empty() {
-            return Err(anyhow!("no arguments provided to spawn process"));
-        }
+    /// Uses `posix_spawn` to create a subprocess with the given `command` and `env`.
+    ///
+    /// The first element in `command` is expected to be the absolute path to the binary to execute.
+    pub fn new(command: &[String], env: &HashMap<String, String>) -> Result<Self> {
+        let actions =
+            PosixSpawnFileActions::init().with_context(|| "unable to init posix_spawn actions")?;
+        let pid = Self::spawn(command, env, &actions)?;
+        Ok(Self { pid, ipc: None })
+    }
 
-        // IPC pipe for parent -> child
-        let (child_reader, parent_writer) = pipe().with_context(|| "unable to create pipe")?;
-        // IPC pipe for child -> parent
-        let (parent_reader, child_writer) = pipe().with_context(|| "unable to create pipe")?;
-        let parent_writer = mem::ManuallyDrop::new(parent_writer);
-        let parent_reader = mem::ManuallyDrop::new(parent_reader);
-
-        let mut actions = PosixSpawnFileActions::init()
-            .with_context(|| "unable to init posix spawn file actions")?;
-        let attrs =
-            PosixSpawnAttr::init().with_context(|| "unable to init posix spawn attributes")?;
-
-        actions.add_dup2(child_reader.as_raw_fd(), 10)?;
-        actions.add_dup2(child_writer.as_raw_fd(), 11)?;
-        actions.add_close(parent_writer.as_raw_fd())?;
-        actions.add_close(parent_reader.as_raw_fd())?;
-
-        let binary = args[0].as_str();
-        let args = args
-            .iter()
-            .map(|arg| CString::new(arg.clone()))
-            .collect::<Result<Vec<CString>, _>>()
-            .with_context(|| "unable to setup bash arguments")?;
-
-        let env = env
-            .iter()
-            .map(|(k, v)| CString::new(format!("{k}={v}")))
-            .collect::<Result<Vec<CString>, _>>()
-            .with_context(|| "unable to setup bash environment")?;
-
-        // SAFETY: We transfer ownership of the pipe ends to Ipc,
-        // so they must not be used elsewhere after this call.
-        let ipc = unsafe { IpcHandler::new(parent_writer, parent_reader) };
-
-        let pid = posix_spawn(binary, &actions, &attrs, &args, &env)
-            .with_context(|| "posix_spawn failed")?;
-        Ok(Self { pid, ipc })
+    /// Uses `posix_spawn` to create a subprocess with the given `command` and `env` with IPC
+    /// capabilities using [`IpcHandler`].
+    ///
+    /// The first element in `command` is expected to be the absolute path to the binary to execute.
+    pub fn with_ipc(command: &[String], env: &HashMap<String, String>) -> Result<Self> {
+        let (ipc, pid) = IpcHandler::new(|actions| Self::spawn(command, env, &actions))
+            .with_context(|| "unable to setup IPC handler")?;
+        Ok(Self {
+            pid,
+            ipc: Some(ipc),
+        })
     }
 
     /// Checks if the child process is still alive.
@@ -89,6 +64,33 @@ impl Process {
             _ => Ok(()),
         }
     }
+
+    /// Helper function to spawn a sub process with the given `args` and `env` and `actions`.
+    fn spawn(
+        command: &[String],
+        env: &HashMap<String, String>,
+        actions: &PosixSpawnFileActions,
+    ) -> Result<Pid> {
+        let binary = command
+            .first()
+            .ok_or_else(|| anyhow!("no arguments provided to spawn process"))?
+            .as_str();
+
+        let args = command
+            .iter()
+            .map(|arg| CString::new(arg.clone()))
+            .collect::<Result<Vec<CString>, _>>()
+            .with_context(|| "unable to setup bash arguments")?;
+
+        let env = env
+            .iter()
+            .map(|(k, v)| CString::new(format!("{k}={v}")))
+            .collect::<Result<Vec<CString>, _>>()
+            .with_context(|| "unable to setup environment")?;
+
+        let attrs = PosixSpawnAttr::init().with_context(|| "unable to init posix_spawn attrs")?;
+        posix_spawn(binary, actions, &attrs, &args, &env).with_context(|| "posix_spawn failed")
+    }
 }
 
 #[cfg(test)]
@@ -96,7 +98,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_process_ipc() {
+    fn test_process_new() {
+        let args = vec!["/usr/bin/true".into()];
+        let mut proc = Process::new(&args, &HashMap::new()).unwrap();
+        assert!(proc.is_alive().unwrap(), "process should be alive");
+        let status = proc.wait().unwrap();
+        assert!(
+            matches!(status, WaitStatus::Exited(_, 0)),
+            "process should exit with code 0"
+        );
+    }
+
+    #[test]
+    fn test_process_with_ipc() {
         let args = vec![
             "/usr/bin/bash".into(),
             "-c".into(),
@@ -107,16 +121,16 @@ mod tests {
         ];
         let env: HashMap<String, String> =
             HashMap::from_iter([("TEST_VARIABLE".into(), "42".into())]);
-        let mut proc = Process::new(&args, &env).unwrap();
-        proc.ipc.send(&String::from("sync")).unwrap();
-        let resp = proc.ipc.recv().unwrap();
-        assert_eq!(resp, Some("sync".to_owned()), "expected echoed line");
-        let resp = proc.ipc.recv().unwrap();
-        assert_eq!(
-            resp,
-            Some("42".to_owned()),
-            "expected value from env variable"
-        );
+        let mut proc = Process::with_ipc(&args, &env).unwrap();
+        let ipc = proc.ipc.as_mut().unwrap();
+
+        ipc.send(&String::from("sync")).unwrap();
+        let resp = ipc.recv().unwrap();
+        assert_eq!(resp, Some("sync".into()), "expected echoed line");
+
+        let resp = ipc.recv().unwrap();
+        assert_eq!(resp, Some("42".into()), "expected value from env variable");
+
         proc.shutdown().unwrap();
     }
 }

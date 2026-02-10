@@ -52,12 +52,17 @@ impl<'a> EbuildPhaseHandler<'a> {
     /// Starts the process for the ebuild phase.
     /// NOTE: This call blocks until the process has been finished.
     pub fn execute(&mut self) -> Result<()> {
-        let mut process = Process::new(&self.args, &self.env)
+        let mut process = Process::with_ipc(&self.args, &self.env)
             .with_context(|| "unable to spawn ebuild process")?;
 
+        let ipc = match &mut process.ipc {
+            Some(ipc) => ipc,
+            None => return Err(anyhow!("IPC handler not available")),
+        };
+
         loop {
-            if process.ipc.poll()? {
-                let data = match process.ipc.recv()? {
+            if ipc.poll()? {
+                let data = match ipc.recv()? {
                     Some(data) => shlex::split(&data)
                         .ok_or_else(|| anyhow!("Unable to split text due to syntax errors"))?
                         .into_iter()
@@ -75,7 +80,7 @@ impl<'a> EbuildPhaseHandler<'a> {
                 let data = data.iter().map(|s| s.as_str()).collect::<Vec<_>>();
                 let request = Request::new(&data)?;
                 let response = handle_request(self.ebuild, self.repo_manager, &request)?;
-                process.ipc.send(&response)?;
+                ipc.send(&response)?;
             }
         }
 
