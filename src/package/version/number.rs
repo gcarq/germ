@@ -26,8 +26,9 @@ impl FromStr for VersionNumber {
 
     /// Creates a [`VersionNumber`] by splitting the version into its numeric components
     /// and an optional letter suffix.
-    /// For example, "1.2.3a" becomes (["1", "2", "3", "a"], Some('a')),
-    /// "2.0.1" becomes (["2", "0", "1"], None).
+    ///
+    /// For example, `"1.2.3a"` becomes `(["1", "2", "3", "a"], Some('a'))` while
+    /// `"2.0.1"` becomes `(["2", "0", "1"], None)`.
     fn from_str(version: &str) -> Result<Self> {
         let (version, letter) = match version
             .chars()

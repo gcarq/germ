@@ -122,7 +122,7 @@ impl Profile {
             eapi,
         };
         for parent in Self::resolve_parents(path, repos)? {
-            profile.inherit_from(&parent)
+            profile.inherit_from(&parent);
         }
 
         if let Some(deprecation) = &profile.deprecated {
@@ -135,7 +135,7 @@ impl Profile {
     }
 
     /// Takes a `path` to a profile directory and resolves all profiles listed in the parent file.
-    /// Parents are returned in the order they are listed or an empty vec if there are no parents.
+    /// Parents are returned in the order they are listed or an empty vec if there are none.
     fn resolve_parents(path: &Path, repos: &ReposConf) -> Result<Vec<Self>> {
         let parent = path.join("parent");
         if !parent.exists() {
@@ -143,23 +143,23 @@ impl Profile {
         }
 
         let content = fs::read_to_string(parent).with_context(|| "Unable to read parent file")?;
-        let lines = content
+        let parent_profiles = content
             .lines()
             .map(|line| line.trim())
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .collect::<Vec<_>>();
 
         let mut profiles = Vec::new();
-        for profile in lines {
+        for profile in parent_profiles {
             // If a profiles references a specific repository, resolve it first.
             // This is not specified in PMS but is implemented in portage
             // see https://bugs.gentoo.org/515666
             let path = match profile.split_once(':') {
-                Some((name, path)) => {
-                    let repo = repos.get(name).ok_or_else(|| {
-                        anyhow!("Referenced Repository {name} not found for profile {profile}")
+                Some((repo_name, profile_path)) => {
+                    let repo = repos.get(repo_name).ok_or_else(|| {
+                        anyhow!("Repository '{repo_name}' not found for profile '{profile}'")
                     })?;
-                    repo.location.join("profiles").join(path)
+                    repo.location.join("profiles").join(profile_path)
                 }
                 None => path.join(profile),
             };

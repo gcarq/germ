@@ -8,15 +8,12 @@ use std::{fmt, fs, iter};
 
 /// Holds all repository configuration that usually resides in /etc/portage/repos.conf.
 /// TODO implement missing functionality listed below.
-///  See https://dev.gentoo.org/~zmedico/portage/doc/man/portage.5.html
-///   * support PORTAGE_REPOSITORIES environment variable
-///   * support 'masters' property in repository sections
-///   * support 'eclass-overrides' properties in DEFAULT and repository sections
-///   * support 'priority' property in repository sections
-///   * support 'aliases' property in repository sections
-///
-///
-///
+///  See <https://dev.gentoo.org/~zmedico/portage/doc/man/portage.5.html>
+///   * support `PORTAGE_REPOSITORIES` environment variable
+///   * support `masters` property in repository sections
+///   * support `eclass-overrides` properties in DEFAULT and repository sections
+///   * support `priority` property in repository sections
+///   * support `aliases` property in repository sections
 ///
 pub struct ReposConf {
     main_repo_name: String,
@@ -65,15 +62,15 @@ impl ReposConf {
         }))
     }
 
-    /// Loads the repos.conf configuration from the given path.
-    /// If the path is a directory, it loads and merges all files in the directory
-    /// except files starting with '.' or ending with '~'.
-    fn load_conf(path: &Path) -> Result<String> {
-        if path.metadata()?.is_file() {
-            return fs::read_to_string(path).with_context(|| "Failed to load repos.conf");
+    /// Loads the repos.conf configuration from the given `location`.
+    /// If the location is a directory, it loads and merges all files in the directory
+    /// except files starting with `.` or ending with `~`.
+    fn load_conf(location: &Path) -> Result<String> {
+        if location.metadata()?.is_file() {
+            return fs::read_to_string(location).with_context(|| "Failed to load repos.conf");
         }
 
-        let merged_conf = utils::files_from_dir(path)?
+        let merged_conf = utils::files_from_dir(location)?
             .map(|p| match p {
                 Ok(path) => fs::read_to_string(&path)
                     .with_context(|| anyhow!("unable to read file {}", path.display())),

@@ -139,15 +139,17 @@ fn ver_split(version: &str) -> Vec<(String, String)> {
 
         // Check for component (either all digits or all letters)
         let mut comp = String::new();
-        if let Some(&c) = chars.peek() {
-            let is_digit = c.is_ascii_digit();
-            while let Some(&c) = chars.peek() {
+        if let Some(&char) = chars.peek() {
+            // Once we determine the type of the component,
+            // we keep consuming chars of the same type
+            let is_digit = char.is_ascii_digit();
+            while let Some(&peeked_char) = chars.peek() {
                 match is_digit {
-                    true if !c.is_ascii_digit() => break,
-                    false if !c.is_ascii_alphabetic() => break,
+                    true if !peeked_char.is_ascii_digit() => break,
+                    false if !peeked_char.is_ascii_alphabetic() => break,
                     _ => {}
                 }
-                comp.push(c);
+                comp.push(peeked_char);
                 chars.next();
             }
         }

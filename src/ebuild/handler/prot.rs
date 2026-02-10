@@ -69,7 +69,8 @@ pub enum Response {
 }
 
 impl Response {
-    pub fn from_bool(value: bool) -> Self {
+    /// Creates a new [`Response`] from a boolean value without a message.
+    pub const fn from_bool(value: bool) -> Self {
         match value {
             true => Self::Ok(None),
             false => Self::Err(None),

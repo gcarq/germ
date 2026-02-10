@@ -12,7 +12,7 @@ lazy_static! {
 }
 
 /// List of variables that are incremental as per PMS section 5.3 and
-/// https://github.com/gentoo/portage/blob/0783d820e6eecffa3adff52c4669fc715d65dbaa/lib/portage/const.py#L121
+/// <https://github.com/gentoo/portage/blob/0783d820e6eecffa3adff52c4669fc715d65dbaa/lib/portage/const.py#L121>
 /// NOTE: This list must be kept sorted for [`core::slice::binary_search`] to work correctly.
 const INCREMENTAL_VARIABLES: [&str; 14] = [
     "ACCEPT_KEYWORDS",
@@ -137,7 +137,7 @@ impl EnvValue {
         }
     }
 
-    pub fn is_incremental(&self) -> bool {
+    pub const fn is_incremental(&self) -> bool {
         matches!(self, EnvValue::Incremental(_))
     }
 

@@ -21,7 +21,7 @@ impl FromStr for VersionSuffixes {
     type Err = anyhow::Error;
 
     /// Parses a string of version suffixes separated by underscores into a [`VersionSuffixes`] instance.
-    /// '_' prefixes are ignored For example, "_beta_p20230101" is still valid.
+    /// `'_'` prefixes are ignored For example, `"_beta_p20230101"` is still valid.
     fn from_str(suffixes: &str) -> Result<Self> {
         let suffixes = suffixes
             .split('_')
@@ -133,7 +133,7 @@ impl VersionSuffix {
     }
 
     /// Deconstructs the suffix into its string representation and optional number.
-    pub fn deconstruct(&self) -> (&str, Option<usize>) {
+    const fn deconstruct(&self) -> (&str, Option<usize>) {
         match self {
             VersionSuffix::Alpha(n) => ("alpha", *n),
             VersionSuffix::Beta(n) => ("beta", *n),
@@ -144,7 +144,7 @@ impl VersionSuffix {
     }
 
     /// Returns the order of the suffix type for comparison purposes.
-    fn suffix_order(&self) -> usize {
+    const fn suffix_order(&self) -> usize {
         match self {
             VersionSuffix::Alpha(_) => 0,
             VersionSuffix::Beta(_) => 1,

@@ -1,3 +1,23 @@
+#![warn(
+    clippy::too_many_lines,
+    clippy::dbg_macro,
+    clippy::doc_link_with_quotes,
+    clippy::doc_markdown,
+    clippy::empty_structs_with_brackets,
+    clippy::missing_const_for_fn,
+    clippy::missing_panics_doc,
+    clippy::disallowed_script_idents,
+    clippy::semicolon_if_nothing_returned,
+    clippy::shadow_unrelated,
+    clippy::similar_names,
+    clippy::unused_self,
+    clippy::use_debug,
+    clippy::used_underscore_binding,
+    clippy::useless_let_if_seq,
+    clippy::wildcard_dependencies,
+    clippy::wildcard_imports
+)]
+
 use crate::conf::PortageConf;
 use crate::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
 use crate::deps::Atom;

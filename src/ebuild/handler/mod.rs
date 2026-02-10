@@ -19,7 +19,7 @@ pub enum EbuildPhase {
 }
 
 impl EbuildPhase {
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self {
             EbuildPhase::Depend => "depend",
         }
@@ -127,7 +127,7 @@ impl<'a> EbuildPhaseHandler<'a> {
 
     /// Builds the list of `args` to be passed to bash for the ebuild process.
     /// Also sets shell options depending on the EAPI.
-    /// See https://www.gnu.org/software/bash/manual/html_node/The-Shopt-Builtin.html
+    /// See <https://www.gnu.org/software/bash/manual/html_node/The-Shopt-Builtin.html>
     fn build_args(ebuild: &Ebuild) -> Vec<String> {
         // The "patsub_replacement" and "globskipdots" options were introduced
         // by bash-5.2. Both are default-enabled and change the behavior of

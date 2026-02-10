@@ -213,7 +213,7 @@ impl Atom {
         Ok(Some(PackageVersion::new(version, suffixes, revision)?))
     }
 
-    fn with_operator(mut self, operator: Option<Operator>) -> Self {
+    const fn with_operator(mut self, operator: Option<Operator>) -> Self {
         self.operator = operator;
         self
     }
