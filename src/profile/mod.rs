@@ -8,12 +8,13 @@ use crate::repository::manager::RepoManager;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use log::{debug, warn};
-use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::{fmt, fs};
 
 /// Represents a profile outlined in PMS section 5.
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Profile {
+    pub location: PathBuf,
     eapi: Eapi,
     deprecated: Option<DeprecationInfo>,
 
@@ -45,82 +46,77 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Builds a profile from the given `path` and all available repositories from `repo_manager`.
+    /// Builds a profile from the given `location` and all available repositories from `repo_manager`.
     /// An error is returned if the `path` doesn't exist or the profile directory is invalid.
-    pub fn new(path: &Path, repo_manager: &RepoManager) -> Result<Self> {
-        let eapi = Self::read_eapi(&path.join("eapi"))?;
-
-        debug!(
-            "Loading profile {} (EAPI: {eapi})",
-            path.canonicalize()?.display(),
-        );
-
+    pub fn new(location: &Path, repo_manager: &RepoManager) -> Result<Self> {
+        let eapi = Self::read_eapi(&location.join("eapi"))?;
         let mut profile = Self {
-            make_defaults: MakeEnv::from_path(&path.join("make.defaults"), false, true)?,
-            deprecated: DeprecationInfo::from_path(&path.join("deprecated"))?,
+            make_defaults: MakeEnv::from_path(&location.join("make.defaults"), false, true)?,
+            deprecated: DeprecationInfo::from_path(&location.join("deprecated"))?,
             packages: LineBasedFile::from_path(
-                &path.join("packages"),
+                &location.join("packages"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             package_mask: LineBasedFile::from_path(
-                &path.join("package.mask"),
+                &location.join("package.mask"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             package_unmask: LineBasedFile::from_path(
-                &path.join("package.unmask"),
+                &location.join("package.unmask"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             package_use: LineBasedFile::from_path(
-                &path.join("package.use"),
+                &location.join("package.use"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             use_mask: LineBasedFile::from_path(
-                &path.join("use.mask"),
+                &location.join("use.mask"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             use_force: LineBasedFile::from_path(
-                &path.join("use.force"),
+                &location.join("use.force"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             use_stable_mask: LineBasedFile::from_path(
-                &path.join("use.stable.mask"),
+                &location.join("use.stable.mask"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             use_stable_force: LineBasedFile::from_path(
-                &path.join("use.stable.force"),
+                &location.join("use.stable.force"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             package_use_mask: LineBasedFile::from_path(
-                &path.join("package.use.mask"),
+                &location.join("package.use.mask"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             package_use_force: LineBasedFile::from_path(
-                &path.join("package.use.force"),
+                &location.join("package.use.force"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             package_use_stable_mask: LineBasedFile::from_path(
-                &path.join("package.use.stable.mask"),
+                &location.join("package.use.stable.mask"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             package_use_stable_force: LineBasedFile::from_path(
-                &path.join("package.use.stable.force"),
+                &location.join("package.use.stable.force"),
                 eapi.profile_file_dirs,
                 true,
             )?,
             eapi,
+            location: location.canonicalize()?,
         };
-        for parent in Self::resolve_parents(path, repo_manager)? {
+        for parent in Self::resolve_parents(location, repo_manager)? {
             profile.inherit_from(&parent);
         }
 
@@ -187,6 +183,7 @@ impl Profile {
 impl Inherit for Profile {
     /// Inherits relevant configurations from the given parent profile.
     fn inherit_from(&mut self, parent: &Profile) {
+        debug!("Inheriting from {} ...", self.location.display());
         self.make_defaults.inherit_from(&parent.make_defaults);
         self.packages.inherit_from(&parent.packages);
         self.package_mask.inherit_from(&parent.package_mask);
@@ -203,5 +200,11 @@ impl Inherit for Profile {
             .inherit_from(&parent.package_use_stable_mask);
         self.package_use_stable_force
             .inherit_from(&parent.package_use_stable_force);
+    }
+}
+
+impl fmt::Display for Profile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.location.display())
     }
 }

@@ -13,7 +13,7 @@ use std::ffi::CString;
 /// Starts and manages a child process with IPC capabilities.
 /// The child process is started with `posix_spawn` and communicates via pipes.
 pub struct Process {
-    pid: Pid,
+    pub pid: Pid,
     pub ipc: Option<IpcHandler>,
 }
 
@@ -25,6 +25,7 @@ impl Process {
         let actions =
             PosixSpawnFileActions::init().with_context(|| "unable to init posix_spawn actions")?;
         let pid = Self::spawn(command, env, &actions)?;
+        debug!("Started process (PID: {pid})");
         Ok(Self { pid, ipc: None })
     }
 
@@ -35,6 +36,7 @@ impl Process {
     pub fn with_ipc(command: &[String], env: &HashMap<String, String>) -> Result<Self> {
         let (ipc, pid) = IpcHandler::new(|actions| Self::spawn(command, env, &actions))
             .with_context(|| "unable to setup IPC handler")?;
+        debug!("Started process (PID: {pid}) with IPC handler");
         Ok(Self {
             pid,
             ipc: Some(ipc),
@@ -69,7 +71,7 @@ impl Process {
         env: &HashMap<String, String>,
         actions: &PosixSpawnFileActions,
     ) -> Result<Pid> {
-        debug!("Spawning process: '{}'", command.join(" "),);
+        debug!("Spawning process: '{}' ...", command.join(" "),);
         let binary = command
             .first()
             .ok_or_else(|| anyhow!("no arguments provided to spawn process"))?

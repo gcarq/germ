@@ -54,7 +54,7 @@ impl<'a> EbuildPhaseHandler<'a> {
     /// NOTE: This call blocks until the process has been finished.
     pub fn execute(&mut self) -> Result<()> {
         debug!(
-            "Executing ebuild phase '{}' for '{}'",
+            "Executing ebuild phase '{}' for '{}' ...",
             self.phase.as_str(),
             self.ebuild.pkg
         );
@@ -75,7 +75,10 @@ impl<'a> EbuildPhaseHandler<'a> {
                     .ok_or_else(|| anyhow!("unable to split text due to syntax errors"))?,
                 // Got EOF, at this point the ebuild process should have already exited
                 None => match process.wait()? {
-                    WaitStatus::Exited(_, 0) => break,
+                    WaitStatus::Exited(_, 0) => {
+                        debug!("ebuild process (PID: {}) exited successfully", process.pid);
+                        break;
+                    }
                     WaitStatus::Exited(_, code) => {
                         return Err(anyhow!("ebuild process exited with code {code}"));
                     }

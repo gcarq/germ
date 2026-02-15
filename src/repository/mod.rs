@@ -56,9 +56,10 @@ impl Repository {
     /// parsing the whole repository and can be expensive to build.
     /// This allows deferring package collection until it's actually needed.
     pub fn new(config: &RepositoryConfig) -> Result<Self> {
-        let eapi = Self::read_eapi(&config.location)?;
+        let location = config.location.canonicalize()?;
 
-        let profiles = config.location.join("profiles");
+        let eapi = Self::read_eapi(&location)?;
+        let profiles = location.join("profiles");
         let repository = Self {
             packages: HashSet::new(),
             categories: Vec::new(),
@@ -72,7 +73,7 @@ impl Repository {
                 eapi.profile_file_dirs,
                 true,
             )?,
-            eclasses: Eclasses::from_path(&config.location.join("eclass"))
+            eclasses: Eclasses::from_path(&location.join("eclass"))
                 .with_context(|| "unable to collectd eclasses")?,
             arch_list: LineBasedFile::from_path(&profiles.join("arch.list"), false, true)?,
             profiles_desc: LineBasedFile::from_path(&profiles.join("profiles.desc"), false, true)?
@@ -81,7 +82,7 @@ impl Repository {
                 .collect::<Result<_>>()?,
             masters: config.masters.clone(),
             name: config.name.clone(),
-            location: config.location.clone(),
+            location,
             sync_handler: build_sync_handler(&config.raw_properties)?,
             eapi,
         };

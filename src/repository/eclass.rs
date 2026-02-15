@@ -62,7 +62,7 @@ impl Eclass {
     /// The name should not contain the `.eclass` suffix.
     /// Returns `Err` if `name` is invalid.
     pub fn new(name: String, path: PathBuf) -> Result<Self> {
-        trace!("Loading eclass '{name}' from '{}'", path.display());
+        trace!("Loading eclass '{name}' from '{}' ...", path.display());
         debug_assert!(
             !name.ends_with(".eclass"),
             "eclass name should not contain the .eclass suffix"

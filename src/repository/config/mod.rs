@@ -33,7 +33,7 @@ impl RepoManagerConfig {
     /// If the location is a directory, it loads and merges all files in the directory
     /// except files starting with `.` or ending with `~`.
     pub fn load(location: &Path) -> Result<Self> {
-        debug!("Loading repos.conf from '{}'", location.display());
+        debug!("Loading repos.conf from '{}' ...", location.display());
         let conf = Self::parse_conf(location).with_context(|| "unable to parse repos.conf")?;
 
         // For now, use "gentoo" as fallback if no DEFAULT section or main-repo property is defined

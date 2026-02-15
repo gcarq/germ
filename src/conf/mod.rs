@@ -8,14 +8,15 @@ use crate::repository::Repository;
 use crate::repository::manager::RepoManager;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
+use log::debug;
 use manager::MaskManager;
 use std::path::Path;
 
 /// Holds the portage configuration that usually resides in `/etc/portage`.
 pub struct PortageConf {
+    profile: Profile,
     pub make_env: MakeEnv,
     pub repo_manager: RepoManager,
-    profile: Profile,
     pub mask_manager: MaskManager,
 }
 
@@ -26,6 +27,7 @@ impl PortageConf {
             .with_context(|| "unable to process repos.conf")?;
 
         let profile_path = path.join("make.profile");
+        debug!("Active profile {}", profile_path.canonicalize()?.display());
         let profile = Profile::new(&profile_path, &repo_manager)
             .with_context(|| "unable to build profile from make.profile")?;
 
@@ -36,7 +38,7 @@ impl PortageConf {
             .with_context(|| "missing ARCH variable")?
             .to_string();
         Self::validate_arch(&arch, &mut repo_manager.repositories())?;
-        Self::validate_profile(&profile_path, &arch, &mut repo_manager.repositories())?;
+        Self::validate_profile(&profile, &arch, &mut repo_manager.repositories())?;
 
         let mask_manager = MaskManager::new(
             &mut repo_manager.repositories(),
@@ -85,24 +87,29 @@ impl PortageConf {
         }
     }
 
-    /// Sanity check to ensure the profile at `location` is valid for at least one repository
+    /// Sanity check to ensure the given `profile` is valid for at least one repository
     /// for the given `ARCH` and `repos`.
+    ///
+    /// The profile- and the repository location are expected to be absolute paths.
     fn validate_profile<'a>(
-        location: &Path,
+        profile: &Profile,
         arch: &str,
         repos: &mut impl Iterator<Item = &'a Repository>,
     ) -> Result<()> {
-        let profile_path = location.canonicalize()?.display().to_string();
         for repo in repos {
-            let profile_prefix = format!("{}/profiles/", repo.location.canonicalize()?.display());
-            if let Some(p) = profile_path.strip_prefix(&profile_prefix)
+            let profile_prefix = format!("{}/profiles/", repo.location.display());
+            if let Some(p) = profile
+                .location
+                .display()
+                .to_string()
+                .strip_prefix(&profile_prefix)
                 && repo.is_known_profile(arch, p)
             {
                 return Ok(());
             }
         }
         Err(anyhow!(
-            "Profile at {profile_path} is not valid for any configured repository"
+            "Profile {profile} is not valid for any configured repository"
         ))
     }
 }
