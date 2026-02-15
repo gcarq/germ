@@ -136,19 +136,20 @@ impl Repository {
     /// Collects all categories from the repository.
     /// Categories from the given `masters` are inherited and added to the collected categories.
     fn collect_categories(&mut self, masters: &[&Repository]) -> Result<()> {
+        self.categories
+            .extend(masters.iter().flat_map(|repo| &repo.categories).cloned());
+
         let path = self.location.join("profiles").join("categories");
         if !path.exists() {
             return Ok(());
         }
 
-        let master_categories = masters.iter().flat_map(|repo| &repo.categories).cloned();
-
-        self.categories = fs::read_to_string(&path)
-            .with_context(|| anyhow!("unable to read '{}'", path.display()))?
-            .lines()
-            .map(|line| line.to_owned())
-            .chain(master_categories)
-            .collect();
+        self.categories.extend(
+            fs::read_to_string(&path)
+                .with_context(|| anyhow!("unable to read '{}'", path.display()))?
+                .lines()
+                .map(|line| line.to_owned()),
+        );
         Ok(())
     }
 
