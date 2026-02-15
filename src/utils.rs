@@ -49,7 +49,7 @@ pub trait FileFromPath {
             ));
         }
 
-        let mut paths = files_from_dir(path)?.collect::<Result<Vec<_>>>()?;
+        let mut paths = list_files(path)?.collect::<Result<Vec<_>>>()?;
         paths.sort();
 
         let content = paths
@@ -81,25 +81,6 @@ pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
         .collect()
 }
 
-/// Reads the path for all files from the given directory `path`,
-/// ignoring subdirectories and files starting with `.` or ending with `~`.
-pub fn files_from_dir(path: &Path) -> Result<impl Iterator<Item = Result<PathBuf>>> {
-    let iter = fs::read_dir(path)
-        .with_context(|| anyhow!("unable to read directory: '{}'", path.display()))?
-        .filter_map(|entry| match entry {
-            Ok(entry) => match is_file(&entry) {
-                Ok(true) => match entry.file_name().as_bytes() {
-                    [b'.', ..] | [.., b'~'] => None,
-                    _ => Some(Ok(entry.path())),
-                },
-                Ok(false) => None,
-                Err(err) => Some(Err(anyhow!(err))),
-            },
-            Err(err) => Some(Err(anyhow!(err))),
-        });
-    Ok(iter)
-}
-
 /// Extracts the filename from the given path as a `String`.
 pub fn path_to_filename(path: &Path) -> Result<&str> {
     path.file_name()
@@ -120,6 +101,43 @@ pub fn is_file(entry: &DirEntry) -> Result<bool> {
     } else {
         Ok(entry.metadata()?.is_file())
     }
+}
+
+/// Reads all files for the given `path`, ignoring subdirectories and files starting
+/// with `.` or ending with `~`.
+pub fn list_files(path: &Path) -> Result<impl Iterator<Item = Result<PathBuf>>> {
+    let iter = list_dir(path, is_file)?.map(|entry| entry.map(|entry| entry.path()));
+    Ok(iter)
+}
+
+/// Reads all directories for the given `path`, ignoring subdirectories and files starting
+/// with `.` or ending with `~`.
+pub fn list_dirs(path: &Path) -> Result<impl Iterator<Item = Result<PathBuf>>> {
+    let iter =
+        list_dir(path, |p| is_file(p).map(|r| !r))?.map(|entry| entry.map(|entry| entry.path()));
+    Ok(iter)
+}
+
+/// Reads the given directory `path` and returns an iterator over its entries that match the given
+/// closure, ignoring entries starting with `.` or ending with `~`.
+fn list_dir<'a, F>(path: &'a Path, func: F) -> Result<impl Iterator<Item = Result<DirEntry>> + 'a>
+where
+    F: Fn(&DirEntry) -> Result<bool> + 'a,
+{
+    let iter = fs::read_dir(path)
+        .with_context(|| anyhow!("unable to read directory: '{}'", path.display()))?
+        .filter_map(move |entry| match entry {
+            Ok(entry) => match func(&entry) {
+                Ok(true) => match entry.file_name().as_bytes() {
+                    [b'.', ..] | [.., b'~'] => None,
+                    _ => Some(Ok(entry)),
+                },
+                Ok(false) => None,
+                Err(err) => Some(Err(anyhow!(err))),
+            },
+            Err(err) => Some(Err(anyhow!(err))),
+        });
+    Ok(iter)
 }
 
 #[cfg(test)]

@@ -154,6 +154,7 @@ impl Profile {
             // If a profiles references a specific repository, resolve it first.
             // This is not specified in PMS but is implemented in portage
             // see https://bugs.gentoo.org/515666
+            // TODO: this behavior is controlled via profile-formats in <repo>/metadata/layout.conf
             let path = match profile.split_once(':') {
                 Some((repo_name, profile_path)) => {
                     let repo = repo_manager.get(repo_name).ok_or_else(|| {

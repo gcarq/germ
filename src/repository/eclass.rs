@@ -24,7 +24,7 @@ impl Eclasses {
             return Ok(eclasses);
         }
 
-        for file_path in utils::files_from_dir(path)? {
+        for file_path in utils::list_files(path)? {
             let file_path = file_path?;
             let filename = utils::path_to_filename(&file_path)?;
             if let Some(eclass_name) = filename.strip_suffix(".eclass") {

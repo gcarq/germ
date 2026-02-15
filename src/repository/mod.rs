@@ -1,3 +1,4 @@
+mod config;
 mod desc;
 mod eclass;
 pub mod manager;
@@ -9,7 +10,8 @@ use crate::ebuild::Ebuild;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
 use crate::package::version::PackageVersion;
-use crate::regex::{PKG_VER_REV, REPOSITORY};
+use crate::regex::PKG_VER_REV;
+use crate::repository::config::RepositoryConfig;
 use crate::repository::desc::ProfileDescription;
 use crate::repository::eclass::Eclasses;
 use crate::repository::sync::{SyncHandler, build_sync_handler};
@@ -23,9 +25,6 @@ use std::path::{Path, PathBuf};
 use std::{fmt, fs};
 
 lazy_static! {
-    /// Regex to validate repository names.
-    static ref REPO_RE: Regex = Regex::new(&format!(r"^{REPOSITORY}$")).unwrap();
-
     /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision`
     /// from an ebuild name.
     static ref EBUILD_RE: Regex = Regex::new(&format!(r"^{PKG_VER_REV}.ebuild$")).unwrap();
@@ -36,7 +35,7 @@ lazy_static! {
 pub struct Repository {
     pub location: PathBuf,
     pub name: String,
-    pub priority: isize,
+    pub masters: Vec<String>,
     pub eapi: Eapi,
     pub categories: Vec<String>,
     pub packages: HashSet<Package>,
@@ -50,33 +49,48 @@ pub struct Repository {
 }
 
 impl Repository {
-    /// Builds a main repository from the given INI `properties` coming from `repos.conf`.
-    pub fn build_main_repository(properties: &ini::Properties) -> Result<Self> {
-        let location = Self::parse_location(properties)?;
-        Self::validate_repository(&location)?;
-        let categories = Self::collect_categories(&location)?;
-        Self::new(location, categories, properties)
+    /// Builds a new [`Repository`] with the given `location` and INI `properties` from repos.conf.
+    ///
+    /// Packages must be collected separately by calling `collect_packages` since they require
+    /// parsing the whole repository and can be expensive to build.
+    /// This allows deferring package collection until it's actually needed.
+    pub fn new(config: &RepositoryConfig) -> Result<Self> {
+        let eapi = Self::read_eapi(&config.location)?;
+
+        let profiles = config.location.join("profiles");
+        let repository = Self {
+            packages: HashSet::new(),
+            categories: Vec::new(),
+            package_mask: LineBasedFile::from_path(
+                &profiles.join("package.mask"),
+                eapi.profile_file_dirs,
+                true,
+            )?,
+            package_unmask: LineBasedFile::from_path(
+                &profiles.join("package.unmask"),
+                eapi.profile_file_dirs,
+                true,
+            )?,
+            eclasses: Eclasses::from_path(&config.location.join("eclass"))
+                .with_context(|| "unable to collectd eclasses")?,
+            arch_list: LineBasedFile::from_path(&profiles.join("arch.list"), false, true)?,
+            profiles_desc: LineBasedFile::from_path(&profiles.join("profiles.desc"), false, true)?
+                .into_iter()
+                .map(|line| ProfileDescription::from_line(&line))
+                .collect::<Result<_>>()?,
+            masters: config.masters.clone(),
+            name: config.name.clone(),
+            location: config.location.clone(),
+            sync_handler: build_sync_handler(&config.raw_properties)?,
+            eapi,
+        };
+        Ok(repository)
     }
 
-    /// Builds an overlay repository from the given INI `properties` coming from `repos.conf`
-    /// and main [`Repository`].
-    /// Missing profiles and categories are inherited from the main repository.
-    pub fn build_overlay(properties: &ini::Properties, main_repo: &Repository) -> Result<Self> {
-        let location = Self::parse_location(properties)?;
-        let categories = Self::collect_categories(&location)?
-            .into_iter()
-            .chain(main_repo.categories.iter().cloned())
-            .collect::<Vec<_>>();
-        Self::new(location, categories, properties)
-    }
-
-    /// Synchronizes the repository using its [`SyncHandler`].
-    pub fn sync(&self) -> Result<()> {
-        if let Some(sync_handler) = &self.sync_handler {
-            println!("Syncing repository '{}'", self.name);
-            sync_handler.sync()?;
-        }
-        Ok(())
+    /// Populates all categories and packages. Categories are inherited from the given `masters`.
+    pub fn populate(&mut self, masters: &[&Repository]) -> Result<()> {
+        self.collect_categories(masters)?;
+        self.collect_packages()
     }
 
     /// Returns all packages in the repository that match the given `atom`.
@@ -91,7 +105,7 @@ impl Repository {
 
     /// Resolves the [`Ebuild`] for the given `package`.
     /// Returns Err if the ebuild file doesn't exist or is invalid.
-    pub fn resolve_ebuild<'a>(&self, package: &'a Package) -> Result<Ebuild<'a>> {
+    pub fn resolve_ebuild<'p>(&self, package: &'p Package) -> Result<Ebuild<'p>> {
         let path = self
             .location
             .join(&package.category)
@@ -109,113 +123,72 @@ impl Repository {
             .any(|desc| desc.keyword == arch && desc.profile_path == profile_path)
     }
 
-    /// Helper function to parse the repository location from the given INI `properties`.
-    fn parse_location(properties: &ini::Properties) -> Result<PathBuf> {
-        properties
-            .get("location")
-            .map(PathBuf::from)
-            .ok_or_else(|| anyhow!("missing location property"))
-    }
-
-    /// Builds a new [`Repository`] with the given `location` and INI `properties`.
-    fn new(
-        location: PathBuf,
-        categories: Vec<String>,
-        properties: &ini::Properties,
-    ) -> Result<Self> {
-        let eapi = Self::read_eapi(&location)?;
-        let profiles = location.join("profiles");
-        let name = Self::read_repo_name(&location)?;
-
-        let repository = Self {
-            packages: HashSet::from_iter(
-                Self::collect_packages(&name, &location, &categories)
-                    .with_context(|| "unable to collect packages")?,
-            ),
-            package_mask: LineBasedFile::from_path(
-                &profiles.join("package.mask"),
-                eapi.profile_file_dirs,
-                true,
-            )?,
-            package_unmask: LineBasedFile::from_path(
-                &profiles.join("package.unmask"),
-                eapi.profile_file_dirs,
-                true,
-            )?,
-            eclasses: Eclasses::from_path(&location.join("eclass"))
-                .with_context(|| "unable to collectd eclasses")?,
-            arch_list: LineBasedFile::from_path(&profiles.join("arch.list"), false, true)?,
-            profiles_desc: LineBasedFile::from_path(&profiles.join("profiles.desc"), false, true)?
-                .into_iter()
-                .map(|line| ProfileDescription::from_line(&line))
-                .collect::<Result<_>>()?,
-            sync_handler: build_sync_handler(properties)?,
-            priority: properties
-                .get("priority")
-                .map(|s| s.parse::<isize>())
-                .transpose()
-                .with_context(|| "invalid priority value")?
-                .unwrap_or(0),
-            name,
-            location,
-            eapi,
-            categories,
-        };
-        Ok(repository)
-    }
-
-    /// Validates the main repository structure at the given `location`
-    /// according to the PMS 4 specifications.
-    fn validate_repository(location: &Path) -> Result<()> {
-        let profiles = location.join("profiles");
-        if !fs::exists(&profiles)? {
-            return Err(anyhow!("Missing profiles directory"));
-        }
-
-        let required_profile_files = [
-            "arch.list",
-            "categories",
-            "info_pkgs",
-            "info_vars",
-            "package.mask",
-            "profiles.desc",
-            "repo_name",
-            "thirdpartymirrors",
-            "use.desc",
-            "use.local.desc",
-        ];
-        for file in required_profile_files {
-            if profiles.join(file).is_dir() {
-                return Err(anyhow!("Required file not found: profiles/{file}"));
-            }
-        }
-
-        let profile_dirs = ["desc", "updates"];
-        for dir in profile_dirs {
-            if !fs::exists(profiles.join(dir))? {
-                return Err(anyhow!("Required folder not found: profiles/{dir}"));
-            }
-            if !&profiles.join(dir).is_dir() {
-                return Err(anyhow!("profiles/{dir} must be a directory"));
-            }
+    /// Synchronizes the repository using its [`SyncHandler`].
+    pub fn sync(&self) -> Result<()> {
+        if let Some(sync_handler) = &self.sync_handler {
+            println!("Syncing repository '{}'", self.name);
+            sync_handler.sync()?;
         }
         Ok(())
     }
 
-    /// Reads the repository name from the given repository path.
-    fn read_repo_name(path: &Path) -> Result<String> {
-        let repo_name = fs::read_to_string(path.join("profiles").join("repo_name"))?
-            .lines()
-            .next()
-            .ok_or_else(|| anyhow!("Empty repo_name file"))?
-            .to_owned();
-        if !REPO_RE.is_match(&repo_name) {
-            return Err(anyhow!(
-                "Invalid repository name: {repo_name}. It must match the regex: {}",
-                REPO_RE.as_str()
-            ));
+    /// Collects all categories from the repository.
+    /// Categories from the given `masters` are inherited and added to the collected categories.
+    fn collect_categories(&mut self, masters: &[&Repository]) -> Result<()> {
+        let path = self.location.join("profiles").join("categories");
+        if !path.exists() {
+            return Ok(());
         }
-        Ok(repo_name)
+
+        let master_categories = masters.iter().flat_map(|repo| &repo.categories).cloned();
+
+        self.categories = fs::read_to_string(&path)
+            .with_context(|| anyhow!("unable to read '{}'", path.display()))?
+            .lines()
+            .map(|line| line.to_owned())
+            .chain(master_categories)
+            .collect();
+        Ok(())
+    }
+
+    /// Collects all packages from the repository.
+    /// [`Self::collect_categories`] must be called before calling this method since only
+    /// known categories are considered when collecting packages.
+    fn collect_packages(&mut self) -> Result<()> {
+        for category in &self.categories {
+            let cat_path = self.location.join(category);
+
+            let pkg_paths = match utils::list_dirs(&cat_path) {
+                Ok(paths) => paths,
+                _ => continue,
+            };
+
+            for pkg_path in pkg_paths {
+                let pkg_path = pkg_path?;
+                let pkg_name = utils::path_to_filename(&pkg_path)?;
+
+                for file_path in utils::list_files(&pkg_path)? {
+                    let file_path = file_path?;
+                    let caps = match EBUILD_RE.captures(utils::path_to_filename(&file_path)?) {
+                        Some(caps) if caps["package"].starts_with(pkg_name) => caps,
+                        _ => continue,
+                    };
+                    let version = PackageVersion::new(
+                        &caps["version"],
+                        Some(&caps["suffixes"]),
+                        caps.name("revision").map(|m| m.as_str()),
+                    )?;
+                    let pkg = Package::new(
+                        utils::path_to_filename(&cat_path)?,
+                        pkg_name,
+                        version,
+                        &self.name,
+                    )?;
+                    self.packages.insert(pkg);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Reads the repository eapi version from the given repository `path`.
@@ -232,62 +205,6 @@ impl Repository {
                 .ok_or_else(|| anyhow!("Empty eapi file"))?,
         )
     }
-
-    /// Collects all categories from the given repository `location`.
-    /// Returns an empty vec if categories file doesn't exist.
-    fn collect_categories(location: &Path) -> Result<Vec<String>> {
-        let path = location.join("profiles").join("categories");
-        if !path.exists() {
-            return Ok(Vec::new());
-        }
-        let categories = fs::read_to_string(&path)
-            .with_context(|| anyhow!("unable to read '{}'", path.display()))?
-            .lines()
-            .map(|line| line.to_owned())
-            .collect();
-        Ok(categories)
-    }
-
-    /// Collects all packages from the given repository `repo_name`, `location`.
-    /// Only respects `categories` in the given list.
-    fn collect_packages(
-        repo_name: &str,
-        location: &Path,
-        categories: &[String],
-    ) -> Result<Vec<Package>> {
-        let mut packages = Vec::new();
-        for category in categories {
-            let cat_path = location.join(category);
-            let entries = match fs::read_dir(&cat_path) {
-                Ok(entries) => entries,
-                Err(_) => continue,
-            };
-            for entry in entries {
-                let entry = entry?;
-                if utils::is_file(&entry)? {
-                    continue;
-                }
-                let pkg_path = entry.path();
-                let pkg_name = utils::path_to_filename(&pkg_path)?;
-
-                for file_path in utils::files_from_dir(&pkg_path)? {
-                    let file_path = file_path?;
-                    let caps = match EBUILD_RE.captures(utils::path_to_filename(&file_path)?) {
-                        Some(caps) if caps["package"].starts_with(pkg_name) => caps,
-                        _ => continue,
-                    };
-                    let version = PackageVersion::new(
-                        &caps["version"],
-                        Some(&caps["suffixes"]),
-                        caps.name("revision").map(|m| m.as_str()),
-                    )?;
-                    let pkg = Package::new(category, pkg_name, version, repo_name)?;
-                    packages.push(pkg);
-                }
-            }
-        }
-        Ok(packages)
-    }
 }
 
 impl fmt::Display for Repository {
@@ -299,28 +216,6 @@ impl fmt::Display for Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_repository_regex_match() {
-        let valid_names = ["gentoo", "my-repo_1", "repo123"];
-        for name in valid_names {
-            assert!(
-                REPO_RE.is_match(name),
-                "repository name '{name}' should be valid",
-            );
-        }
-    }
-
-    #[test]
-    fn test_repository_regex_no_match() {
-        let invalid_names = ["", "my repo", "repo!", "repo@123", "repo#name", "-repo"];
-        for name in invalid_names {
-            assert!(
-                !REPO_RE.is_match(name),
-                "repository name '{name}' should be invalid",
-            );
-        }
-    }
 
     #[test]
     fn test_ebuild_regex_match() {
