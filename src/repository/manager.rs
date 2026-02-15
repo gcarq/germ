@@ -3,6 +3,7 @@ use crate::package::Package;
 use crate::repository::Repository;
 use crate::repository::config::RepoManagerConfig;
 use anyhow::{Context, Result, anyhow};
+use log::debug;
 use std::collections::HashMap;
 use std::path::Path;
 use std::{fmt, iter};
@@ -32,6 +33,11 @@ impl RepoManager {
                 .map(|(_, repo)| repo)
                 .collect::<Vec<_>>();
             repo.populate(&masters)?;
+            debug!(
+                "Loaded repository '{}' with {} packages",
+                repo.name,
+                repo.packages.len()
+            );
             repositories.insert(repo.name.clone(), repo);
         }
 

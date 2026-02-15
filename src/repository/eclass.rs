@@ -1,6 +1,7 @@
 use crate::utils;
 use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
+use log::trace;
 use regex::Regex;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -61,6 +62,7 @@ impl Eclass {
     /// The name should not contain the `.eclass` suffix.
     /// Returns `Err` if `name` is invalid.
     pub fn new(name: String, path: PathBuf) -> Result<Self> {
+        trace!("Loading eclass '{name}' from '{}'", path.display());
         debug_assert!(
             !name.ends_with(".eclass"),
             "eclass name should not contain the .eclass suffix"

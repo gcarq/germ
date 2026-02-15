@@ -2,6 +2,7 @@ use crate::eapi::Eapi;
 use crate::package::Package;
 use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
+use log::debug;
 use regex::Regex;
 use std::fmt;
 use std::fs::File;
@@ -29,6 +30,7 @@ impl<'a> Ebuild<'a> {
     /// Creates an [`Ebuild`] from the given `path` and `pkg` it relates to.
     /// Returns an `Err` if the EAPI is not found or unsupported for ebuilds.
     pub fn new(path: PathBuf, pkg: &'a Package) -> Result<Self> {
+        debug!("Loading ebuild for '{pkg}' from path '{}'", path.display());
         let reader = BufReader::with_capacity(256, File::open(&path)?);
         for line in reader.lines() {
             let line = line?;

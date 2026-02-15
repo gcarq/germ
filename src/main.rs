@@ -25,6 +25,8 @@ use crate::vdb::Vdb;
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
+use fern::colors::{Color, ColoredLevelConfig};
+use lazy_static::lazy_static;
 use makenv::EnvValue;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -43,6 +45,14 @@ mod regex;
 mod repository;
 mod utils;
 mod vdb;
+
+lazy_static! {
+    /// Colors for log levels.
+    static ref COLORS: ColoredLevelConfig = ColoredLevelConfig::new()
+        .info(Color::Green)
+        .warn(Color::Yellow)
+        .error(Color::Red);
+}
 
 /// Package management tool for Gentoo-like systems.
 #[derive(Parser)]
@@ -75,6 +85,8 @@ enum Command {
 }
 
 fn main() -> Result<()> {
+    setup_logger()?;
+
     let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH))?;
 
     let args = Args::parse();
@@ -137,5 +149,27 @@ fn sync(conf: &PortageConf) -> Result<()> {
     for repo in conf.repo_manager.repositories() {
         repo.sync()?;
     }
+    Ok(())
+}
+
+/// Sets up application logger.
+fn setup_logger() -> Result<()> {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            let format = match record.level() {
+                log::Level::Trace | log::Level::Debug => {
+                    format_args!(
+                        "[{}] {} - {message}",
+                        COLORS.color(record.level()),
+                        record.target()
+                    )
+                }
+                _ => format_args!("[{}] {message}", COLORS.color(record.level())),
+            };
+            out.finish(format);
+        })
+        .level(log::LevelFilter::Debug)
+        .chain(std::io::stdout())
+        .apply()?;
     Ok(())
 }

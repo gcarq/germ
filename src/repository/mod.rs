@@ -19,6 +19,7 @@ use crate::utils;
 use crate::utils::FileFromPath;
 use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
+use log::info;
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -126,7 +127,7 @@ impl Repository {
     /// Synchronizes the repository using its [`SyncHandler`].
     pub fn sync(&self) -> Result<()> {
         if let Some(sync_handler) = &self.sync_handler {
-            println!("Syncing repository '{}'", self.name);
+            info!("Syncing repository '{}'", self.name);
             sync_handler.sync()?;
         }
         Ok(())

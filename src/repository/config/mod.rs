@@ -4,6 +4,7 @@ use crate::utils;
 use anyhow::{Context, Result, anyhow};
 use ini::Ini;
 use lazy_static::lazy_static;
+use log::{debug, warn};
 use regex::Regex;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -32,6 +33,7 @@ impl RepoManagerConfig {
     /// If the location is a directory, it loads and merges all files in the directory
     /// except files starting with `.` or ending with `~`.
     pub fn load(location: &Path) -> Result<Self> {
+        debug!("Loading repos.conf from '{}'", location.display());
         let conf = Self::parse_conf(location).with_context(|| "unable to parse repos.conf")?;
 
         // For now, use "gentoo" as fallback if no DEFAULT section or main-repo property is defined
@@ -39,6 +41,8 @@ impl RepoManagerConfig {
             .section(Some("DEFAULT"))
             .and_then(|props| props.get("main-repo").map(|name| name.to_owned()))
             .unwrap_or_else(|| "gentoo".into());
+
+        debug!("Main repository: '{}'", main_repo_name);
 
         let mut repo_confs = conf
             .into_iter()
@@ -106,7 +110,7 @@ impl RepositoryConfig {
     fn new(repo_name: &str, properties: HashMap<String, String>) -> Result<RepositoryConfig> {
         for prop in UNSUPPORTED_CONF_PROPERTIES {
             if properties.contains_key(*prop) {
-                eprintln!("Warning: '{prop}' property is not supported and will be ignored");
+                warn!("repos.conf: '{prop}' property is not supported and will be ignored");
             }
         }
 

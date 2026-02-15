@@ -4,6 +4,7 @@ use crate::ebuild::handler::prot::{FuncType, Request, Response};
 use crate::package::Package;
 use crate::repository::manager::RepoManager;
 use anyhow::{Result, anyhow};
+use log::error;
 use std::process;
 
 mod version;
@@ -109,7 +110,7 @@ fn contains_word(word: &str, args: &[&str]) -> Response {
 /// Prints the given `message` to stderr and exits with code 1 if `fatal` is true.
 /// Otherwise, it returns "1" as a string.
 fn die(args: &[&str], fatal: bool) -> Response {
-    eprintln!("die: {}", args.join(" "));
+    error!("die: {}", args.join(" "));
     if fatal {
         process::exit(1);
     }

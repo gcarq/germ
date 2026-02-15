@@ -2,6 +2,7 @@ mod ipc;
 
 use crate::process::ipc::IpcHandler;
 use anyhow::{Context, Result, anyhow};
+use log::debug;
 use nix::spawn::{PosixSpawnAttr, PosixSpawnFileActions, posix_spawn};
 use nix::sys::signal::{Signal, kill};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
@@ -68,6 +69,7 @@ impl Process {
         env: &HashMap<String, String>,
         actions: &PosixSpawnFileActions,
     ) -> Result<Pid> {
+        debug!("Spawning process: '{}'", command.join(" "),);
         let binary = command
             .first()
             .ok_or_else(|| anyhow!("no arguments provided to spawn process"))?

@@ -7,6 +7,7 @@ use crate::profile::deprecation::DeprecationInfo;
 use crate::repository::manager::RepoManager;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
+use log::{debug, warn};
 use std::fs;
 use std::path::Path;
 
@@ -49,9 +50,8 @@ impl Profile {
     pub fn new(path: &Path, repo_manager: &RepoManager) -> Result<Self> {
         let eapi = Self::read_eapi(&path.join("eapi"))?;
 
-        // TODO: remove debug print
-        println!(
-            "Loading profile from {} (EAPI: {eapi})",
+        debug!(
+            "Loading profile {} (EAPI: {eapi})",
             path.canonicalize()?.display(),
         );
 
@@ -125,7 +125,7 @@ impl Profile {
         }
 
         if let Some(deprecation) = &profile.deprecated {
-            eprintln!(
+            warn!(
                 "This profile is deprecated. The recommended profile to upgrade to is {}\n\n{}",
                 deprecation.recommended_profile, deprecation.info
             );

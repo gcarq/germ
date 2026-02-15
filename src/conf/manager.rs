@@ -5,6 +5,7 @@ use crate::profile::Profile;
 use crate::repository::Repository;
 use crate::utils::Inherit;
 use anyhow::{Context, Result};
+use log::debug;
 use std::collections::HashMap;
 
 /// Holds all package masks and should be used as the single source of truth  when checking
@@ -41,6 +42,11 @@ impl MaskManager {
         let unmask =
             Self::map_from_linefile(unmask).with_context(|| "unable to collect package unmasks")?;
         let manager = Self { mask, unmask };
+        debug!(
+            "Initialized MaskManager with {} masks and {} unmasks",
+            manager.mask.len(),
+            manager.unmask.len()
+        );
         Ok(manager)
     }
 

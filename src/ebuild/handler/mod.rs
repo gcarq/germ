@@ -10,6 +10,7 @@ use crate::makenv::MakeEnv;
 use crate::process::Process;
 use crate::repository::manager::RepoManager;
 use anyhow::{Context, Result, anyhow};
+use log::debug;
 use nix::sys::wait::WaitStatus;
 use std::collections::HashMap;
 
@@ -52,6 +53,11 @@ impl<'a> EbuildPhaseHandler<'a> {
     /// Starts the process for the ebuild phase.
     /// NOTE: This call blocks until the process has been finished.
     pub fn execute(&mut self) -> Result<()> {
+        debug!(
+            "Executing ebuild phase '{}' for '{}'",
+            self.phase.as_str(),
+            self.ebuild.pkg
+        );
         let mut process = Process::with_ipc(&self.args, &self.env)
             .with_context(|| "unable to spawn ebuild process")?;
         let ipc = match &mut process.ipc {

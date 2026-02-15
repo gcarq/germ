@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use ini::Ini;
+use log::debug;
 use std::path::Path;
 
 /// Holds the layout configuration of a repository,
@@ -17,6 +18,7 @@ impl Layout {
     /// Return Err if the file doesn't exist, is not a valid INI file or if
     /// required properties are missing.
     pub fn from_path(location: &Path) -> Result<Self> {
+        debug!("Loading layout.conf from {}", location.display());
         let conf = Ini::load_from_file(location)?;
         let properties = conf
             .section(None::<String>)
