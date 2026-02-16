@@ -19,7 +19,7 @@
 )]
 
 use crate::conf::PortageConf;
-use crate::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
+use crate::consts::{DEFAULT_LOG_LEVEL, DEFAULT_USE_PORTAGE_CONF_PATH};
 use crate::deps::Atom;
 use crate::vdb::Vdb;
 use anyhow::{Context, Result, anyhow};
@@ -168,7 +168,7 @@ fn setup_logger() -> Result<()> {
             };
             out.finish(format);
         })
-        .level(log::LevelFilter::Debug)
+        .level(DEFAULT_LOG_LEVEL)
         .chain(std::io::stdout())
         .apply()?;
     Ok(())

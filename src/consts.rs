@@ -1,3 +1,5 @@
+pub const DEFAULT_LOG_LEVEL: log::LevelFilter = log::LevelFilter::Debug;
+
 /// List of EAPIs that are considered valid and in various places
 pub const VALID_EAPIS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 

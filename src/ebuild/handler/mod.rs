@@ -1,5 +1,6 @@
 mod functions;
 mod prot;
+mod utils;
 
 use crate::conf::PortageConf;
 use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
@@ -66,13 +67,8 @@ impl<'a> EbuildPhaseHandler<'a> {
         };
 
         loop {
-            if !ipc.poll()? {
-                continue;
-            }
-
-            let data = match ipc.recv()? {
-                Some(data) => shlex::split(&data)
-                    .ok_or_else(|| anyhow!("unable to split text due to syntax errors"))?,
+            let request = match ipc.recv::<Request>()? {
+                Some(msg) => msg,
                 // Got EOF, at this point the ebuild process should have already exited
                 None => match process.wait()? {
                     WaitStatus::Exited(_, 0) => {
@@ -85,11 +81,8 @@ impl<'a> EbuildPhaseHandler<'a> {
                     _ => return Err(anyhow!("ebuild process terminated abnormally")),
                 },
             };
-
-            let data = data.iter().map(|s| s.as_str()).collect::<Vec<_>>();
-            let request = Request::new(&data)?;
-            let response = handle_request(self.ebuild, self.repo_manager, &request)?;
-            ipc.send(&response)?;
+            let response = handle_request(self.ebuild, self.repo_manager, request)?;
+            ipc.send(response)?;
         }
         Ok(())
     }

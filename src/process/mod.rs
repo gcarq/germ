@@ -1,4 +1,4 @@
-mod ipc;
+pub mod ipc;
 
 use crate::process::ipc::IpcHandler;
 use anyhow::{Context, Result, anyhow};
@@ -97,6 +97,25 @@ impl Process {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process::ipc::{ChildMessage, ParentMessage};
+
+    struct ToBashTestMsg(String);
+    impl ParentMessage for ToBashTestMsg {
+        fn into_bytes(self) -> Vec<u8> {
+            self.0.into_bytes()
+        }
+    }
+
+    struct ToRustTestMsg(pub String);
+
+    impl ChildMessage for ToRustTestMsg {
+        fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
+            let s = String::from_utf8(bytes)
+                .with_context(|| "invalid UTF-8 in child message")?
+                .to_string();
+            Ok(Self(s))
+        }
+    }
 
     #[test]
     fn test_process_new() {
@@ -112,22 +131,22 @@ mod tests {
         let args = vec![
             "/usr/bin/bash".into(),
             "-c".into(),
-            "read line <&10; echo ${line} >&11;\
-            echo ${TEST_VARIABLE} >&11;\
-            sleep infinity"
+            r#"IFS= read -r response <&10 || exit 1
+            printf '%s\n' "${response}" >&11 || exit 1
+            printf '%s\n' "${TEST_ENV}" >&11 || exit 1
+            sleep 30"#
                 .into(),
         ];
-        let env: HashMap<String, String> =
-            HashMap::from_iter([("TEST_VARIABLE".into(), "42".into())]);
+        let env: HashMap<String, String> = HashMap::from_iter([("TEST_ENV".into(), "42".into())]);
         let mut proc = Process::with_ipc(&args, &env).unwrap();
         let ipc = proc.ipc.as_mut().unwrap();
 
-        ipc.send(&String::from("sync")).unwrap();
-        let resp = ipc.recv().unwrap();
-        assert_eq!(resp, Some("sync".into()), "expected echoed line");
+        ipc.send(ToBashTestMsg("sync".into())).unwrap();
+        let resp = ipc.recv::<ToRustTestMsg>().unwrap().unwrap();
+        assert_eq!(resp.0, "sync", "expected echoed line");
 
-        let resp = ipc.recv().unwrap();
-        assert_eq!(resp, Some("42".into()), "expected value from env variable");
+        let resp = ipc.recv::<ToRustTestMsg>().unwrap().unwrap();
+        assert_eq!(resp.0, "42", "expected value from env variable");
 
         proc.stop().unwrap();
     }

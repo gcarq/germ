@@ -4,7 +4,8 @@ use crate::ebuild::handler::prot::{FuncType, Request, Response};
 use crate::package::Package;
 use crate::repository::manager::RepoManager;
 use anyhow::{Result, anyhow};
-use log::error;
+use log::{debug, error};
+use std::ops::Deref;
 use std::process;
 
 mod version;
@@ -15,28 +16,30 @@ mod version;
 pub fn handle_request(
     ebuild: &Ebuild,
     repo_manager: &RepoManager,
-    request: &Request,
+    request: Request,
 ) -> Result<Response> {
+    let args = request.args.deref();
     match request.func {
-        FuncType::ResolveEclass => match request.args {
+        FuncType::ResolveEclass => match args {
             [name] => resolve_eclass(ebuild.pkg, repo_manager, name),
             _ => Err(anyhow!(
                 "invalid arguments: __resolve_eclass <name>: {:?}",
                 request.args
             )),
         },
-        FuncType::ContainsWord => match request.args {
+        FuncType::ContainsWord => match args {
             [word, args @ ..] => Ok(contains_word(word, args)),
             _ => Err(anyhow!(
                 "invalid arguments: contains_word <word> <string>: {:?}",
                 request.args
             )),
         },
-        FuncType::Die => match request.args {
-            ["-n", args @ ..] => Ok(die(args, false)),
+        FuncType::DebugPrint => Ok(debug_print(args)),
+        FuncType::Die => match args {
+            [first, args @ ..] if first == "-n" => Ok(die(args, false)),
             args => Ok(die(args, true)),
         },
-        FuncType::Has => match request.args {
+        FuncType::Has => match args {
             [word, args @ ..] => match args.contains(word) {
                 true => Ok(Response::Ok(None)),
                 false => Ok(Response::Err(None)),
@@ -46,7 +49,7 @@ pub fn handle_request(
                 request.args
             )),
         },
-        FuncType::HasV if ebuild.eapi.is_hasv_supported() => match request.args {
+        FuncType::HasV if ebuild.eapi.is_hasv_supported() => match args {
             [word, args @ ..] => match args.contains(word) {
                 true => Ok(Response::Ok(Some(word.to_string()))),
                 false => Ok(Response::Err(None)),
@@ -56,7 +59,7 @@ pub fn handle_request(
                 request.args
             )),
         },
-        FuncType::HasQ if ebuild.eapi.is_hasq_supported() => match request.args {
+        FuncType::HasQ if ebuild.eapi.is_hasq_supported() => match args {
             [word, args @ ..] => match args.contains(word) {
                 true => Ok(Response::Ok(None)),
                 false => Ok(Response::Err(None)),
@@ -66,7 +69,7 @@ pub fn handle_request(
                 request.args
             )),
         },
-        FuncType::VerCut => match request.args {
+        FuncType::VerCut => match args {
             [range] => ver_cut(ebuild.pkg, range, None),
             [range, version] => ver_cut(ebuild.pkg, range, Some(version)),
             _ => Err(anyhow!(
@@ -74,8 +77,8 @@ pub fn handle_request(
                 request.args
             )),
         },
-        FuncType::VerRs => ver_rs(ebuild.pkg, request.args),
-        FuncType::VerTest => match request.args {
+        FuncType::VerRs => ver_rs(ebuild.pkg, args),
+        FuncType::VerTest => match args {
             [op, v2] => ver_test(ebuild.pkg, None, op, v2),
             [v1, op, v2] => ver_test(ebuild.pkg, Some(v1), op, v2),
             _ => Err(anyhow!(
@@ -93,7 +96,7 @@ pub fn handle_request(
 
 /// Checks if the given `word` is present anywhere in the list of `args`.
 /// Returns `Err` if `word` contains whitespace or is not present.
-fn contains_word(word: &str, args: &[&str]) -> Response {
+fn contains_word(word: &str, args: &[String]) -> Response {
     if word.contains(' ') {
         return Response::Err(None);
     }
@@ -107,9 +110,14 @@ fn contains_word(word: &str, args: &[&str]) -> Response {
     }
 }
 
-/// Prints the given `message` to stderr and exits with code 1 if `fatal` is true.
-/// Otherwise, it returns "1" as a string.
-fn die(args: &[&str], fatal: bool) -> Response {
+/// Logs the given `args` using `debug!()`.
+fn debug_print(args: &[String]) -> Response {
+    debug!(target: "ebuild", "{}", args.join(" "));
+    Response::Ok(None)
+}
+
+/// Logs the given `message` to `error!()` and exits with code 1 if `fatal` is true.
+fn die(args: &[String], fatal: bool) -> Response {
     error!("die: {}", args.join(" "));
     if fatal {
         process::exit(1);
@@ -148,6 +156,7 @@ mod tests {
     use crate::eapi::Eapi;
     use crate::ebuild::Ebuild;
     use crate::package::version::PackageVersion;
+    use crate::process::ipc::ChildMessage;
     use std::path::PathBuf;
 
     #[test]
@@ -168,36 +177,23 @@ mod tests {
 
         // (request data, expected response)
         let test_data = [
+            ("FN die -n This is a non-fatal error", Response::Err(None)),
+            ("FN has foo foo bar baz", Response::Ok(None)),
             (
-                vec!["FN", "die", "-n", "This is a non-fatal error"],
-                Response::Err(None),
-            ),
-            (
-                vec!["FN", "has", "foo", "foo", "bar", "baz"],
+                "FN contains_word nodoc buildpkg clean-logs fail-clean nodoc parallel-install split-log",
                 Response::Ok(None),
             ),
             (
-                vec![
-                    "FN",
-                    "contains_word",
-                    "nodoc",
-                    "buildpkg clean-logs fail-clean nodoc parallel-install split-log",
-                ],
-                Response::Ok(None),
-            ),
-            (
-                vec!["FN", "ver_rs", "1-2", "-", "1.2.3.4"],
+                "FN ver_rs 1-2 - 1.2.3.4",
                 Response::Ok(Some("1-2-3.4".into())),
             ),
-            (
-                vec!["FN", "ver_test", "6.0", "-gt", "5.0"],
-                Response::Ok(None),
-            ),
+            ("FN ver_test 6.0 -gt 5.0", Response::Ok(None)),
         ];
         for (data, response) in test_data {
-            let request = Request::new(&data).unwrap();
+            let data = data.to_string().into_bytes();
+            let request = Request::from_bytes(data).unwrap();
             assert_eq!(
-                handle_request(&ebuild, &RepoManager::default(), &request).unwrap(),
+                handle_request(&ebuild, &RepoManager::default(), request).unwrap(),
                 response
             )
         }

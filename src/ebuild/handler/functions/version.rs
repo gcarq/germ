@@ -44,7 +44,7 @@ pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<Resp
 /// If the len of `args` is odd, the last element is treated as the version string,
 /// otherwise the package's PV is used.
 /// Returns the modified version string or an `Err` if parsing fails.
-pub fn ver_rs(pkg: &Package, args: &[&str]) -> Result<Response> {
+pub fn ver_rs(pkg: &Package, args: &[String]) -> Result<Response> {
     if args.len() < 2 {
         return Err(anyhow!("ver_rs requires at least two arguments"));
     }
@@ -52,7 +52,7 @@ pub fn ver_rs(pkg: &Package, args: &[&str]) -> Result<Response> {
     let (pairs, version) = match args.len() & 1 == 0 {
         true => (args, None),
         // Safe to unwrap, since we know args.len() must be > 0
-        false => (&args[..args.len() - 1], Some(*args.last().unwrap())),
+        false => (&args[..args.len() - 1], Some(args.last().unwrap())),
     };
 
     // Fallback to PV if no version is provided
@@ -286,6 +286,7 @@ mod tests {
         .unwrap();
         for (args, expected) in test_cases {
             let response = Response::Ok(Some(expected.to_owned()));
+            let args = args.into_iter().map(String::from).collect::<Vec<_>>();
             assert_eq!(
                 ver_rs(&pkg, &args).unwrap_or_else(|_| panic!("Failed for input args: {args:?}")),
                 response,
@@ -305,6 +306,7 @@ mod tests {
         .unwrap();
         let test_cases = [vec![], vec!["1"], vec!["foo", "-"]];
         for args in test_cases {
+            let args = args.into_iter().map(String::from).collect::<Vec<_>>();
             assert!(
                 ver_rs(&pkg, &args).is_err(),
                 "Expected error for input args: {:?}",

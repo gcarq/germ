@@ -1,15 +1,34 @@
 use anyhow::{Context, Result, anyhow};
-use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::spawn::PosixSpawnFileActions;
 use nix::unistd::{Pid, pipe};
-use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::mem::ManuallyDrop;
-use std::os::fd::{AsFd, AsRawFd, FromRawFd};
-use std::time::Duration;
+use std::os::fd::{AsRawFd, FromRawFd};
+
+/// Trait for messages sent from the parent process to the child process.
+pub trait ParentMessage {
+    fn into_bytes(self) -> Vec<u8>;
+}
+
+/// Trait for messages sent from the child process to the parent process.
+pub trait ChildMessage: Sized {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self>;
+}
 
 /// Handler for IPC communication via pipes with a child process.
+/// When the `IpcHandler` is dropped, the write end of the pipe is flushed to ensure all data is
+/// sent to the child process before closing.
+///
+/// The child process is expected to use file descriptors 10 and 11 for reading and writing,
+/// respectively. The child process must ensure that a message doesn't contain any
+/// newline characters, as they are used to delimit messages.
+///
+/// **Example message from child to parent process:**
+/// ```
+/// FN __resolve_eclass toolchain-funcs\n
+/// ```
+///
 pub struct IpcHandler {
     reader: BufReader<File>,
     writer: Option<File>,
@@ -65,46 +84,32 @@ impl IpcHandler {
         Ok((instance, pid))
     }
 
-    /// Sends the given `Resp` of text to the bash process.
-    /// The data sent should not include a newline character; one will be added automatically.
-    pub fn send<Resp: fmt::Display>(&mut self, response: &Resp) -> Result<()> {
-        let to_bash = match &mut self.writer {
+    /// Sends the given [`ParentMessage`] to the child process.
+    /// The data sent must not contain a newline character; one will be added automatically.
+    pub fn send<T: ParentMessage>(&mut self, msg: T) -> Result<()> {
+        let writer = match &mut self.writer {
             Some(writer) => writer,
             None => return Err(anyhow!("bash writer is closed")),
         };
-        to_bash
-            .write_all(response.to_string().as_bytes())
-            .and_then(|_| to_bash.write_all(b"\n"))
-            .and_then(|_| to_bash.flush())
+        writer
+            .write_all(&msg.into_bytes())
+            .and_then(|_| writer.write_all(b"\n"))
+            .and_then(|_| writer.flush())
             .with_context(|| "failed to write to bash")
     }
 
-    /// Receives a line of text from the child process without the ending newline.
-    /// Returns `Ok(None)` if EOF is reached.
-    pub fn recv(&mut self) -> Result<Option<String>> {
-        let mut buf = String::new();
-        match self.reader.read_line(&mut buf) {
-            Ok(0) => Ok(None), // EOF
-            Ok(_) => {
-                if buf.ends_with('\n') {
-                    buf.pop();
-                }
-                Ok(Some(buf))
-            }
-            Err(e) => Err(anyhow!(e)).with_context(|| "failed to read from child process"),
-        }
-    }
-
-    /// Waits for data to be available for reading from the child process.
-    /// Times out after 500 milliseconds.
-    /// Returns `Ok(true)` if data is available, `Ok(false)` if timed out.
-    pub fn poll(&mut self) -> Result<bool> {
-        let timeout = PollTimeout::try_from(Duration::from_millis(500))?;
-        let fd = PollFd::new(self.reader.get_ref().as_fd(), PollFlags::POLLIN);
-        match poll(&mut [fd], timeout)? {
-            0 => Ok(false),
-            _ => Ok(true),
-        }
+    /// Reads raw bytes from the child process until `\n` is encountered.
+    /// Returns [`ChildMessage`] or `Ok(None)` if EOF is reached.
+    pub fn recv<T: ChildMessage>(&mut self) -> Result<Option<T>> {
+        let mut buf = Vec::new();
+        let num_bytes = (self.reader.read_until(b'\n', &mut buf))
+            .with_context(|| "failed to read from child process")?;
+        // We got EOF
+        if num_bytes == 0 {
+            return Ok(None);
+        };
+        buf.pop_if(|b| *b == b'\n');
+        Ok(Some(T::from_bytes(buf)?))
     }
 }
 
