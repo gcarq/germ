@@ -5,9 +5,10 @@ mod git;
 
 use crate::repository::sync::git::GitSyncHandler;
 use anyhow::{Context, Result, anyhow};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
-pub enum SyncType {
+enum SyncType {
     Git,
 }
 
@@ -23,21 +24,24 @@ impl SyncType {
 /// Configuration for the synchronization mechanism.
 /// This struct holds common options that are used for all [`SyncType`],
 /// such as `location`, `auto_sync`, `sync_uri`, etc.
-pub struct SyncConfig {
+struct SyncConfig {
+    // Absolute path to the repository location on the local filesystem.
     pub location: PathBuf,
     pub auto_sync: bool,
     pub sync_uri: Option<String>,
 }
 
 impl SyncConfig {
-    pub fn from_ini(properties: &ini::Properties) -> Result<Self> {
+    pub fn from_ini(properties: &HashMap<String, String>) -> Result<Self> {
         let location = properties
             .get("location")
             .map(PathBuf::from)
-            .ok_or_else(|| anyhow!("missing required 'location' property"))?;
+            .ok_or_else(|| anyhow!("missing required 'location' property"))?
+            .canonicalize()?;
+
         let auto_sync = properties
             .get("auto-sync")
-            .map(|s| match s {
+            .map(|s| match s.as_str() {
                 "true" | "yes" => Ok(true),
                 "false" | "no" => Ok(false),
                 _ => Err(anyhow!("invalid auto-sync value: '{s}'")),
@@ -58,10 +62,12 @@ impl SyncConfig {
 
 /// Builds a synchronization handler based on the provided INI `properties`.
 /// The `sync-type` property is used to determine which synchronization mechanism to use.
-pub fn build_sync_handler(properties: &ini::Properties) -> Result<Option<Box<dyn SyncHandler>>> {
+pub fn build_sync_handler(
+    properties: &HashMap<String, String>,
+) -> Result<Option<Box<dyn SyncHandler>>> {
     let sync_type = properties
         .get("sync-type")
-        .map(SyncType::new)
+        .map(|sync_type| SyncType::new(sync_type))
         .transpose()
         .with_context(|| "invalid sync-type value")?;
 
@@ -77,7 +83,7 @@ pub fn build_sync_handler(properties: &ini::Properties) -> Result<Option<Box<dyn
 pub trait SyncHandler {
     /// Creates a new instance of the `SyncHandler` based on the provided INI `properties`
     /// for this repository coming from `repos.conf`.
-    fn new(properties: &ini::Properties) -> Result<Self>
+    fn new(properties: &HashMap<String, String>) -> Result<Self>
     where
         Self: Sized;
 
@@ -105,6 +111,16 @@ mod tests {
     use super::*;
     use ini::Ini;
 
+    fn load_properties(ini_content: &str) -> HashMap<String, String> {
+        Ini::load_from_str(ini_content)
+            .expect("failed to parse INI content")
+            .section(Some("gentoo"))
+            .expect("missing section")
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect()
+    }
+
     #[test]
     fn test_build_sync_handler_git() {
         let ini_content = r#"
@@ -112,11 +128,7 @@ mod tests {
                 location = /dev/null
                 sync-type = git
             "#;
-        let properties = Ini::load_from_str(ini_content)
-            .expect("failed to parse INI content")
-            .section(Some("gentoo"))
-            .expect("missing section")
-            .clone();
+        let properties = load_properties(ini_content);
 
         let handler = build_sync_handler(&properties)
             .expect("failed to build sync handler")
@@ -133,11 +145,7 @@ mod tests {
                 sync-type = git
                 sync-uri = https://github.com/gentoo-mirror/gentoo.git
             "#;
-        let properties = Ini::load_from_str(ini_content)
-            .expect("failed to parse INI content")
-            .section(Some("gentoo"))
-            .expect("missing section")
-            .clone();
+        let properties = load_properties(ini_content);
 
         let config = SyncConfig::from_ini(&properties).expect("failed to create SyncConfig");
         assert_eq!(config.location, PathBuf::from("/path/to/repo"));
@@ -154,11 +162,7 @@ mod tests {
                 [gentoo]
                 location = /path/to/repo
             "#;
-        let properties = Ini::load_from_str(ini_content)
-            .expect("failed to parse INI content")
-            .section(Some("gentoo"))
-            .expect("missing section")
-            .clone();
+        let properties = load_properties(ini_content);
 
         let config = SyncConfig::from_ini(&properties).expect("failed to create SyncConfig");
         assert_eq!(config.location, PathBuf::from("/path/to/repo"));
@@ -173,12 +177,7 @@ mod tests {
                 location = /path/to/repo
                 auto-sync = maybe
             "#;
-        let properties = Ini::load_from_str(ini_content)
-            .expect("failed to parse INI content")
-            .section(Some("gentoo"))
-            .expect("missing section")
-            .clone();
-
+        let properties = load_properties(ini_content);
         assert!(SyncConfig::from_ini(&properties).is_err());
     }
 }

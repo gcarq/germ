@@ -27,6 +27,7 @@ use clap::{Parser, Subcommand};
 use ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
 use fern::colors::{Color, ColoredLevelConfig};
 use lazy_static::lazy_static;
+use log::error;
 use makenv::EnvValue;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -147,7 +148,10 @@ fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
 /// Syncs all repositories defined in the portage `conf`.
 fn sync(conf: &PortageConf) -> Result<()> {
     for repo in conf.repo_manager.repositories() {
-        repo.sync()?;
+        match repo.sync() {
+            Ok(_) => (),
+            Err(e) => error!("failed to sync repository '{}'\n\t{e}", repo.name),
+        }
     }
     Ok(())
 }
