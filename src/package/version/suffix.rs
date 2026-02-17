@@ -93,11 +93,11 @@ impl fmt::Display for VersionSuffixes {
 /// For example: `"alpha1", "beta2", "pre", "rc", "p20230101"`.
 #[derive(Clone, Eq, Debug)]
 pub enum VersionSuffix {
-    Alpha(Option<usize>),
-    Beta(Option<usize>),
-    Pre(Option<usize>),
-    Rc(Option<usize>),
-    Patch(Option<usize>),
+    Alpha(Option<String>),
+    Beta(Option<String>),
+    Pre(Option<String>),
+    Rc(Option<String>),
+    Patch(Option<String>),
 }
 
 impl VersionSuffix {
@@ -114,32 +114,34 @@ impl VersionSuffix {
             .find(|c: char| c.is_ascii_digit())
             .unwrap_or(suffix.len());
         let (suffix, number) = suffix.split_at(split_index);
-        let number_parsed =
-            match number.is_empty() {
-                true => None,
-                false => Some(number.parse::<usize>().with_context(|| {
+        let number = match number.is_empty() {
+            true => None,
+            false => {
+                number.parse::<usize>().with_context(|| {
                     anyhow!("unable to parse version suffix number: '{number}'")
-                })?),
-            };
+                })?;
+                Some(number.to_string())
+            }
+        };
         let suffix = match suffix {
-            "alpha" => Self::Alpha(number_parsed),
-            "beta" => Self::Beta(number_parsed),
-            "pre" => Self::Pre(number_parsed),
-            "rc" => Self::Rc(number_parsed),
-            "p" => Self::Patch(number_parsed),
+            "alpha" => Self::Alpha(number),
+            "beta" => Self::Beta(number),
+            "pre" => Self::Pre(number),
+            "rc" => Self::Rc(number),
+            "p" => Self::Patch(number),
             _ => return Err(anyhow!("invalid version suffix: {suffix}")),
         };
         Ok(suffix)
     }
 
     /// Deconstructs the suffix into its string representation and optional number.
-    const fn deconstruct(&self) -> (&str, Option<usize>) {
+    const fn deconstruct(&self) -> (&str, &Option<String>) {
         match self {
-            VersionSuffix::Alpha(n) => ("alpha", *n),
-            VersionSuffix::Beta(n) => ("beta", *n),
-            VersionSuffix::Pre(n) => ("pre", *n),
-            VersionSuffix::Rc(n) => ("rc", *n),
-            VersionSuffix::Patch(n) => ("p", *n),
+            VersionSuffix::Alpha(num) => ("alpha", num),
+            VersionSuffix::Beta(num) => ("beta", num),
+            VersionSuffix::Pre(num) => ("pre", num),
+            VersionSuffix::Rc(num) => ("rc", num),
+            VersionSuffix::Patch(num) => ("p", num),
         }
     }
 
@@ -169,7 +171,11 @@ impl Ord for VersionSuffix {
             | (VersionSuffix::Pre(a), VersionSuffix::Pre(b))
             | (VersionSuffix::Rc(a), VersionSuffix::Rc(b))
             | (VersionSuffix::Patch(a), VersionSuffix::Patch(b)) => match (a, b) {
-                (Some(a_num), Some(b_num)) => a_num.cmp(b_num),
+                // Safe to unwrap since the number is guaranteed to be a valid usize if it exists
+                (Some(a_num), Some(b_num)) => a_num
+                    .parse::<usize>()
+                    .unwrap()
+                    .cmp(&b_num.parse::<usize>().unwrap()),
                 (Some(_), None) => Ordering::Greater,
                 (None, Some(_)) => Ordering::Less,
                 (None, None) => Ordering::Equal,
@@ -227,14 +233,17 @@ mod tests {
             ("_alpha", vec![VersionSuffix::Alpha(None)]),
             (
                 "_alpha1_beta2",
-                vec![VersionSuffix::Alpha(Some(1)), VersionSuffix::Beta(Some(2))],
+                vec![
+                    VersionSuffix::Alpha(Some("1".into())),
+                    VersionSuffix::Beta(Some("2".into())),
+                ],
             ),
             (
                 "pre_rc_p20230101",
                 vec![
                     VersionSuffix::Pre(None),
                     VersionSuffix::Rc(None),
-                    VersionSuffix::Patch(Some(20230101)),
+                    VersionSuffix::Patch(Some("20230101".into())),
                 ],
             ),
         ];
@@ -248,15 +257,15 @@ mod tests {
     fn test_version_suffix_new_ok() {
         let test_cases = vec![
             ("alpha", VersionSuffix::Alpha(None)),
-            ("alpha1", VersionSuffix::Alpha(Some(1))),
+            ("alpha1", VersionSuffix::Alpha(Some("1".into()))),
             ("beta", VersionSuffix::Beta(None)),
-            ("beta2", VersionSuffix::Beta(Some(2))),
+            ("beta2", VersionSuffix::Beta(Some("2".into()))),
             ("pre", VersionSuffix::Pre(None)),
-            ("pre3", VersionSuffix::Pre(Some(3))),
+            ("pre3", VersionSuffix::Pre(Some("3".into()))),
             ("rc", VersionSuffix::Rc(None)),
-            ("rc4", VersionSuffix::Rc(Some(4))),
+            ("rc4", VersionSuffix::Rc(Some("4".into()))),
             ("p", VersionSuffix::Patch(None)),
-            ("p20230101", VersionSuffix::Patch(Some(20230101))),
+            ("p20230101", VersionSuffix::Patch(Some("20230101".into()))),
         ];
         for (input, expected) in test_cases {
             let suffix = VersionSuffix::new(input).unwrap();
@@ -274,14 +283,16 @@ mod tests {
 
     #[test]
     fn test_version_suffix_ord() {
-        let alpha1 = VersionSuffix::Alpha(Some(1));
-        let alpha2 = VersionSuffix::Alpha(Some(2));
+        let alpha1 = VersionSuffix::Alpha(Some("1".into()));
+        let alpha01 = VersionSuffix::Alpha(Some("01".into()));
+        let alpha2 = VersionSuffix::Alpha(Some("2".into()));
         let beta_none = VersionSuffix::Beta(None);
-        let beta1 = VersionSuffix::Beta(Some(1));
-        let pre1 = VersionSuffix::Pre(Some(1));
-        let rc_none = VersionSuffix::Rc(Some(1));
-        let patch1 = VersionSuffix::Patch(Some(1));
+        let beta1 = VersionSuffix::Beta(Some("1".into()));
+        let pre1 = VersionSuffix::Pre(Some("1".into()));
+        let rc_none = VersionSuffix::Rc(Some("1".into()));
+        let patch1 = VersionSuffix::Patch(Some("1".into()));
 
+        assert_eq!(alpha1, alpha01);
         assert!(alpha1 < alpha2);
         assert!(alpha2 < beta_none);
         assert!(beta_none < beta1);
@@ -293,11 +304,12 @@ mod tests {
     #[test]
     fn test_version_suffix_display() {
         let test_cases = vec![
-            (VersionSuffix::Alpha(Some(1)), "alpha1"),
+            (VersionSuffix::Alpha(Some("1".into())), "alpha1"),
             (VersionSuffix::Beta(None), "beta"),
-            (VersionSuffix::Pre(Some(3)), "pre3"),
+            (VersionSuffix::Pre(Some("3".into())), "pre3"),
             (VersionSuffix::Rc(None), "rc"),
-            (VersionSuffix::Patch(Some(20231231)), "p20231231"),
+            (VersionSuffix::Patch(Some("20231231".into())), "p20231231"),
+            (VersionSuffix::Patch(Some("01234".into())), "p01234"),
         ];
         for (suffix, expected) in test_cases {
             assert_eq!(suffix.to_string(), expected);
