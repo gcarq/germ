@@ -194,6 +194,24 @@ impl Repository {
         Ok(())
     }
 
+    /// Resolves all masters recursively and returns an `Iterator` with `self`
+    /// and all resolved Repositories.
+    ///
+    /// To passed [`RepoManager`] is needed to resolve repositories.
+    /// NOTE: If a repository is listed as a master but doesn't exist, it will be silently ignored.
+    fn resolve_masters<'a>(
+        &'a self,
+        repo_manager: &'a RepoManager,
+    ) -> Box<dyn Iterator<Item = &'a Repository> + 'a> {
+        let it = iter::once(self).chain(
+            self.masters
+                .iter()
+                .filter_map(|name| repo_manager.get_repo(name))
+                .flat_map(|repo| repo.resolve_masters(repo_manager)),
+        );
+        Box::new(it)
+    }
+
     /// Reads the repository eapi version from the given repository `path`.
     /// Returns 0 if no eapi file exists.
     fn read_eapi(path: &Path) -> Result<Eapi> {

@@ -1,7 +1,9 @@
+use crate::conf::PortageConf;
 use crate::ebuild::Ebuild;
 use crate::package::Package;
 use crate::repository::Repository;
 use crate::repository::config::RepoManagerConfig;
+use crate::repository::eclass::Eclass;
 use anyhow::{Context, Result, anyhow};
 use log::debug;
 use std::collections::HashMap;
@@ -87,6 +89,40 @@ impl RepoManager {
 
         repo.resolve_ebuild(package)
             .with_context(|| anyhow!("unable to resolve ebuild for {package}"))
+    }
+
+    /// Resolves an eclass with the given `eclass_name` and `repo_name`
+    /// that should be used for the search.
+    pub fn resolve_eclass(&self, eclass_name: &str, repo_name: &str) -> Result<&Eclass> {
+        let repo = self
+            .repositories
+            .get(repo_name)
+            .ok_or_else(|| anyhow!("repository '{repo_name}' doesn't exist"))?;
+
+        let eclass = repo
+            .resolve_masters(self)
+            .find_map(|repo| repo.eclasses.get(eclass_name))
+            .ok_or_else(|| {
+                anyhow!("eclass '{eclass_name}' not found in repository '{repo}' or its masters")
+            })?;
+
+        Ok(eclass)
+    }
+
+    /// Generates metadata for either the given `repo_name` or all repositories.
+    pub fn generate_metadata(&self, conf: &PortageConf, repo_name: Option<String>) -> Result<()> {
+        if let Some(repo) = repo_name {
+            let repo = self
+                .repositories
+                .get(&repo)
+                .ok_or_else(|| anyhow!("repository '{repo}' doesn't exist"))?;
+            return repo.generate_metadata(conf);
+        }
+
+        for repo in self.repositories() {
+            repo.generate_metadata(conf)?;
+        }
+        Ok(())
     }
 }
 

@@ -125,7 +125,7 @@ mod tests {
     fn test_build_sync_handler_git() {
         let ini_content = r#"
                 [gentoo]
-                location = /dev/null
+                location = /tmp
                 sync-type = git
             "#;
         let properties = load_properties(ini_content);
@@ -140,7 +140,7 @@ mod tests {
     fn test_sync_config_from_ini_valid() {
         let ini_content = r#"
                 [gentoo]
-                location = /path/to/repo
+                location = /tmp
                 auto-sync = true
                 sync-type = git
                 sync-uri = https://github.com/gentoo-mirror/gentoo.git
@@ -148,7 +148,7 @@ mod tests {
         let properties = load_properties(ini_content);
 
         let config = SyncConfig::from_ini(&properties).expect("failed to create SyncConfig");
-        assert_eq!(config.location, PathBuf::from("/path/to/repo"));
+        assert_eq!(config.location, PathBuf::from("/tmp"));
         assert!(config.auto_sync);
         assert_eq!(
             config.sync_uri,
@@ -160,12 +160,12 @@ mod tests {
     fn test_sync_config_defaults() {
         let ini_content = r#"
                 [gentoo]
-                location = /path/to/repo
+                location = /tmp
             "#;
         let properties = load_properties(ini_content);
 
         let config = SyncConfig::from_ini(&properties).expect("failed to create SyncConfig");
-        assert_eq!(config.location, PathBuf::from("/path/to/repo"));
+        assert_eq!(config.location, PathBuf::from("/tmp"));
         assert!(config.auto_sync);
         assert!(config.sync_uri.is_none());
     }
@@ -174,7 +174,7 @@ mod tests {
     fn test_sync_config_from_ini_invalid_auto_sync() {
         let ini_content = r#"
                 [gentoo]
-                location = /path/to/repo
+                location = /tmp
                 auto-sync = maybe
             "#;
         let properties = load_properties(ini_content);

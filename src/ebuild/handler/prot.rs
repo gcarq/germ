@@ -9,7 +9,7 @@ use std::str::FromStr;
 use strum::{Display, EnumString};
 
 /// All supported ebuild functions that can be called from the ebuild process.
-#[derive(EnumString, Display)]
+#[derive(EnumString, Display, PartialEq, Debug)]
 pub enum FuncType {
     // Internal ebuild functions
     #[strum(serialize = "__resolve_eclass")]
@@ -145,9 +145,9 @@ mod tests {
             ),
         ];
 
-        for (data, (expected_func, expected_args)) in test_data {
+        for (data, (expected_func_type, expected_args)) in test_data {
             let req = Request::from_bytes(data).unwrap();
-            assert!(matches!(req.func, expected_func));
+            assert_eq!(req.func, expected_func_type);
             assert_eq!(req.args, expected_args);
         }
     }
