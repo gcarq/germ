@@ -5,7 +5,7 @@ use crate::regex::{CATEGORY_RE, PACKAGE};
 use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::{fmt, hash};
+use std::fmt;
 
 lazy_static! {
     /// Regex to validate package names.
@@ -14,7 +14,7 @@ lazy_static! {
 
 /// Represents a package with its category, name, version and repository.
 /// TODO: add slot information.
-#[derive(Clone, Eq, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Package {
     pub category: String,
     pub name: String,
@@ -79,20 +79,6 @@ impl Package {
     /// Returns the package version and revision (if any), for example `7.0.174` or `7.0.174-r1`.
     pub fn pvr(&self) -> String {
         self.version.pvr()
-    }
-}
-
-impl PartialEq<Self> for Package {
-    fn eq(&self, other: &Self) -> bool {
-        self.category == other.category && self.name == other.name && self.version == other.version
-    }
-}
-
-impl hash::Hash for Package {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.category.hash(state);
-        self.name.hash(state);
-        self.version.hash(state);
     }
 }
 

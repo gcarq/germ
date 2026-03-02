@@ -43,10 +43,6 @@ impl Eclasses {
     pub fn get(&self, name: &str) -> Option<&Eclass> {
         self.0.get(name)
     }
-
-    pub fn iter(&self) -> impl Iterator<Item = &Eclass> {
-        self.0.values()
-    }
 }
 
 /// Represents an eclass defined in PMS chapter 10.

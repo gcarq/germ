@@ -153,7 +153,7 @@ impl Profile {
             // TODO: this behavior is controlled via profile-formats in <repo>/metadata/layout.conf
             let path = match profile.split_once(':') {
                 Some((repo_name, profile_path)) => {
-                    let repo = repo_manager.get(repo_name).ok_or_else(|| {
+                    let repo = repo_manager.get_repo(repo_name).ok_or_else(|| {
                         anyhow!("Repository '{repo_name}' not found for profile '{profile}'")
                     })?;
                     repo.location.join("profiles").join(profile_path)

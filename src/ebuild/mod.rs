@@ -1,6 +1,6 @@
 use crate::eapi::Eapi;
 use crate::package::Package;
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
 use log::debug;
 use regex::Regex;
@@ -34,7 +34,9 @@ impl<'a> Ebuild<'a> {
             "Loading ebuild for '{pkg}' from path '{}' ...",
             path.display()
         );
-        let reader = BufReader::with_capacity(256, File::open(&path)?);
+        let file =
+            File::open(&path).with_context(|| anyhow!("unable to open {}", path.display()))?;
+        let reader = BufReader::with_capacity(256, file);
         for line in reader.lines() {
             let line = line?;
             if let Some(caps) = PMS_EAPI_RE.captures(&line) {

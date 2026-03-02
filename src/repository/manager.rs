@@ -50,18 +50,15 @@ impl RepoManager {
     }
 
     /// Returns the repository with the given `name` if it exists.
-    pub fn get(&self, name: &str) -> Option<&Repository> {
+    pub fn get_repo(&self, name: &str) -> Option<&Repository> {
         self.repositories.get(name)
     }
 
     /// Returns the main repository.
     pub fn main_repo(&self) -> &Repository {
-        self.get(&self.main_repo_name)
+        self.repositories
+            .get(&self.main_repo_name)
             .expect("FATAL: no main repository assigned")
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &Repository)> {
-        self.repositories.iter()
     }
 
     /// Returns an `Iterator` over all repositories, with the main repository first.
@@ -80,6 +77,7 @@ impl RepoManager {
     /// resolved for any reason.
     pub fn resolve_ebuild<'a>(&self, package: &'a Package) -> Result<Ebuild<'a>> {
         let repo = self
+            .repositories
             .get(&package.repo)
             .ok_or_else(|| anyhow!("repository {} doesn't exist", package.name))?;
 

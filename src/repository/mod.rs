@@ -4,9 +4,11 @@ mod eclass;
 pub mod manager;
 mod sync;
 
+use crate::conf::PortageConf;
 use crate::deps::Atom;
 use crate::eapi::Eapi;
 use crate::ebuild::Ebuild;
+use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
 use crate::package::version::PackageVersion;
@@ -14,6 +16,7 @@ use crate::regex::PKG_VER_REV;
 use crate::repository::config::RepositoryConfig;
 use crate::repository::desc::ProfileDescription;
 use crate::repository::eclass::Eclasses;
+use crate::repository::manager::RepoManager;
 use crate::repository::sync::{SyncHandler, build_sync_handler};
 use crate::utils;
 use crate::utils::FileFromPath;
@@ -23,7 +26,7 @@ use log::info;
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::{fmt, fs};
+use std::{fmt, fs, iter};
 
 lazy_static! {
     /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision`
@@ -36,13 +39,13 @@ lazy_static! {
 pub struct Repository {
     pub location: PathBuf,
     pub name: String,
-    pub masters: Vec<String>,
+    masters: Vec<String>,
     pub eapi: Eapi,
-    pub categories: Vec<String>,
-    pub packages: HashSet<Package>,
+    categories: Vec<String>,
+    packages: HashSet<Package>,
     pub package_mask: LineBasedFile,
     pub package_unmask: LineBasedFile,
-    pub eclasses: Eclasses,
+    eclasses: Eclasses,
     pub arch_list: LineBasedFile,
     pub profiles_desc: Vec<ProfileDescription>,
 
@@ -95,25 +98,17 @@ impl Repository {
         self.collect_packages()
     }
 
+    /// Returns an `Iterator` over all packages in the repository.
+    /// TODO: Order the returned packages by version
+    pub fn packages(&self) -> impl Iterator<Item = &Package> {
+        self.packages.iter()
+    }
+
     /// Returns all packages in the repository that match the given `atom`.
     /// TODO: Order the returned packages by version
     /// TODO: Consider returning an iterator
     pub fn find_packages(&self, atom: &Atom) -> Vec<&Package> {
-        self.packages
-            .iter()
-            .filter(|pkg| atom.matches(pkg))
-            .collect()
-    }
-
-    /// Resolves the [`Ebuild`] for the given `package`.
-    /// Returns Err if the ebuild file doesn't exist or is invalid.
-    pub fn resolve_ebuild<'p>(&self, package: &'p Package) -> Result<Ebuild<'p>> {
-        let path = self
-            .location
-            .join(&package.category)
-            .join(&package.name)
-            .join(format!("{}-{}.ebuild", package.name, package.version));
-        Ebuild::new(path, package)
+        self.packages().filter(|pkg| atom.matches(pkg)).collect()
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
@@ -130,6 +125,30 @@ impl Repository {
         if let Some(sync_handler) = &self.sync_handler {
             info!("Syncing repository '{}'", self.name);
             sync_handler.sync()?;
+        }
+        Ok(())
+    }
+
+    /// Resolves the [`Ebuild`] for the given `package`.
+    /// Returns Err if the ebuild file doesn't exist or is invalid.
+    fn resolve_ebuild<'p>(&self, package: &'p Package) -> Result<Ebuild<'p>> {
+        let path = self
+            .location
+            .join(&package.category)
+            .join(&package.name)
+            .join(format!("{}-{}.ebuild", package.name, package.version));
+        Ebuild::new(path, package)
+    }
+
+    /// Generates metadata cache for all packages in the repository.
+    /// TODO: save metadata
+    fn generate_metadata(&self, conf: &PortageConf) -> Result<()> {
+        info!("Generating metadata cache for repository {self} ...");
+        for pkg in self.packages() {
+            let ebuild = self.resolve_ebuild(pkg)?;
+            let mut handler = EbuildPhaseHandler::new(&ebuild, conf, EbuildPhase::Depend)
+                .with_context(|| anyhow!("unable to generate metadata for '{pkg}'"))?;
+            handler.execute()?;
         }
         Ok(())
     }
@@ -213,7 +232,7 @@ impl Repository {
     }
 
     /// Reads the repository eapi version from the given repository `path`.
-    /// Returns 0 if no eapi file exists.
+    /// Returns `Eapi::default()` if no eapi file exists.
     fn read_eapi(path: &Path) -> Result<Eapi> {
         let eapi_file = path.join("profiles").join("eapi");
         if !fs::exists(&eapi_file)? {
