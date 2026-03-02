@@ -24,7 +24,6 @@ __ipc_call() {
 
 __resolve_eclass() { __ipc_call __resolve_eclass "$@"; }
 contains_word()    { __ipc_call contains_word    "$@"; }
-debug-print()      { __ipc_call debug-print      "$@"; }
 die()              { __ipc_call die              "$@"; }
 has()              { __ipc_call has              "$@"; }
 hasv()             { __ipc_call hasv             "$@"; }
@@ -34,7 +33,14 @@ ver_rs()           { __ipc_call ver_rs           "$@"; }
 ver_test()         { __ipc_call ver_test         "$@"; }
 
 
-debug-print-function() { debug-print "${1}: entering function, parameters: ${*:2}"; }
-debug-print-section()  { debug-print "now in section ${*}"; }
-
-
+# Debugging functions.
+# If EBUILD_DEBUG is not set to 1, these functions do nothing.
+if [[ "${EBUILD_DEBUG}" == 1 ]]; then
+    debug-print()          { __ipc_call debug-print      "$@"; }
+    debug-print-function() { debug-print "${1}: entering function, parameters: ${*:2}"; }
+    debug-print-section()  { debug-print "now in section ${*}"; }
+else
+    debug-print()          { :; }
+    debug-print-function() { :; }
+    debug-print-section()  { :; }
+fi

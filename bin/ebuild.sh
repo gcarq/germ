@@ -58,15 +58,6 @@ fi
 # environment by modifying our PATH.
 unset BASH_ENV
 
-# Unset some variables that break things.
-# Profiles should define this variable if needed.
-unset GZIP BZIP BZIP2 CDPATH GREP_OPTIONS GREP_COLOR GLOBIGNORE
-for env in ${ENV_UNSET}; do
-    unset "${env}"
-done
-unset env
-
-
 
 # Sources all eclasses in parameters
 declare -ix ECLASS_DEPTH=0

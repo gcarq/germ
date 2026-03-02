@@ -5,6 +5,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Deref;
 
 lazy_static! {
     /// Regex to capture variable references for expansion.
@@ -162,6 +163,17 @@ impl EnvValue {
             }
         }
         EnvValue::new(new_value, self.is_incremental())
+    }
+}
+
+impl Deref for EnvValue {
+    type Target = Vec<String>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            EnvValue::Literal(values) => values,
+            EnvValue::Incremental(values) => values,
+        }
     }
 }
 
