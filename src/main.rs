@@ -81,19 +81,36 @@ enum Command {
         #[arg(value_name = "atom")]
         atom: Atom,
     },
+
+    /// Generate metadata cache for ebuild repositories
+    GenCache {
+        #[arg(value_name = "repo")]
+        repo: Option<String>,
+    },
+
     /// Sync the repositories
     Sync,
 }
 
-fn main() -> Result<()> {
-    setup_logger()?;
+fn main() {
+    setup_logger().expect("unable to setup logger");
 
+    match run() {
+        Ok(_) => (),
+        Err(e) => error!("{e:#?}"),
+    }
+}
+
+/// Main application logic is here.
+/// Parses command line arguments and executes the corresponding command.
+fn run() -> Result<()> {
     let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH))?;
 
     let args = Args::parse();
     match args.command {
         Some(Command::Info { atom }) => info(&conf, atom)?,
         Some(Command::Install { atom }) => install(&conf, atom)?,
+        Some(Command::GenCache { repo }) => gencache(&conf, repo)?,
         Some(Command::Sync) => sync(&conf)?,
         None => {}
     }
@@ -143,6 +160,12 @@ fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
     handler.execute()?;
 
     Ok(())
+}
+
+/// Generates metadata cache for all repositories defined in the portage `conf`.
+/// If `repo` is provided, only generates metadata cache for that repository.
+fn gencache(conf: &PortageConf, repo: Option<String>) -> Result<()> {
+    conf.repo_manager.generate_metadata(conf, repo)
 }
 
 /// Syncs all repositories defined in the portage `conf`.
