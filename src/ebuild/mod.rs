@@ -40,12 +40,9 @@ impl<'a> Ebuild<'a> {
         for line in reader.lines() {
             let line = line?;
             if let Some(caps) = PMS_EAPI_RE.captures(&line) {
-                let eapi = Eapi::new(&caps["eapi"])?;
+                let eapi = Eapi::from_str(&caps["eapi"])?;
                 if !eapi.is_supported_for_ebuilds() {
-                    return Err(anyhow!(
-                        "EAPI '{}' is not supported for ebuilds",
-                        eapi.version
-                    ));
+                    return Err(anyhow!("EAPI '{eapi}' is not supported for ebuilds"));
                 }
                 return Ok(Self { eapi, path, pkg });
             }

@@ -55,62 +55,62 @@ impl Profile {
             deprecated: DeprecationInfo::from_path(&location.join("deprecated"))?,
             packages: LineBasedFile::from_path(
                 &location.join("packages"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             package_mask: LineBasedFile::from_path(
                 &location.join("package.mask"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             package_unmask: LineBasedFile::from_path(
                 &location.join("package.unmask"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             package_use: LineBasedFile::from_path(
                 &location.join("package.use"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             use_mask: LineBasedFile::from_path(
                 &location.join("use.mask"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             use_force: LineBasedFile::from_path(
                 &location.join("use.force"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             use_stable_mask: LineBasedFile::from_path(
                 &location.join("use.stable.mask"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             use_stable_force: LineBasedFile::from_path(
                 &location.join("use.stable.force"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             package_use_mask: LineBasedFile::from_path(
                 &location.join("package.use.mask"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             package_use_force: LineBasedFile::from_path(
                 &location.join("package.use.force"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             package_use_stable_mask: LineBasedFile::from_path(
                 &location.join("package.use.stable.mask"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             package_use_stable_force: LineBasedFile::from_path(
                 &location.join("package.use.stable.force"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             eapi,
@@ -170,7 +170,7 @@ impl Profile {
         if !path.exists() {
             return Ok(Eapi::default());
         }
-        Eapi::new(
+        Eapi::from_str(
             fs::read_to_string(path)
                 .with_context(|| "unable to read eapi file")?
                 .lines()

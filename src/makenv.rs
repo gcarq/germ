@@ -207,12 +207,8 @@ enable_year2038="no"
 
     #[test]
     fn test_make_env_inherit_from() {
-        let parent_content = r#"
-USE="cet -iconv"
-        "#;
-        let child_content = r#"
-USE="${USE} seccomp branding -cet"
-        "#;
+        let parent_content = r#"USE="cet -iconv""#;
+        let child_content = r#"USE="${USE} seccomp branding -cet""#;
         let parent = MakeEnv::from_file_content(parent_content.into()).unwrap();
         let mut child = MakeEnv::from_file_content(child_content.into()).unwrap();
         child.inherit_from(&parent);

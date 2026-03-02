@@ -68,12 +68,12 @@ impl Repository {
             categories: Vec::new(),
             package_mask: LineBasedFile::from_path(
                 &profiles.join("package.mask"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             package_unmask: LineBasedFile::from_path(
                 &profiles.join("package.unmask"),
-                eapi.profile_file_dirs,
+                eapi.supports_profile_file_dirs(),
                 true,
             )?,
             eclasses: Eclasses::from_path(&location.join("eclass"))
@@ -238,7 +238,7 @@ impl Repository {
         if !fs::exists(&eapi_file)? {
             return Ok(Eapi::default());
         }
-        Eapi::new(
+        Eapi::from_str(
             fs::read_to_string(&eapi_file)?
                 .lines()
                 .next()

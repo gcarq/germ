@@ -49,7 +49,7 @@ pub fn handle_request(
                 request.args
             )),
         },
-        FuncType::HasV if ebuild.eapi.is_hasv_supported() => match args {
+        FuncType::HasV if ebuild.eapi.supports_hasv() => match args {
             [word, args @ ..] => match args.contains(word) {
                 true => Ok(Response::Ok(Some(word.to_string()))),
                 false => Ok(Response::Err(None)),
@@ -59,7 +59,7 @@ pub fn handle_request(
                 request.args
             )),
         },
-        FuncType::HasQ if ebuild.eapi.is_hasq_supported() => match args {
+        FuncType::HasQ if ebuild.eapi.supports_hasq() => match args {
             [word, args @ ..] => match args.contains(word) {
                 true => Ok(Response::Ok(None)),
                 false => Ok(Response::Err(None)),
@@ -157,7 +157,7 @@ mod tests {
 
         let ebuild = Ebuild {
             path: PathBuf::default(),
-            eapi: Eapi::new("8").unwrap(),
+            eapi: Eapi::from_str("8").unwrap(),
             pkg: &pkg,
         };
 
