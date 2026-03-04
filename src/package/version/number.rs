@@ -16,7 +16,7 @@ impl VersionNumber {
     pub fn iter(&self) -> impl Iterator<Item = String> {
         self.components
             .iter()
-            .map(|comp| comp.to_string())
+            .map(ToString::to_string)
             .chain(self.letter.map(|c| c.to_string()))
     }
 }
@@ -103,7 +103,7 @@ impl fmt::Display for VersionNumber {
         let repr = self
             .components
             .iter()
-            .map(|comp| comp.to_string())
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(".");
         write!(f, "{repr}")?;

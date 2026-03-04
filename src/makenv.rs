@@ -82,7 +82,11 @@ impl FileFromPath for MakeEnv {
 
 impl Inherit for MakeEnv {
     fn inherit_from(&mut self, parent: &MakeEnv) {
-        let parent_ctx = Vec::from_iter(parent.vars.iter().map(|(k, v)| (k.clone(), v.clone())));
+        let parent_ctx = parent
+            .vars
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<Vec<_>>();
         for (key, parent_value) in &parent.vars {
             // If the variable exists, expand it with the parent's context and take care of
             // incremental variables, otherwise just insert it.
@@ -128,7 +132,7 @@ impl EnvValue {
     pub fn new(value: String, is_incremental: bool) -> Self {
         let values = value
             .split_ascii_whitespace()
-            .map(|s| s.to_owned())
+            .map(ToOwned::to_owned)
             .collect();
         if is_incremental {
             EnvValue::Incremental(values)
@@ -147,8 +151,7 @@ impl EnvValue {
     #[must_use = "this returns the expanded value as a new allocation"]
     pub fn expand(&self, context: &[(String, EnvValue)]) -> Self {
         let value = match self {
-            EnvValue::Literal(values) => values,
-            EnvValue::Incremental(values) => values,
+            EnvValue::Literal(values) | EnvValue::Incremental(values) => values,
         }
         .join(" ");
         let mut new_value = value.clone();
@@ -170,8 +173,7 @@ impl Deref for EnvValue {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            EnvValue::Literal(values) => values,
-            EnvValue::Incremental(values) => values,
+            EnvValue::Literal(values) | EnvValue::Incremental(values) => values,
         }
     }
 }
@@ -179,8 +181,7 @@ impl Deref for EnvValue {
 impl fmt::Display for EnvValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
-            EnvValue::Literal(values) => values,
-            EnvValue::Incremental(values) => values,
+            EnvValue::Literal(values) | EnvValue::Incremental(values) => values,
         }
         .join(" ");
         write!(f, "{value}")

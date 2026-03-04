@@ -140,9 +140,8 @@ fn install(atom: Atom, repo_manager: &RepoManager, make_env: &MakeEnv) -> Result
         .filter_map(|repo| repo.find_packages(&atom).first().map(|p| (*p).clone()))
         .next();
 
-    let pkg = match pkg {
-        Some(pkg) => pkg,
-        None => return Err(anyhow!("no matching package found for atom '{atom}'")),
+    let Some(pkg) = pkg else {
+        return Err(anyhow!("no matching package found for atom '{atom}'"));
     };
     let ebuild = repo_manager.resolve_ebuild(&pkg)?;
     let metadata = ebuild.generate_metadata(make_env)?;
@@ -176,7 +175,7 @@ fn gencache(
 fn sync(repo_manager: &RepoManager) -> Result<()> {
     for repo in repo_manager.repos.values() {
         match repo.sync() {
-            Ok(_) => (),
+            Ok(()) => (),
             Err(e) => error!("failed to sync repository '{}'\n\t{e}", repo.name),
         }
     }

@@ -82,8 +82,11 @@ pub fn ver_rs(pkg: &Package, args: &[String]) -> Result<ParentMessage> {
     }
     let result = parts
         .into_iter()
-        .map(|(sep, comp)| format!("{sep}{comp}"))
-        .collect();
+        .fold(String::new(), |mut output, (sep, comp)| {
+            output.push_str(&sep);
+            output.push_str(&comp);
+            output
+        });
     Ok(ParentMessage::Ok(Some(result)))
 }
 

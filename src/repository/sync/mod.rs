@@ -50,7 +50,7 @@ impl SyncConfig {
             .with_context(|| "invalid auto-sync value")?
             .unwrap_or(true);
 
-        let sync_uri = properties.get("sync-uri").map(|s| s.to_owned());
+        let sync_uri = properties.get("sync-uri").map(ToOwned::to_owned);
 
         Ok(SyncConfig {
             location,

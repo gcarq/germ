@@ -24,14 +24,10 @@ impl Layout {
             .section(None::<String>)
             .with_context(|| anyhow!("cannot parse {}", location.display()))?;
 
-        let name = properties.get("name").map(|s| s.to_owned());
+        let name = properties.get("name").map(ToOwned::to_owned);
         let masters = properties
             .get("masters")
-            .map(|s| {
-                s.split_ascii_whitespace()
-                    .map(|master| master.to_owned())
-                    .collect()
-            })
+            .map(|s| s.split_ascii_whitespace().map(ToOwned::to_owned).collect())
             .ok_or_else(|| anyhow!("missing 'masters' property"))?;
         Ok(Layout { name, masters })
     }

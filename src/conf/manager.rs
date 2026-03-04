@@ -61,8 +61,7 @@ impl MaskManager {
     /// Helper function to check if a map contains a package according to its atoms.
     fn map_contains_pkg(map: &HashMap<String, Vec<Atom>>, pkg: &Package) -> bool {
         map.get(&pkg.qualified_name())
-            .map(|atoms| atoms.iter().any(|atom| atom.matches(pkg)))
-            .unwrap_or(false)
+            .is_some_and(|atoms| atoms.iter().any(|atom| atom.matches(pkg)))
     }
 
     /// Helper function to build a map from qualified atom names to [`Atom`]

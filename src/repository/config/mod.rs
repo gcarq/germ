@@ -38,10 +38,10 @@ impl RepoManagerConfig {
         // For now, use "gentoo" as fallback if no DEFAULT section or main-repo property is defined
         let main_repo_name = conf
             .section(Some("DEFAULT"))
-            .and_then(|props| props.get("main-repo").map(|name| name.to_owned()))
+            .and_then(|props| props.get("main-repo").map(ToOwned::to_owned))
             .unwrap_or_else(|| "gentoo".into());
 
-        debug!("Main repository: '{}'", main_repo_name);
+        debug!("Main repository: '{main_repo_name}'");
 
         let mut repo_confs = conf
             .into_iter()
@@ -50,7 +50,7 @@ impl RepoManagerConfig {
                 _ => None,
             })
             .map(|(name, properties)| {
-                RepositoryConfig::new(&name, HashMap::from_iter(properties.into_iter()))
+                RepositoryConfig::new(&name, properties.into_iter().collect::<HashMap<_, _>>())
                     .with_context(|| format!("unable to build repository config for '{name}'"))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -137,7 +137,7 @@ impl RepositoryConfig {
         let masters = match properties.get("masters") {
             Some(masters) => masters
                 .split_ascii_whitespace()
-                .map(|s| s.to_owned())
+                .map(ToOwned::to_owned)
                 .collect(),
             None => layout.masters,
         };
@@ -152,11 +152,10 @@ impl RepositoryConfig {
                 .transpose()
                 .with_context(|| "invalid priority value")?
                 .unwrap_or(0),
-            raw_properties: HashMap::from_iter(
-                properties
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string())),
-            ),
+            raw_properties: properties
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<HashMap<_, _>>(),
         };
         Ok(config)
     }

@@ -138,10 +138,9 @@ impl Atom {
 
     /// Checks if the given `pkg_ver` matches the this atoms [`PackageVersion`].
     fn matches_version(&self, pkg_ver: &PackageVersion) -> bool {
-        let atom_ver = match &self.version {
-            Some(v) => v,
+        let Some(atom_ver) = &self.version else {
             // If the atom doesn't specify a version, it matches any version
-            None => return true,
+            return true;
         };
         match self.variant {
             AtomVariant::Simple => atom_ver == pkg_ver,

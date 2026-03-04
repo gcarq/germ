@@ -60,9 +60,8 @@ impl Vdb {
                     .as_os_str()
                     .to_str()
                     .with_context(|| "path contains invalid unicode")?;
-                let caps = match PKG_VER_REV_RE.captures(pvr) {
-                    Some(caps) => caps,
-                    None => continue,
+                let Some(caps) = PKG_VER_REV_RE.captures(pvr) else {
+                    continue;
                 };
 
                 let version = PackageVersion::new(

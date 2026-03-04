@@ -31,9 +31,9 @@ impl<'a> FromIterator<&'a str> for LineBasedFile {
     fn from_iter<T: IntoIterator<Item = &'a str>>(iter: T) -> Self {
         let lines = iter
             .into_iter()
-            .map(|line| line.trim())
+            .map(str::trim)
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .map(|line| line.to_owned())
+            .map(ToOwned::to_owned)
             .collect();
         Self { lines }
     }
@@ -44,7 +44,7 @@ impl FileFromPath for LineBasedFile {
     where
         Self: Sized,
     {
-        Ok(Self::from_iter(content.lines()))
+        Ok(content.lines().collect::<Self>())
     }
 }
 
