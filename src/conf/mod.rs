@@ -45,8 +45,8 @@ impl PortageConf {
         .with_context(|| "unable to build MaskManager")?;
 
         Ok(PortageConf {
-            make_env,
             profile,
+            make_env,
             mask_manager,
         })
     }

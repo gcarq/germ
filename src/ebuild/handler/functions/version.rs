@@ -77,7 +77,7 @@ pub fn ver_rs(pkg: &Package, args: &[String]) -> Result<ParentMessage> {
             if i == 0 && sep.is_empty() {
                 continue;
             }
-            *sep = (*repl).clone();
+            sep.clone_from(repl);
         }
     }
     let result = parts
@@ -168,28 +168,25 @@ fn ver_split(version: &str) -> Vec<(String, String)> {
 /// `max` is the maximum valid index (inclusive) for the range.
 /// Returns `Err` if the range is invalid.
 fn parse_range(range: &str, max: usize) -> Result<(usize, usize)> {
-    match range.split_once('-') {
-        Some((a, b)) => {
-            let start = match a.is_empty() {
-                true => return Err(anyhow!("range must start with a number")),
-                false => a.parse::<usize>()?,
-            };
-            let end = match b.is_empty() {
-                true => max,
-                false => {
-                    let end = b.parse::<usize>()?;
-                    if start > end {
-                        return Err(anyhow!("range end must be >= start"));
-                    }
-                    end
+    if let Some((a, b)) = range.split_once('-') {
+        let start = match a.is_empty() {
+            true => return Err(anyhow!("range must start with a number")),
+            false => a.parse::<usize>()?,
+        };
+        let end = match b.is_empty() {
+            true => max,
+            false => {
+                let end = b.parse::<usize>()?;
+                if start > end {
+                    return Err(anyhow!("range end must be >= start"));
                 }
-            };
-            Ok((start, end.min(max)))
-        }
-        None => {
-            let num = range.parse::<usize>()?;
-            Ok((num, num))
-        }
+                end
+            }
+        };
+        Ok((start, end.min(max)))
+    } else {
+        let num = range.parse::<usize>()?;
+        Ok((num, num))
     }
 }
 

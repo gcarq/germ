@@ -137,8 +137,7 @@ fn install(atom: Atom, repo_manager: &RepoManager, make_env: &MakeEnv) -> Result
     let pkg = repo_manager
         .repos
         .values()
-        .filter_map(|repo| repo.find_packages(&atom).first().map(|p| (*p).clone()))
-        .next();
+        .find_map(|repo| repo.find_packages(&atom).first().map(|p| (*p).clone()));
 
     let Some(pkg) = pkg else {
         return Err(anyhow!("no matching package found for atom '{atom}'"));

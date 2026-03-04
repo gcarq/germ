@@ -79,7 +79,7 @@ impl RepoManager {
 
 impl fmt::Display for RepoManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (name, repo) in self.repos.iter() {
+        for (name, repo) in &self.repos {
             writeln!(f, "{name}\n    location: {}\n", repo.location.display())?;
         }
         Ok(())

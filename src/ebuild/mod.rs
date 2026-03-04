@@ -54,8 +54,8 @@ impl<'a> Ebuild<'a> {
                     return Err(anyhow!("EAPI '{eapi}' is not supported for ebuilds"));
                 }
                 return Ok(Self {
-                    eapi,
                     path,
+                    eapi,
                     pkg,
                     repo,
                 });

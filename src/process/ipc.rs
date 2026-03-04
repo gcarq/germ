@@ -112,7 +112,7 @@ impl IpcHandler {
         // We got EOF
         if num_bytes == 0 {
             return Ok(None);
-        };
+        }
         // Get rid of the EOT character
         self.buffer.truncate(self.buffer.len() - 1);
         Ok(Some(T::from_bytes(&self.buffer)?))

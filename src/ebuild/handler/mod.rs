@@ -91,7 +91,7 @@ impl<'a> EbuildPhaseHandler<'a> {
                     ipc.send(response)?;
                 }
                 ChildMessage::Data(data) => received_data.push(data),
-            };
+            }
         }
         Ok(received_data)
     }
