@@ -1,8 +1,9 @@
 use anyhow::{Context, Result, anyhow};
-use std::fs;
-use std::fs::DirEntry;
+use md5::{Digest, Md5};
+use std::fs::{DirEntry, File};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 /// Trait for inheriting configurations from another instance.
 pub trait Inherit {
@@ -67,6 +68,14 @@ pub trait FileFromPath {
     fn from_file_content(content: String) -> Result<Self>
     where
         Self: Sized;
+}
+
+/// Calculates and returns the MD5 hash of the given `file` as a hexadecimal `String`.
+pub fn md5sum(file: &Path) -> Result<String> {
+    let mut file = File::open(file)?;
+    let mut hasher = Md5::new();
+    io::copy(&mut file, &mut hasher)?;
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// Uses [`shlex`] to analyze and split the given [`String`] into key-value pairs.

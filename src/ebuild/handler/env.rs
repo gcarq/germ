@@ -4,6 +4,7 @@ use crate::makenv::MakeEnv;
 use log::warn;
 use std::collections::HashMap;
 use std::ops::Deref;
+use std::os::fd::RawFd;
 
 /// Unset selected variables so that they don't needlessly propagate down into the ebuild
 /// environment.
@@ -200,7 +201,7 @@ impl EbuildEnv {
                     "EBUILD".to_owned(),
                     ebuild.path.to_str().unwrap().to_owned(),
                 ),
-                ("EBUILD_PHASE".to_owned(), phase.as_str().to_owned()),
+                ("EBUILD_PHASE".to_owned(), phase.to_string()),
             ])
             .collect::<HashMap<String, String>>();
 
@@ -210,6 +211,14 @@ impl EbuildEnv {
             }
         }
         Self(env)
+    }
+
+    /// Adds the given IPC `channel` to the environment.
+    pub fn add_ipc_channel(&mut self, channel: (RawFd, RawFd)) {
+        self.0
+            .insert("CHILD_READ_FD".to_owned(), channel.0.to_string());
+        self.0
+            .insert("CHILD_WRITE_FD".to_owned(), channel.1.to_string());
     }
 
     /// Returns true if the given variable `name` is allowed to be propagated into the ebuild env.

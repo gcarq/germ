@@ -1,4 +1,4 @@
-use crate::ebuild::handler::prot::Response;
+use crate::ebuild::handler::prot::ParentMessage;
 use crate::package::Package;
 use crate::package::version::PackageVersion;
 use anyhow::{Result, anyhow};
@@ -11,7 +11,7 @@ use std::cmp::Ordering;
 /// The `range` specifies which components to extract from the version.
 /// If `version` is `None`, the package's PV is used.
 /// Returns `Err` if the EAPI does not support `ver_cut`.
-pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<Response> {
+pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<ParentMessage> {
     // Use PV as fallback if
     let version = match version {
         Some(v) => v,
@@ -26,7 +26,7 @@ pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<Resp
     }
     let end = end * 2;
     if start >= end {
-        return Ok(Response::Ok(Some(String::new())));
+        return Ok(ParentMessage::Ok(Some(String::new())));
     }
     let flat_components = parts
         .into_iter()
@@ -34,7 +34,7 @@ pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<Resp
         .skip(start)
         .take(end - start)
         .collect::<String>();
-    Ok(Response::Ok(Some(flat_components)))
+    Ok(ParentMessage::Ok(Some(flat_components)))
 }
 
 /// Implements the `ver_rs` function for ebuilds that replaces separators for the given ranges,
@@ -44,7 +44,7 @@ pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<Resp
 /// If the len of `args` is odd, the last element is treated as the version string,
 /// otherwise the package's PV is used.
 /// Returns the modified version string or an `Err` if parsing fails.
-pub fn ver_rs(pkg: &Package, args: &[String]) -> Result<Response> {
+pub fn ver_rs(pkg: &Package, args: &[String]) -> Result<ParentMessage> {
     if args.len() < 2 {
         return Err(anyhow!("ver_rs requires at least two arguments"));
     }
@@ -77,14 +77,14 @@ pub fn ver_rs(pkg: &Package, args: &[String]) -> Result<Response> {
             if i == 0 && sep.is_empty() {
                 continue;
             }
-            *sep = (*repl).to_owned();
+            *sep = (*repl).clone();
         }
     }
     let result = parts
         .into_iter()
         .map(|(sep, comp)| format!("{sep}{comp}"))
         .collect();
-    Ok(Response::Ok(Some(result)))
+    Ok(ParentMessage::Ok(Some(result)))
 }
 
 /// Implements the `ver_test` function for ebuilds that checks if the relation
@@ -100,7 +100,7 @@ pub fn ver_test(
     version1: Option<&str>,
     op: &str,
     version2: &str,
-) -> Result<Response> {
+) -> Result<ParentMessage> {
     let v1 = match version1 {
         Some(v) => &PackageVersion::try_from(v)?,
         None => &pkg.version,
@@ -116,7 +116,7 @@ pub fn ver_test(
         "-lt" => v1.cmp(v2) == Ordering::Less,
         _ => Err(anyhow!("invalid operator: '{op}'"))?,
     };
-    Ok(Response::from_bool(does_match))
+    Ok(ParentMessage::from_bool(does_match))
 }
 
 /// Splits the given `version` into its components,
@@ -226,7 +226,7 @@ mod tests {
         )
         .unwrap();
         for (range, version, expected) in test_cases {
-            let response = Response::Ok(Some(expected.to_owned()));
+            let response = ParentMessage::Ok(Some(expected.to_owned()));
             assert_eq!(
                 ver_cut(&pkg, range, version).unwrap_or_else(|_| panic!(
                     "Failed for input range: {range}, version: {version:?}"
@@ -285,7 +285,7 @@ mod tests {
         )
         .unwrap();
         for (args, expected) in test_cases {
-            let response = Response::Ok(Some(expected.to_owned()));
+            let response = ParentMessage::Ok(Some(expected.to_owned()));
             let args = args.into_iter().map(String::from).collect::<Vec<_>>();
             assert_eq!(
                 ver_rs(&pkg, &args).unwrap_or_else(|_| panic!("Failed for input args: {args:?}")),
@@ -418,7 +418,7 @@ mod tests {
         )
         .unwrap();
         for (version1, op, version2, expected) in test_cases {
-            let response = Response::from_bool(expected);
+            let response = ParentMessage::from_bool(expected);
             assert_eq!(
                 ver_test(&pkg, version1, op, version2).unwrap_or_else(|_| panic!(
                     "Failed for input version1: {version1:?}, op: {op}, version2: {version2}"

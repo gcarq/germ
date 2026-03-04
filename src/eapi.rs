@@ -1,9 +1,11 @@
 use anyhow::{Result, anyhow};
+use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::str::FromStr;
 
 /// An EAPI can be thought of as a ‘version’ of the PMS to which a package conforms.
 /// See PMS section 2 for more details.nbv
-#[derive(Clone, Eq, PartialEq, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug, Default)]
 pub enum Eapi {
     #[default]
     Zero,
@@ -19,25 +21,6 @@ pub enum Eapi {
 }
 
 impl Eapi {
-    /// Creates a new instance from the given EAPI `version`.
-    /// Returns an `Err` if the version is unsupported.
-    pub fn from_str(version: &str) -> Result<Self> {
-        let version = match version {
-            "0" => Self::Zero,
-            "1" => Self::One,
-            "2" => Self::Two,
-            "3" => Self::Three,
-            "4" => Self::Four,
-            "5" => Self::Five,
-            "6" => Self::Six,
-            "7" => Self::Seven,
-            "8" => Self::Eight,
-            "9" => Self::Nine,
-            x => Err(anyhow!("unsupported EAPI: {x}"))?,
-        };
-        Ok(version)
-    }
-
     /// Returns `true` if this EAPI is supported for ebuilds.
     pub const fn is_supported_for_ebuilds(&self) -> bool {
         matches!(self, Self::Seven | Self::Eight | Self::Nine)
@@ -69,6 +52,29 @@ impl Eapi {
     }
 }
 
+impl FromStr for Eapi {
+    type Err = anyhow::Error;
+
+    /// Creates a new instance from the given EAPI `version`.
+    /// Returns an `Err` if the version is unsupported.
+    fn from_str(version: &str) -> Result<Self> {
+        let version = match version {
+            "0" => Self::Zero,
+            "1" => Self::One,
+            "2" => Self::Two,
+            "3" => Self::Three,
+            "4" => Self::Four,
+            "5" => Self::Five,
+            "6" => Self::Six,
+            "7" => Self::Seven,
+            "8" => Self::Eight,
+            "9" => Self::Nine,
+            x => Err(anyhow!("unsupported EAPI: {x}"))?,
+        };
+        Ok(version)
+    }
+}
+
 impl fmt::Display for Eapi {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let version = match self {
@@ -83,7 +89,7 @@ impl fmt::Display for Eapi {
             Self::Eight => "8",
             Self::Nine => "9",
         };
-        write!(f, "{}", version)
+        write!(f, "{version}")
     }
 }
 

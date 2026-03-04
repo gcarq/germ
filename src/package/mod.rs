@@ -14,7 +14,7 @@ lazy_static! {
 
 /// Represents a package with its category, name, version and repository.
 /// TODO: add slot information.
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct Package {
     pub category: String,
     pub name: String,

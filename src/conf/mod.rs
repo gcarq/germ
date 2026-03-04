@@ -16,19 +16,15 @@ use std::path::Path;
 pub struct PortageConf {
     profile: Profile,
     pub make_env: MakeEnv,
-    pub repo_manager: RepoManager,
     pub mask_manager: MaskManager,
 }
 
 impl PortageConf {
-    /// Builds a [`PortageConf`] from the given portage configuration `path`.
-    pub fn new(path: &Path) -> Result<Self> {
-        let repo_manager = RepoManager::new(&path.join("repos.conf"))
-            .with_context(|| "unable to process repos.conf")?;
-
+    /// Builds a [`PortageConf`] from the given portage configuration `path` and `repo_manager`.
+    pub fn new(path: &Path, repo_manager: &RepoManager) -> Result<Self> {
         let profile_path = path.join("make.profile");
         debug!("Active profile {}", profile_path.canonicalize()?.display());
-        let profile = Profile::new(&profile_path, &repo_manager)
+        let profile = Profile::new(&profile_path, repo_manager)
             .with_context(|| "unable to build profile from make.profile")?;
 
         let make_env = Self::init_make_env(path, &profile)?;
@@ -37,11 +33,11 @@ impl PortageConf {
             .get("ARCH")
             .with_context(|| "missing ARCH variable")?
             .to_string();
-        Self::validate_arch(&arch, &mut repo_manager.repositories())?;
-        Self::validate_profile(&profile, &arch, &mut repo_manager.repositories())?;
+        Self::validate_arch(&arch, &mut repo_manager.repos.values())?;
+        Self::validate_profile(&profile, &arch, &mut repo_manager.repos.values())?;
 
         let mask_manager = MaskManager::new(
-            &mut repo_manager.repositories(),
+            &mut repo_manager.repos.values(),
             &profile,
             LineBasedFile::from_path(&path.join("package.mask"), true, true)?,
             LineBasedFile::from_path(&path.join("package.unmask"), true, true)?,
@@ -50,7 +46,6 @@ impl PortageConf {
 
         Ok(PortageConf {
             make_env,
-            repo_manager,
             profile,
             mask_manager,
         })
@@ -62,7 +57,6 @@ impl PortageConf {
         let globals_path = Path::new(DEFAULT_PORTAGE_CONF_PATH).join("make.globals");
         let make_globals = MakeEnv::from_path(&globals_path, true, false)
             .with_context(|| "unable to process make.globals")?;
-        // TODO: make.conf: Variables prefixed with __ are local should not be propagated.
         let make_conf = MakeEnv::from_path(&path.join("make.conf"), true, false)
             .with_context(|| "unable to process make.conf")?;
 

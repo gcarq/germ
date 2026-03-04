@@ -1,30 +1,11 @@
-#![warn(
-    clippy::too_many_lines,
-    clippy::dbg_macro,
-    clippy::doc_link_with_quotes,
-    clippy::doc_markdown,
-    clippy::empty_structs_with_brackets,
-    clippy::missing_const_for_fn,
-    clippy::missing_panics_doc,
-    clippy::disallowed_script_idents,
-    clippy::semicolon_if_nothing_returned,
-    clippy::shadow_unrelated,
-    clippy::similar_names,
-    clippy::unused_self,
-    clippy::use_debug,
-    clippy::used_underscore_binding,
-    clippy::useless_let_if_seq,
-    clippy::wildcard_dependencies,
-    clippy::wildcard_imports
-)]
-
 use crate::conf::PortageConf;
-use crate::consts::{DEFAULT_LOG_LEVEL, DEFAULT_USE_PORTAGE_CONF_PATH};
+use crate::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
 use crate::deps::Atom;
+use crate::makenv::MakeEnv;
+use crate::repository::manager::RepoManager;
 use crate::vdb::Vdb;
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
-use ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
 use fern::colors::{Color, ColoredLevelConfig};
 use lazy_static::lazy_static;
 use log::error;
@@ -50,18 +31,22 @@ mod vdb;
 lazy_static! {
     /// Colors for log levels.
     static ref COLORS: ColoredLevelConfig = ColoredLevelConfig::new()
-        .info(Color::Green)
+        .error(Color::Red)
         .warn(Color::Yellow)
-        .error(Color::Red);
+        .info(Color::Green)
+        .debug(Color::Cyan)
+        .trace(Color::BrightCyan);
+
+
 }
 
 /// Package management tool for Gentoo-like systems.
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Increases verbosity
-    #[arg(short, long)]
-    verbose: bool,
+    /// Increase verbosity
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -83,7 +68,7 @@ enum Command {
     },
 
     /// Generate metadata cache for ebuild repositories
-    GenCache {
+    Gencache {
         #[arg(value_name = "repo")]
         repo: Option<String>,
     },
@@ -93,25 +78,33 @@ enum Command {
 }
 
 fn main() {
-    setup_logger().expect("unable to setup logger");
+    let args = Args::parse();
+    let log_level = match args.verbose {
+        0 => log::LevelFilter::Info,
+        1 => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Trace,
+    };
+    setup_logger(log_level).expect("unable to setup logger");
 
-    match run() {
-        Ok(_) => (),
-        Err(e) => error!("{e:#?}"),
+    match run(args) {
+        Ok(()) => (),
+        Err(e) => error!("{e:#}"),
     }
 }
 
 /// Main application logic is here.
-/// Parses command line arguments and executes the corresponding command.
-fn run() -> Result<()> {
-    let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH))?;
+fn run(args: Args) -> Result<()> {
+    let config_path = Path::new(DEFAULT_USE_PORTAGE_CONF_PATH);
 
-    let args = Args::parse();
+    let mut repo_manager = RepoManager::new(&config_path.join("repos.conf"))
+        .with_context(|| "unable to process repos.conf")?;
+    let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH), &repo_manager)?;
+
     match args.command {
-        Some(Command::Info { atom }) => info(&conf, atom)?,
-        Some(Command::Install { atom }) => install(&conf, atom)?,
-        Some(Command::GenCache { repo }) => gencache(&conf, repo)?,
-        Some(Command::Sync) => sync(&conf)?,
+        Some(Command::Info { atom }) => info(atom, &repo_manager, &conf.make_env)?,
+        Some(Command::Install { atom }) => install(atom, &repo_manager, &conf.make_env)?,
+        Some(Command::Gencache { repo }) => gencache(repo, &mut repo_manager, &conf.make_env)?,
+        Some(Command::Sync) => sync(&repo_manager)?,
         None => {}
     }
 
@@ -119,9 +112,9 @@ fn run() -> Result<()> {
 }
 
 /// Prints information about the current portage `conf`.
-fn info(conf: &PortageConf, atom: Option<Atom>) -> Result<()> {
-    println!("Repositories:\n\n{}", conf.repo_manager);
-    let mut make_env = conf.make_env.iter().collect::<Vec<(&String, &EnvValue)>>();
+fn info(atom: Option<Atom>, repo_manager: &RepoManager, make_env: &MakeEnv) -> Result<()> {
+    println!("Repositories:\n\n{repo_manager}");
+    let mut make_env = make_env.iter().collect::<Vec<(&String, &EnvValue)>>();
     make_env.sort_by_key(|(name, _)| *name);
     for (key, value) in make_env {
         println!("{key}=\"{value}\"");
@@ -142,10 +135,10 @@ fn info(conf: &PortageConf, atom: Option<Atom>) -> Result<()> {
 
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.
-fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
-    let pkg = conf
-        .repo_manager
-        .repositories()
+fn install(atom: Atom, repo_manager: &RepoManager, make_env: &MakeEnv) -> Result<()> {
+    let pkg = repo_manager
+        .repos
+        .values()
         .filter_map(|repo| repo.find_packages(&atom).first().map(|p| (*p).clone()))
         .next();
 
@@ -153,24 +146,37 @@ fn install(conf: &PortageConf, atom: Atom) -> Result<()> {
         Some(pkg) => pkg,
         None => return Err(anyhow!("no matching package found for atom '{atom}'")),
     };
-    let ebuild = conf.repo_manager.resolve_ebuild(&pkg)?;
-
-    let mut handler = EbuildPhaseHandler::new(&ebuild, conf, EbuildPhase::Depend)
-        .with_context(|| anyhow!("unable to install package '{pkg}' using {ebuild}"))?;
-    handler.execute()?;
+    let ebuild = repo_manager.resolve_ebuild(&pkg)?;
+    let metadata = ebuild.generate_metadata(make_env)?;
+    println!("{metadata}");
 
     Ok(())
 }
 
 /// Generates metadata cache for all repositories defined in the portage `conf`.
-/// If `repo` is provided, only generates metadata cache for that repository.
-fn gencache(conf: &PortageConf, repo: Option<String>) -> Result<()> {
-    conf.repo_manager.generate_metadata(conf, repo)
+/// If `repo_name` is provided, only generates metadata cache for that repository.
+fn gencache(
+    repo_name: Option<String>,
+    repo_manager: &mut RepoManager,
+    make_env: &MakeEnv,
+) -> Result<()> {
+    if let Some(repo) = repo_name {
+        let repo = repo_manager
+            .repos
+            .get_mut(&repo)
+            .ok_or_else(|| anyhow!("repository '{repo}' doesn't exist"))?;
+        return repo.generate_metadata(make_env);
+    }
+
+    for repo in repo_manager.repos.values_mut() {
+        repo.generate_metadata(make_env)?;
+    }
+    Ok(())
 }
 
 /// Syncs all repositories defined in the portage `conf`.
-fn sync(conf: &PortageConf) -> Result<()> {
-    for repo in conf.repo_manager.repositories() {
+fn sync(repo_manager: &RepoManager) -> Result<()> {
+    for repo in repo_manager.repos.values() {
         match repo.sync() {
             Ok(_) => (),
             Err(e) => error!("failed to sync repository '{}'\n\t{e}", repo.name),
@@ -179,8 +185,8 @@ fn sync(conf: &PortageConf) -> Result<()> {
     Ok(())
 }
 
-/// Sets up application logger.
-fn setup_logger() -> Result<()> {
+/// Sets up application logger with the given `log_level`.
+fn setup_logger(log_level: log::LevelFilter) -> Result<()> {
     fern::Dispatch::new()
         .format(|out, message, record| {
             let format = match record.level() {
@@ -195,7 +201,7 @@ fn setup_logger() -> Result<()> {
             };
             out.finish(format);
         })
-        .level(DEFAULT_LOG_LEVEL)
+        .level(log_level)
         .chain(std::io::stdout())
         .apply()?;
     Ok(())

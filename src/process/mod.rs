@@ -9,6 +9,7 @@ use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::Pid;
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::os::fd::RawFd;
 
 /// Starts and manages a child process with IPC capabilities.
 /// The child process is started with `posix_spawn` and communicates via pipes.
@@ -32,10 +33,17 @@ impl Process {
     /// Uses `posix_spawn` to create a subprocess with the given `command` and `env` with IPC
     /// capabilities using [`IpcHandler`].
     ///
+    /// `child_channel` holds the (read, write) file descriptors the child should will use.
+    ///
     /// The first element in `command` is expected to be the absolute path to the binary to execute.
-    pub fn with_ipc(command: &[String], env: &HashMap<String, String>) -> Result<Self> {
-        let (ipc, pid) = IpcHandler::new(|actions| Self::spawn(command, env, &actions))
-            .with_context(|| "unable to setup IPC handler")?;
+    pub fn with_ipc(
+        command: &[String],
+        env: &HashMap<String, String>,
+        child_channel: (RawFd, RawFd),
+    ) -> Result<Self> {
+        let (ipc, pid) =
+            IpcHandler::new(child_channel, |actions| Self::spawn(command, env, &actions))
+                .with_context(|| "unable to setup IPC handler")?;
         debug!("Started process (PID: {pid}) with IPC handler");
         Ok(Self {
             pid,
@@ -97,20 +105,20 @@ impl Process {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process::ipc::{ChildMessage, ParentMessage};
+    use crate::process::ipc::{ChildToParentMsg, ParentToChildMsg};
 
-    struct ToBashTestMsg(String);
-    impl ParentMessage for ToBashTestMsg {
+    struct ParentTestMsg(String);
+    impl ParentToChildMsg for ParentTestMsg {
         fn into_bytes(self) -> Vec<u8> {
             self.0.into_bytes()
         }
     }
 
-    struct ToRustTestMsg(pub String);
+    struct ChildTestMsg(pub String);
 
-    impl ChildMessage for ToRustTestMsg {
-        fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
-            let s = String::from_utf8(bytes)
+    impl ChildToParentMsg for ChildTestMsg {
+        fn from_bytes(bytes: &[u8]) -> Result<Self> {
+            let s = String::from_utf8(bytes.to_owned())
                 .with_context(|| "invalid UTF-8 in child message")?
                 .to_string();
             Ok(Self(s))
@@ -132,20 +140,20 @@ mod tests {
             "/usr/bin/bash".into(),
             "-c".into(),
             r#"IFS= read -r response <&10 || exit 1
-            printf '%s\n' "${response}" >&11 || exit 1
-            printf '%s\n' "${TEST_ENV}" >&11 || exit 1
+            printf '%s\4' "${response}" >&11 || exit 1
+            printf '%s\4' "${TEST_ENV}" >&11 || exit 1
             sleep 30"#
                 .into(),
         ];
         let env: HashMap<String, String> = HashMap::from_iter([("TEST_ENV".into(), "42".into())]);
-        let mut proc = Process::with_ipc(&args, &env).unwrap();
+        let mut proc = Process::with_ipc(&args, &env, (10, 11)).unwrap();
         let ipc = proc.ipc.as_mut().unwrap();
 
-        ipc.send(ToBashTestMsg("sync".into())).unwrap();
-        let resp = ipc.recv::<ToRustTestMsg>().unwrap().unwrap();
+        ipc.send(ParentTestMsg("sync".into())).unwrap();
+        let resp = ipc.recv::<ChildTestMsg>().unwrap().unwrap();
         assert_eq!(resp.0, "sync", "expected echoed line");
 
-        let resp = ipc.recv::<ToRustTestMsg>().unwrap().unwrap();
+        let resp = ipc.recv::<ChildTestMsg>().unwrap().unwrap();
         assert_eq!(resp.0, "42", "expected value from env variable");
 
         proc.stop().unwrap();

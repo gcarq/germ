@@ -3,6 +3,7 @@ use anyhow::{Result, anyhow};
 use lazy_static::lazy_static;
 use log::trace;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,7 @@ lazy_static! {
     static ref ECLASS_RE: Regex = Regex::new(r"^[A-Za-z_][a-zA-Z0-9_.-]*$").unwrap();
 }
 
-#[derive(Debug)]
+#[derive(Default)]
 pub struct Eclasses(BTreeMap<String, Eclass>);
 
 impl Eclasses {
@@ -43,11 +44,15 @@ impl Eclasses {
     pub fn get(&self, name: &str) -> Option<&Eclass> {
         self.0.get(name)
     }
+
+    pub fn extend(&mut self, other: &Self) {
+        self.0.extend(other.0.clone());
+    }
 }
 
 /// Represents an eclass defined in PMS chapter 10.
 /// TODO: parse documentation
-#[derive(Debug)]
+#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct Eclass {
     pub name: String,
     pub path: PathBuf,

@@ -1,17 +1,19 @@
 # This is a stub function to call functions in the parent process via IPC.
-# The first argument is the function name, and the rest are the arguments to pass to that function.
+# The format is as follows: FN\0function_name\0arg1\0arg2\0...\4
+# So a hardcoded FN identifier, followed by the function name and arguments, everything is delimited by \0 and the
+# message is terminated with \4.
 __ipc_call() {
     {
-        printf 'FN %s' "$1"
+        printf 'FN\0%s' "$1"
         shift
         for arg in "$@"; do
-            printf ' %q' "$arg"
+            printf '\0%s' "$arg"
         done
-        printf '\n'
-    } >&11
+        printf '\4'
+    } >&"${CHILD_WRITE_FD}" || exit 2
 
     local reply
-    IFS= read -r reply <&10 || exit 1
+    IFS= read -r reply <&"${CHILD_READ_FD}" || exit 1
 
     case ${reply} in
         OK) return 0 ;;
@@ -20,6 +22,12 @@ __ipc_call() {
         ERR\ *) printf '%s\n' "${reply#ERR }" >&2; return 1 ;;
         *) printf 'protocol error: %s\n' "${reply}" >&2; exit 2 ;;
     esac
+}
+
+# Same as __ipc_call, but for sending data instead of calling a function.
+# The format is: DATA\0KEY=value\4
+__ipc_data() {
+    printf 'DATA\0%s=%s\4' "$1" "$2" >&"${CHILD_WRITE_FD}" || exit 2
 }
 
 __resolve_eclass() { __ipc_call __resolve_eclass "$@"; }

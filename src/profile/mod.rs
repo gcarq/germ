@@ -9,6 +9,7 @@ use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use log::{debug, warn};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::{fmt, fs};
 
 /// Represents a profile outlined in PMS section 5.
@@ -141,7 +142,7 @@ impl Profile {
         let content = fs::read_to_string(parent).with_context(|| "unable to read parent file")?;
         let parent_profiles = content
             .lines()
-            .map(|line| line.trim())
+            .map(str::trim)
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .collect::<Vec<_>>();
 
@@ -153,7 +154,7 @@ impl Profile {
             // TODO: this behavior is controlled via profile-formats in <repo>/metadata/layout.conf
             let path = match profile.split_once(':') {
                 Some((repo_name, profile_path)) => {
-                    let repo = repo_manager.get_repo(repo_name).ok_or_else(|| {
+                    let repo = repo_manager.repos.get(repo_name).ok_or_else(|| {
                         anyhow!("Repository '{repo_name}' not found for profile '{profile}'")
                     })?;
                     repo.location.join("profiles").join(profile_path)

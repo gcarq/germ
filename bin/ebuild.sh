@@ -242,3 +242,25 @@ EXPORT_FUNCTIONS() {
 
 # shellcheck source=/dev/null
 source "${EBUILD}"
+
+if [[ ${EBUILD_PHASE} = depend ]] ; then
+	metadata_keys=(
+		DEPEND RDEPEND SLOT SRC_URI RESTRICT HOMEPAGE LICENSE
+		DESCRIPTION KEYWORDS INHERITED IUSE REQUIRED_USE PDEPEND BDEPEND
+		EAPI PROPERTIES DEFINED_PHASES IDEPEND INHERIT
+	)
+
+	if ! ___eapi_has_IDEPEND; then
+		unset IDEPEND
+	fi
+
+	INHERIT=${PORTAGE_EXPLICIT_INHERIT}
+
+    # Send metadata as single-line KEY=value pairs
+    for key in "${metadata_keys[@]}"; do
+        value=${!key-}
+        value=${value//$'\n'/ }
+        __ipc_data "${key}" "${value}"
+    done
+	exec {CHILD_WRITE_FD}>&-
+fi

@@ -4,16 +4,16 @@ use nix::unistd::{Pid, pipe};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::mem::ManuallyDrop;
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 
 /// Trait for messages sent from the parent process to the child process.
-pub trait ParentMessage {
+pub trait ParentToChildMsg {
     fn into_bytes(self) -> Vec<u8>;
 }
 
 /// Trait for messages sent from the child process to the parent process.
-pub trait ChildMessage: Sized {
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self>;
+pub trait ChildToParentMsg: Sized {
+    fn from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
 /// Handler for IPC communication via pipes with a child process.
@@ -32,6 +32,7 @@ pub trait ChildMessage: Sized {
 pub struct IpcHandler {
     reader: BufReader<File>,
     writer: Option<File>,
+    buffer: Vec<u8>,
 }
 
 impl IpcHandler {
@@ -39,15 +40,17 @@ impl IpcHandler {
     /// process with the given `PosixSpawnFileActions`. The closure must also return the PID of
     /// the spawned child process.
     ///
+    /// `child_channel` holds the (read, write) file descriptors the child process should use.
+    ///
     /// # Example
     ///
     /// ```
     /// let attrs = PosixSpawnAttr::init()?;
-    /// let (ipc, pid) = IpcHandler::new(|actions| {
+    /// let (ipc, pid) = IpcHandler::new((42, 43), |actions| {
     ///     posix_spawn(binary, &actions, &attrs, &args, &env)
     /// })
     /// ```
-    pub fn new<F>(func: F) -> Result<(Self, Pid)>
+    pub fn new<F>(child_channel: (RawFd, RawFd), func: F) -> Result<(Self, Pid)>
     where
         F: FnOnce(PosixSpawnFileActions) -> Result<Pid>,
     {
@@ -58,8 +61,8 @@ impl IpcHandler {
 
         let mut actions =
             PosixSpawnFileActions::init().with_context(|| "unable to init posix_spawn actions")?;
-        actions.add_dup2(child_reader.as_raw_fd(), 10)?;
-        actions.add_dup2(child_writer.as_raw_fd(), 11)?;
+        actions.add_dup2(child_reader.as_raw_fd(), child_channel.0)?;
+        actions.add_dup2(child_writer.as_raw_fd(), child_channel.1)?;
         actions.add_close(parent_reader.as_raw_fd())?;
         actions.add_close(parent_writer.as_raw_fd())?;
 
@@ -73,6 +76,7 @@ impl IpcHandler {
         let instance = Self {
             reader: BufReader::new(reader),
             writer: Some(writer),
+            buffer: Vec::new(),
         };
         let pid = func(actions)?;
 
@@ -84,32 +88,34 @@ impl IpcHandler {
         Ok((instance, pid))
     }
 
-    /// Sends the given [`ParentMessage`] to the child process.
+    /// Sends the given [`ParentToChildMsg`] to the child process.
     /// The data sent must not contain a newline character; one will be added automatically.
-    pub fn send<T: ParentMessage>(&mut self, msg: T) -> Result<()> {
-        let writer = match &mut self.writer {
-            Some(writer) => writer,
-            None => return Err(anyhow!("bash writer is closed")),
+    pub fn send<T: ParentToChildMsg>(&mut self, msg: T) -> Result<()> {
+        let Some(writer) = &mut self.writer else {
+            return Err(anyhow!("bash writer is closed"));
         };
         writer
             .write_all(&msg.into_bytes())
-            .and_then(|_| writer.write_all(b"\n"))
-            .and_then(|_| writer.flush())
-            .with_context(|| "failed to write to bash")
+            .and_then(|()| writer.write_all(b"\n"))
+            .and_then(|()| writer.flush())
+            .with_context(|| "failed to write to pipe")
     }
 
-    /// Reads raw bytes from the child process until `\n` is encountered.
-    /// Returns [`ChildMessage`] or `Ok(None)` if EOF is reached.
-    pub fn recv<T: ChildMessage>(&mut self) -> Result<Option<T>> {
-        let mut buf = Vec::new();
-        let num_bytes = (self.reader.read_until(b'\n', &mut buf))
+    /// Reads raw bytes from the child process until `\4` is encountered.
+    /// Returns [`ChildToParentMsg`] or `Ok(None)` if EOF is reached.
+    pub fn recv<T: ChildToParentMsg>(&mut self) -> Result<Option<T>> {
+        self.buffer.clear();
+        let num_bytes = self
+            .reader
+            .read_until(4, &mut self.buffer)
             .with_context(|| "failed to read from child process")?;
         // We got EOF
         if num_bytes == 0 {
             return Ok(None);
         };
-        buf.pop_if(|b| *b == b'\n');
-        Ok(Some(T::from_bytes(buf)?))
+        // Get rid of the EOT character
+        self.buffer.truncate(self.buffer.len() - 1);
+        Ok(Some(T::from_bytes(&self.buffer)?))
     }
 }
 
