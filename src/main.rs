@@ -69,6 +69,9 @@ enum Command {
     Gencache {
         #[arg(value_name = "repo")]
         repo: Option<String>,
+
+        #[arg(short, long)]
+        force: bool,
     },
 
     /// Sync the repositories
@@ -101,7 +104,9 @@ fn run(args: Args) -> Result<()> {
     match args.command {
         Some(Command::Info { atom }) => info(atom, &repo_manager, &conf.make_env)?,
         Some(Command::Install { atom }) => install(atom, &repo_manager, &conf.make_env)?,
-        Some(Command::Gencache { repo }) => gencache(repo, &mut repo_manager, &conf.make_env)?,
+        Some(Command::Gencache { repo, force }) => {
+            gencache(repo, &mut repo_manager, &conf.make_env, force)?;
+        }
         Some(Command::Sync) => sync(&repo_manager)?,
         None => {}
     }
@@ -149,28 +154,28 @@ fn install(atom: Atom, repo_manager: &RepoManager, make_env: &MakeEnv) -> Result
     Ok(())
 }
 
-/// Generates metadata cache for all repositories defined in the portage `conf`.
-/// If `repo_name` is provided, only generates metadata cache for that repository.
+/// Generates metadata cache for repositories.
 fn gencache(
     repo_name: Option<String>,
     repo_manager: &mut RepoManager,
     make_env: &MakeEnv,
+    force: bool,
 ) -> Result<()> {
     if let Some(repo) = repo_name {
         let repo = repo_manager
             .repos
             .get_mut(&repo)
             .ok_or_else(|| anyhow!("repository '{repo}' doesn't exist"))?;
-        return repo.generate_metadata(make_env);
+        return repo.generate_metadata(make_env, force);
     }
 
     for repo in repo_manager.repos.values_mut() {
-        repo.generate_metadata(make_env)?;
+        repo.generate_metadata(make_env, force)?;
     }
     Ok(())
 }
 
-/// Syncs all repositories defined in the portage `conf`.
+/// Syncs all repositories.
 fn sync(repo_manager: &RepoManager) -> Result<()> {
     for repo in repo_manager.repos.values() {
         match repo.sync() {

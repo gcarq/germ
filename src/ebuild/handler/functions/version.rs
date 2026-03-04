@@ -173,15 +173,14 @@ fn parse_range(range: &str, max: usize) -> Result<(usize, usize)> {
             true => return Err(anyhow!("range must start with a number")),
             false => a.parse::<usize>()?,
         };
-        let end = match b.is_empty() {
-            true => max,
-            false => {
-                let end = b.parse::<usize>()?;
-                if start > end {
-                    return Err(anyhow!("range end must be >= start"));
-                }
-                end
+        let end = if b.is_empty() {
+            max
+        } else {
+            let end = b.parse::<usize>()?;
+            if start > end {
+                return Err(anyhow!("range end must be >= start"));
             }
+            end
         };
         Ok((start, end.min(max)))
     } else {

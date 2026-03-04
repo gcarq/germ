@@ -19,7 +19,6 @@ strum = { version = "0.28.0", default-features = false, features = ["std", "deri
 serde = { version = "1.0.228", features = ["derive"] }
 
 [lints.clippy]
-pedantic = "warn"
 dbg_macro = "warn"
 disallowed_script_idents = "warn"
 doc_link_with_quotes = "warn"

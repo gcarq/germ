@@ -1,7 +1,7 @@
 use crate::ebuild::metadata::EbuildMetadata;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::PathBuf;
 
@@ -15,14 +15,19 @@ pub struct MetadataCache {
 }
 
 impl MetadataCache {
-    /// Inserts the given `metadata` for the ebuild at `path` into this cache.
-    pub fn insert(&mut self, path: PathBuf, metadata: EbuildMetadata) {
-        self.ebuilds.insert(path, metadata);
-    }
-
     /// Extends this cache with the entries from `ebuilds`.
     pub fn extend(&mut self, ebuilds: HashMap<PathBuf, EbuildMetadata>) {
         self.ebuilds.extend(ebuilds);
+    }
+
+    /// Returns `true` if this cache contains metadata for the ebuild at `path`.
+    pub fn is_cached(&self, path: &PathBuf) -> bool {
+        self.ebuilds.contains_key(path)
+    }
+
+    /// Retains only the entries for the given `paths`.
+    pub fn retain(&mut self, paths: &HashSet<&PathBuf>) {
+        self.ebuilds.retain(|cached, _| paths.contains(&cached));
     }
 
     /// Deserializes the metadata cache from `reader`.
@@ -51,6 +56,12 @@ impl MetadataCache {
 mod tests {
     use super::*;
     use std::io::{Cursor, Seek, SeekFrom};
+
+    impl MetadataCache {
+        fn insert(&mut self, path: PathBuf, metadata: EbuildMetadata) {
+            self.ebuilds.insert(path, metadata);
+        }
+    }
 
     #[test]
     fn test_metadata_cache_serialization() {

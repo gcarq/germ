@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
@@ -29,7 +29,7 @@ static PMS_EAPI_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// how to build it. See PMS 6 and 7.
 #[derive(Clone, Eq, PartialEq)]
 pub struct Ebuild<'a> {
-    pub path: PathBuf,
+    pub path: &'a Path,
     pub eapi: Eapi,
     pub pkg: &'a Package,
     pub repo: &'a Repository,
@@ -38,13 +38,13 @@ pub struct Ebuild<'a> {
 impl<'a> Ebuild<'a> {
     /// Creates an [`Ebuild`] from the given `path` and `pkg` it relates to.
     /// Returns an `Err` if the EAPI is not found or unsupported for ebuilds.
-    pub fn new(path: PathBuf, pkg: &'a Package, repo: &'a Repository) -> Result<Self> {
+    pub fn new(path: &'a Path, pkg: &'a Package, repo: &'a Repository) -> Result<Self> {
         debug!(
             "Loading ebuild for '{pkg}' from path '{}' ...",
             path.display()
         );
         let file =
-            File::open(&path).with_context(|| anyhow!("unable to open {}", path.display()))?;
+            File::open(path).with_context(|| anyhow!("unable to open {}", path.display()))?;
         let reader = BufReader::with_capacity(256, file);
         for line in reader.lines() {
             let line = line?;
@@ -78,7 +78,7 @@ impl<'a> Ebuild<'a> {
             .collect::<HashMap<_, _>>();
 
         let md5sum =
-            utils::md5sum(&self.path).with_context(|| anyhow!("failed to calculate md5sum"))?;
+            utils::md5sum(self.path).with_context(|| anyhow!("failed to calculate md5sum"))?;
         EbuildMetadata::from_map(data, md5sum)
             .with_context(|| anyhow!("unable to create metadata from ebuild output"))
     }

@@ -2,7 +2,7 @@ use crate::ebuild::Ebuild;
 use crate::package::Package;
 use crate::repository::Repository;
 use crate::repository::config::RepoManagerConfig;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use log::debug;
 use std::collections::HashMap;
 use std::path::Path;
@@ -42,21 +42,20 @@ impl RepoManager {
         Ok(Self { repos })
     }
 
-    /// Resolves the ebuild for the given `package` by searching through all repositories.
-    /// Returns Err if the package or repository doesn't exist, or if the ebuild cannot be
-    /// resolved for any reason.
+    /// Resolves the ebuild for the given `package`.
+    ///
+    /// Returns `Err` if the `package` or the assigned repo doesn't exist.
     pub fn resolve_ebuild<'a>(&'a self, package: &'a Package) -> Result<Ebuild<'a>> {
         let repo = self
             .repos
             .get(&package.repo)
             .ok_or_else(|| anyhow!("repository {} doesn't exist", package.name))?;
 
-        if !repo.packages.contains(package) {
-            return Err(anyhow!("unable to find {package} in {repo}"));
-        }
-
-        repo.resolve_ebuild(package)
-            .with_context(|| anyhow!("unable to resolve ebuild for {package}"))
+        let path = match repo.packages.get(package) {
+            Some(path) => path,
+            None => Err(anyhow!("unable to find {package} in {repo}"))?,
+        };
+        Ebuild::new(path, package, repo)
     }
 
     /// Helper function to recursively resolve all master repositories for a given `repo` and return

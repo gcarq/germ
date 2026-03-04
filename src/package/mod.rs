@@ -26,6 +26,7 @@ impl Package {
         if !PKG_RE.is_match(name) {
             return Err(anyhow!("invalid package name: '{name}'"));
         }
+
         Ok(Self {
             category: category.to_owned(),
             name: name.to_owned(),

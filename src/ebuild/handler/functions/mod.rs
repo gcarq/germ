@@ -131,7 +131,7 @@ mod tests {
     use crate::ebuild::Ebuild;
     use crate::package::Package;
     use crate::package::version::PackageVersion;
-    use std::path::PathBuf;
+    use std::path::Path;
 
     #[test]
     fn test_exec_ebuild_fn_ok() {
@@ -143,12 +143,13 @@ mod tests {
         )
         .unwrap();
         let repo = Repository::default();
+        let path = Path::new("/dev/null");
 
         let ebuild = Ebuild {
-            path: PathBuf::default(),
             eapi: Eapi::Eight,
             pkg: &pkg,
             repo: &repo,
+            path,
         };
 
         // (func call, expected response)

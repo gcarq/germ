@@ -114,15 +114,16 @@ impl VersionSuffix {
             .find(|c: char| c.is_ascii_digit())
             .unwrap_or(suffix.len());
         let (suffix, number) = suffix.split_at(split_index);
-        let number = match number.is_empty() {
-            true => None,
-            false => {
-                number.parse::<usize>().with_context(|| {
-                    anyhow!("unable to parse version suffix number: '{number}'")
-                })?;
-                Some(number.to_string())
-            }
+
+        let number = if number.is_empty() {
+            None
+        } else {
+            number
+                .parse::<usize>()
+                .with_context(|| anyhow!("unable to parse version suffix number: '{number}'"))?;
+            Some(number.to_string())
         };
+
         let suffix = match suffix {
             "alpha" => Self::Alpha(number),
             "beta" => Self::Beta(number),
