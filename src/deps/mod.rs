@@ -2,24 +2,28 @@ use crate::package::Package;
 use crate::package::version::PackageVersion;
 use crate::regex::{ATOM_OP, CAT_PKG, CAT_PKG_VER_REV, REPOSITORY, SLOT_LOOSE};
 use anyhow::{Result, anyhow};
-use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 use std::fmt;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Regex to capture simple atoms with category and package,
-    /// optionally version, slot and repository e.g.: dev-lang/rust, dev-lang/rust-1.70.0.
-    static ref ATOM_SIMPLE_RE: Regex = Regex::new(&format!(
+/// Regex to capture simple atoms with category and package,
+/// optionally version, slot and repository e.g.: dev-lang/rust, dev-lang/rust-1.70.0.
+static ATOM_SIMPLE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
         r"^{CAT_PKG}(?:\:(?P<slot>{SLOT_LOOSE}))?(?:\:\:(?P<repo>{REPOSITORY}))?$"
     ))
-    .unwrap();
-    /// Regex to capture atoms with operator, category, package,
-    /// version, slot and repository e.g.: >=dev-lang/rust-1.70
-    static ref ATOM_OPERATOR_RE: Regex = Regex::new(&format!(r"^{ATOM_OP}{CAT_PKG_VER_REV}$")).unwrap();
-    /// Regex to capture atoms with '=' category, package and a version wildcard.
-    static ref ATOM_STAR_RE: Regex = Regex::new(&format!(r"^={CAT_PKG_VER_REV}\*$")).unwrap();
-}
+    .unwrap()
+});
+
+/// Regex to capture atoms with operator, category, package,
+/// version, slot and repository e.g.: >=dev-lang/rust-1.70
+static ATOM_OPERATOR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"^{ATOM_OP}{CAT_PKG_VER_REV}$")).unwrap());
+
+/// Regex to capture atoms with '=' category, package and a version wildcard.
+static ATOM_STAR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"^={CAT_PKG_VER_REV}\*$")).unwrap());
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 enum Operator {

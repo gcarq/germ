@@ -21,7 +21,6 @@ use crate::repository::sync::{SyncHandler, build_sync_handler};
 use crate::utils;
 use crate::utils::FileFromPath;
 use anyhow::{Context, Result, anyhow};
-use lazy_static::lazy_static;
 use log::{debug, info, trace, warn};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -29,13 +28,13 @@ use std::fs::File;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::LazyLock;
 use std::{fmt, fs, io};
 
-lazy_static! {
-    /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision`
-    /// from an ebuild name.
-    static ref EBUILD_RE: Regex = Regex::new(&format!(r"^{PKG_VER_REV}.ebuild$")).unwrap();
-}
+/// Regex to validate and parse `package`, `version`, `suffixes` and the `revision`
+/// from an ebuild name.
+static EBUILD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"^{PKG_VER_REV}.ebuild$")).unwrap());
 
 /// Represents a package repository with its location, name, eapi version, categories, packages,
 /// and other metadata. The repository will be synced using a [`SyncHandler`].

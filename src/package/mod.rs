@@ -1,16 +1,10 @@
 pub mod version;
 
 use crate::package::version::PackageVersion;
-use crate::regex::{CATEGORY_RE, PACKAGE};
+use crate::regex::{CATEGORY_RE, PKG_RE};
 use anyhow::{Result, anyhow};
-use lazy_static::lazy_static;
-use regex::Regex;
-use std::fmt;
 
-lazy_static! {
-    /// Regex to validate package names.
-    static ref PKG_RE: Regex = Regex::new(&format!(r"^{PACKAGE}$")).unwrap();
-}
+use std::fmt;
 
 /// Represents a package with its category, name, version and repository.
 /// TODO: add slot information.

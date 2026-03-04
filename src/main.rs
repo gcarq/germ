@@ -7,11 +7,11 @@ use crate::vdb::Vdb;
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use fern::colors::{Color, ColoredLevelConfig};
-use lazy_static::lazy_static;
 use log::error;
 use makenv::EnvValue;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 mod conf;
 mod consts;
@@ -28,17 +28,15 @@ mod repository;
 mod utils;
 mod vdb;
 
-lazy_static! {
-    /// Colors for log levels.
-    static ref COLORS: ColoredLevelConfig = ColoredLevelConfig::new()
+/// Colors for log levels.
+static COLORS: LazyLock<ColoredLevelConfig> = LazyLock::new(|| {
+    ColoredLevelConfig::new()
         .error(Color::Red)
         .warn(Color::Yellow)
         .info(Color::Green)
         .debug(Color::Cyan)
-        .trace(Color::BrightCyan);
-
-
-}
+        .trace(Color::BrightCyan)
+});
 
 /// Package management tool for Gentoo-like systems.
 #[derive(Parser)]

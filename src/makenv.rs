@@ -1,16 +1,15 @@
 use crate::utils;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Regex to capture variable references for expansion.
-    static ref VAR_EXPAND_RE: Regex = Regex::new(r"(?<expr>\$\{?(?<var>[a-zA-Z][a-zA-Z0-9_]*)\}?)").unwrap();
-}
+/// Regex to capture variable references for expansion.
+static VAR_EXPAND_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?<expr>\$\{?(?<var>[a-zA-Z][a-zA-Z0-9_]*)\}?)").unwrap());
 
 /// List of variables that are incremental as per PMS section 5.3 and
 /// <https://github.com/gentoo/portage/blob/0783d820e6eecffa3adff52c4669fc715d65dbaa/lib/portage/const.py#L121>

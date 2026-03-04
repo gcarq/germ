@@ -1,8 +1,8 @@
 /// This module contains common regex patterns to validate and parse various
 /// components as per the Portage Package Management Specification (PMS).
 use constcat::concat;
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::LazyLock;
 
 /// Regex to capture atom operators.
 pub const ATOM_OP: &str = r"(?<operator>[=~]|[><]=?)";
@@ -41,13 +41,13 @@ pub const CAT_PKG: &str = constcat::concat!(CATEGORY, "/", PACKAGE, "(?:-", VER_
 
 pub const CAT_PKG_VER_REV: &str = concat!(CATEGORY, "/", PACKAGE, "-", VER_REV);
 
-lazy_static! {
-    /// Regex to validate if a string is a valid category name.
-    pub static ref CATEGORY_RE: Regex = Regex::new(&format!(r"^{CATEGORY}$")).unwrap();
+/// Regex to validate if a string is a valid category name.
+pub static CATEGORY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"^{CATEGORY}$")).unwrap());
 
-    /// Regex to validate if a string is a valid package name.
-    pub static ref PKG_RE: Regex = Regex::new(&format!(r"^{PACKAGE}$")).unwrap();
-}
+/// Regex to validate if a string is a valid package name.
+pub static PKG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"^{PACKAGE}$")).unwrap());
 
 #[cfg(test)]
 mod tests {

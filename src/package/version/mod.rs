@@ -1,19 +1,18 @@
 use crate::package::version::suffix::VersionSuffixes;
 use crate::regex::VER_REV;
 use anyhow::{Context, Result, anyhow};
-use lazy_static::lazy_static;
 use number::VersionNumber;
 use regex::Regex;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 pub mod number;
 pub mod suffix;
 
-lazy_static! {
-    /// Regex to validate and parse `version`, `suffixes` and the `revision`.
-    static ref VERSION_RE: Regex = Regex::new(&format!(r"^{VER_REV}$")).unwrap();
-}
+/// Regex to validate and parse `version`, `suffixes` and the `revision`.
+static VERSION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"^{VER_REV}$")).unwrap());
 
 /// Represents a package version according to PMS section 3.2 and 3.3.
 /// This includes the base version components (e.g., "1.2.3a"), any suffixes

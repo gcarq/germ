@@ -3,20 +3,19 @@ use crate::repository::config::layout::Layout;
 use crate::utils;
 use anyhow::{Context, Result, anyhow};
 use ini::Ini;
-use lazy_static::lazy_static;
 use log::{debug, warn};
 use regex::Regex;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 mod layout;
 
-lazy_static! {
-    /// Regex to validate repository names.
-    static ref REPO_RE: Regex = Regex::new(&format!(r"^{REPOSITORY}$")).unwrap();
-}
+/// Regex to validate repository names.
+static REPO_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"^{REPOSITORY}$")).unwrap());
 
 // List of properties in repos.conf and layout.conf that are currently not supported.
 const UNSUPPORTED_CONF_PROPERTIES: &[&str] = &["aliases", "eclass-overrides", "force"];

@@ -3,16 +3,15 @@ use crate::package::version::PackageVersion;
 use crate::regex::PKG_VER_REV;
 use crate::utils;
 use anyhow::{Context, Result, anyhow};
-use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision` from VDB.
-    static ref PKG_VER_REV_RE: Regex = Regex::new(&format!(r"^{PKG_VER_REV}$")).unwrap();
-}
+/// Regex to validate and parse `package`, `version`, `suffixes` and the `revision` from VDB.
+static PKG_VER_REV_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"^{PKG_VER_REV}$")).unwrap());
 
 /// Represents a portage compatible VDB containing installed packages.
 pub struct Vdb {

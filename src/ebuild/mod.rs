@@ -6,7 +6,6 @@ use crate::package::Package;
 use crate::repository::Repository;
 use crate::utils;
 use anyhow::{Context, Result, anyhow};
-use lazy_static::lazy_static;
 use log::debug;
 use regex::Regex;
 use std::collections::HashMap;
@@ -15,16 +14,16 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 pub mod handler;
 pub mod metadata;
 
-lazy_static! {
-    /// Regex to capture EAPI from ebuild files according to PMS 7.3.1.
-    /// The regex crate doesn't support backreferences, so we can't enforce matching quotes.
-    static ref PMS_EAPI_RE: Regex =
-        Regex::new(r#"^[ \t]*EAPI=['\"]?(?<eapi>[A-Za-z0-9+_.-]*)['\"]?[ \t]*([ \t]#.*)?$"#).unwrap();
-}
+/// Regex to capture EAPI from ebuild files according to PMS 7.3.1.
+/// The regex crate doesn't support backreferences, so we can't enforce matching quotes.
+static PMS_EAPI_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^[ \t]*EAPI=['\"]?(?<eapi>[A-Za-z0-9+_.-]*)['\"]?[ \t]*([ \t]#.*)?$"#).unwrap()
+});
 
 /// An ebuild is associated with a package and contains the metadata and instructions
 /// how to build it. See PMS 6 and 7.

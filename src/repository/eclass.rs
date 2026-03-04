@@ -1,18 +1,17 @@
 use crate::utils;
 use anyhow::{Result, anyhow};
-use lazy_static::lazy_static;
 use log::trace;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
-lazy_static! {
-    /// Regex to validate eclass names according to PMS 3.1.6.
-    /// NOTE: look-ahead to exclude "default" is not supported by the regex crate.
-    static ref ECLASS_RE: Regex = Regex::new(r"^[A-Za-z_][a-zA-Z0-9_.-]*$").unwrap();
-}
+/// Regex to validate eclass names according to PMS 3.1.6.
+/// NOTE: look-ahead to exclude "default" is not supported by the regex crate.
+static ECLASS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z_][a-zA-Z0-9_.-]*$").unwrap());
 
 #[derive(Default)]
 pub struct Eclasses(BTreeMap<String, Eclass>);
