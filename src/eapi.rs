@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 /// An EAPI can be thought of as a ‘version’ of the PMS to which a package conforms.
 /// See PMS section 2 for more details.nbv
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub enum Eapi {
     #[default]
     Zero,

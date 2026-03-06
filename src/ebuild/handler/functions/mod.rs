@@ -131,7 +131,7 @@ mod tests {
     use crate::ebuild::Ebuild;
     use crate::package::Package;
     use crate::package::version::PackageVersion;
-    use std::path::Path;
+    use std::path::PathBuf;
 
     #[test]
     fn test_exec_ebuild_fn_ok() {
@@ -142,14 +142,12 @@ mod tests {
             "gentoo",
         )
         .unwrap();
-        let repo = Repository::default();
-        let path = Path::new("/dev/null");
 
         let ebuild = Ebuild {
             eapi: Eapi::Eight,
             pkg: &pkg,
-            repo: &repo,
-            path,
+            repo: &Repository::default(),
+            path: PathBuf::default(),
         };
 
         // (func call, expected response)

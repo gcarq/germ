@@ -1,19 +1,24 @@
+pub mod metadata;
+pub mod slot;
 pub mod version;
 
 use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY_RE, PKG_RE};
 use anyhow::{Result, anyhow};
-
+use metadata::PackageMetadata;
+use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 /// Represents a package with its category, name, version and repository.
 /// TODO: add slot information.
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Deserialize, Clone, Eq, Debug)]
 pub struct Package {
     pub category: String,
     pub name: String,
     pub version: PackageVersion,
     pub repo: String,
+    metadata: Option<PackageMetadata>,
 }
 
 impl Package {
@@ -32,7 +37,12 @@ impl Package {
             name: name.to_owned(),
             version,
             repo: repo.to_owned(),
+            metadata: None,
         })
+    }
+
+    pub fn attach_metadata(&mut self, metadata: PackageMetadata) {
+        self.metadata = Some(metadata);
     }
 
     /// Returns the qualified name of the package in the format `category/name`
@@ -77,6 +87,25 @@ impl Package {
     }
 }
 
+impl PartialEq for Package {
+    /// TODO: add slot
+    fn eq(&self, other: &Self) -> bool {
+        self.category == other.category
+            && self.name == other.name
+            && self.version == other.version
+            && self.repo == other.repo
+    }
+}
+
+impl Hash for Package {
+    //TODO: add slot
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.category.hash(state);
+        self.name.hash(state);
+        self.version.hash(state);
+        self.repo.hash(state);
+    }
+}
 impl fmt::Display for Package {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}-{}", self.qualified_name(), self.version)

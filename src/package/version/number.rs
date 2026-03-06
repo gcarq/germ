@@ -1,10 +1,11 @@
 use anyhow::{Result, anyhow};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::str::FromStr;
 use std::{fmt, hash};
 
 /// Represents the base version number as individual components and an optional letter suffix.
-#[derive(Clone, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Eq, Debug)]
 pub struct VersionNumber {
     pub components: Vec<NumberComponent>,
     pub letter: Option<char>,
@@ -121,7 +122,7 @@ impl fmt::Display for VersionNumber {
 /// E.g., in "1.2.03a", "1" and "2" are Numeric, "03" is Alphabetic, and "a" is handled separately
 /// and not part of this enum.
 /// See PMS 3.2 and 3.3 for more details.
-#[derive(Clone, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Eq, Debug)]
 pub enum NumberComponent {
     Numeric(String),
     Alphabetic(String),

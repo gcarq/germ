@@ -1,14 +1,16 @@
 use crate::eapi::Eapi;
+use crate::package::slot::PackageSlot;
 use crate::repository::eclass::Eclass;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use std::str::FromStr;
 
-/// Holds all metadata of an ebuild.
+/// Holds all metadata of a [`Package`].
 /// TODO: parse eclasses
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub struct EbuildMetadata {
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct PackageMetadata {
     eapi: Eapi,
     description: String,
     homepage: Vec<String>,
@@ -20,7 +22,7 @@ pub struct EbuildMetadata {
     defined_phases: Vec<String>,
     isue: Vec<String>,
     required_use: String,
-    slot: String,
+    slot: PackageSlot,
     depend: String,
     bdepend: String,
     idepend: String,
@@ -30,7 +32,7 @@ pub struct EbuildMetadata {
     md5sum: String,
 }
 
-impl EbuildMetadata {
+impl PackageMetadata {
     /// Takes a `map` with all ebuild properties, also takes the `md5sum` of the ebuild file.
     ///
     /// Returns `None` if any of the required fields are missing or if the EAPI is invalid.
@@ -59,8 +61,8 @@ impl EbuildMetadata {
             required_use: Self::sanitize_value(&map, "REQUIRED_USE")?.join(" "),
             slot: map
                 .get("SLOT")
-                .ok_or_else(|| anyhow!("SLOT not set"))?
-                .to_string(),
+                .map(|s| PackageSlot::from_str(s))
+                .ok_or_else(|| anyhow!("SLOT not set"))??,
             depend: Self::sanitize_value(&map, "DEPEND")?.join(" "),
             bdepend: Self::sanitize_value(&map, "BDEPEND")?.join(" "),
             idepend: Self::sanitize_value(&map, "IDEPEND")?.join(" "),
@@ -82,7 +84,7 @@ impl EbuildMetadata {
     }
 }
 
-impl fmt::Display for EbuildMetadata {
+impl fmt::Display for PackageMetadata {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "BDEPEND={}", self.bdepend)?;
         writeln!(f, "DEFINED_PHASES={}", self.defined_phases.join(" "))?;
@@ -137,7 +139,7 @@ mod tests {
             .filter_map(|d| d.split_once('='))
             .collect::<HashMap<_, _>>();
 
-        let metadata = EbuildMetadata::from_map(data, String::new());
+        let metadata = PackageMetadata::from_map(data, String::new());
         assert!(metadata.is_ok(), "metadata should be parsed successfully");
 
         let metadata = metadata.unwrap();
@@ -167,7 +169,7 @@ mod tests {
             metadata.required_use,
             "^^ ( python_single_target_python3_11 )"
         );
-        assert_eq!(metadata.slot, "0");
+        assert_eq!(metadata.slot, PackageSlot::Simple("0".into()));
         assert_eq!(metadata.depend, "");
         assert_eq!(
             metadata.bdepend,

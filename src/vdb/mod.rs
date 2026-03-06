@@ -1,6 +1,6 @@
 use crate::package::Package;
 use crate::package::version::PackageVersion;
-use crate::regex::PKG_VER_REV;
+use crate::regex::PV_REV;
 use crate::utils;
 use anyhow::{Context, Result, anyhow};
 use regex::Regex;
@@ -10,8 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision` from VDB.
-static PKG_VER_REV_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(&format!(r"^{PKG_VER_REV}$")).unwrap());
+static PKG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{PV_REV}$")).unwrap());
 
 /// Represents a portage compatible VDB containing installed packages.
 pub struct Vdb {
@@ -60,7 +59,7 @@ impl Vdb {
                     .as_os_str()
                     .to_str()
                     .with_context(|| "path contains invalid unicode")?;
-                let Some(caps) = PKG_VER_REV_RE.captures(pvr) else {
+                let Some(caps) = PKG_RE.captures(pvr) else {
                     continue;
                 };
 

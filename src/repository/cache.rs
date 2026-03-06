@@ -1,33 +1,56 @@
-use crate::ebuild::metadata::EbuildMetadata;
-use anyhow::{Context, Result};
+use crate::package::Package;
+use anyhow::{Context, Result, anyhow};
+use log::debug;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+use std::fs::File;
 use std::io;
-use std::path::PathBuf;
+use std::path::Path;
 
-/// Metadata cache for [`Ebuild`].
+/// Metadata cache for [`Package`].
 ///
-/// This maps the absolute path of an ebuild to its metadata.
-/// This cache is used to avoid reparsing ebuild files, which is expensive.
+/// This cache is used to avoid expensive metadata parsing.
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Debug)]
-pub struct MetadataCache {
-    ebuilds: HashMap<PathBuf, EbuildMetadata>,
+pub struct PackageCache {
+    packages: HashSet<Package>,
 }
 
-impl MetadataCache {
-    /// Extends this cache with the entries from `ebuilds`.
-    pub fn extend(&mut self, ebuilds: HashMap<PathBuf, EbuildMetadata>) {
-        self.ebuilds.extend(ebuilds);
+impl PackageCache {
+    /// Syncs the cache by removing all packages not present in `known_packages`.
+    pub fn sync(&mut self, known_packages: &HashSet<Package>) {
+        self.packages.retain(|pkg| known_packages.contains(pkg));
     }
 
-    /// Returns `true` if this cache contains metadata for the ebuild at `path`.
-    pub fn is_cached(&self, path: &PathBuf) -> bool {
-        self.ebuilds.contains_key(path)
+    /// Drains the cache and returns all packages.
+    pub fn drain(self) -> HashSet<Package> {
+        self.packages
     }
 
-    /// Retains only the entries for the given `paths`.
-    pub fn retain(&mut self, paths: &HashSet<&PathBuf>) {
-        self.ebuilds.retain(|cached, _| paths.contains(&cached));
+    /// Loads the package cache from the given `path`.
+    ///
+    /// Returns `Ok(None)` if the file doesn't exist.
+    /// Returns `Err` if the cache cannot be deserialized or the file cannot be opened.
+    pub fn load_from_path(path: &Path) -> Result<Option<Self>> {
+        debug!("Loading package cache from {} ...", path.display());
+        let reader = match File::open(path) {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => Err(anyhow!(
+                "unable to open package cache at {}: {err}",
+                path.display()
+            ))?,
+        };
+        Ok(Some(PackageCache::deserialize(reader)?))
+    }
+
+    /// Writes the package cache to the given `path`.
+    ///
+    /// Returns `Err` if the cache cannot be serialized or the file cannot be created.
+    pub fn write_to_path(&self, path: &Path) -> Result<()> {
+        debug!("Writing package cache to {} ...", path.display());
+        let writer = File::create(path)
+            .with_context(|| anyhow!("unable to create package cache '{}'", path.display()))?;
+        self.serialize(writer)
     }
 
     /// Deserializes the metadata cache from `reader`.
@@ -52,14 +75,25 @@ impl MetadataCache {
     }
 }
 
+impl FromIterator<Package> for PackageCache {
+    fn from_iter<T: IntoIterator<Item = Package>>(iter: T) -> Self {
+        Self {
+            packages: iter.into_iter().collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::package::metadata::PackageMetadata;
+    use crate::package::version::PackageVersion;
+    use std::collections::HashMap;
     use std::io::{Cursor, Seek, SeekFrom};
 
-    impl MetadataCache {
-        fn insert(&mut self, path: PathBuf, metadata: EbuildMetadata) {
-            self.ebuilds.insert(path, metadata);
+    impl PackageCache {
+        fn insert(&mut self, package: Package) {
+            self.packages.insert(package);
         }
     }
 
@@ -90,15 +124,23 @@ mod tests {
         .filter_map(|d| d.split_once('='))
         .collect::<HashMap<_, _>>();
 
-        let metadata = EbuildMetadata::from_map(data, String::new()).unwrap();
-        let mut cache = MetadataCache::default();
-        cache.insert(PathBuf::from("/dev/null"), metadata);
+        let mut package = Package::new(
+            "app-editors",
+            "vim",
+            PackageVersion::new("1.0.0", None, None).unwrap(),
+            "gentoo",
+        )
+        .unwrap();
+        let metadata = PackageMetadata::from_map(data, String::new()).unwrap();
+        package.attach_metadata(metadata);
+
+        let mut cache = PackageCache::default();
+        cache.insert(package);
 
         let mut cursor = Cursor::new(Vec::new());
         cache.serialize(&mut cursor).unwrap();
 
         cursor.seek(SeekFrom::Start(0)).unwrap();
-        let cache2 = MetadataCache::deserialize(cursor).unwrap();
-        assert_eq!(cache, cache2);
+        assert_eq!(PackageCache::deserialize(cursor).unwrap(), cache);
     }
 }

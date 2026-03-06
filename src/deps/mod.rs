@@ -1,30 +1,54 @@
 use crate::package::Package;
+use crate::package::slot::PackageSlot;
 use crate::package::version::PackageVersion;
-use crate::regex::{ATOM_OP, CAT_PKG, CAT_PKG_VER_REV, REPOSITORY, SLOT_LOOSE};
+use crate::regex::{CATEGORY, PACKAGE, PV_REV, REPOSITORY, V_REV};
 use anyhow::{Result, anyhow};
+use constcat::concat;
 use regex::{Captures, Regex};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+/// Captures atom operators.
+const ATOM_OPERATOR: &str = r"(?<operator>[=~]|[><]=?)";
+
+/// Captures category and package with optional version and revision.
+const ATOM_CP: &str = concat!(CATEGORY, "/", PACKAGE, "(?:-", V_REV, ")?");
+
+/// Captures category, package, version and revision.
+const ATOM_CPV_REV: &str = concat!(CATEGORY, "/", PV_REV);
+
+/// Captures optional slot information in atoms.
+const ATOM_SLOT_LOOSE: &str = r"(?:\:(?P<slot>([a-zA-Z0-9_+./*=-]+)))?";
+
+/// Captures optional repository information in atoms.
+const ATOM_REPOSITORY: &str = concat!(r"(?:\:\:", REPOSITORY, ")?");
+
 /// Regex to capture simple atoms with category and package,
-/// optionally version, slot and repository e.g.: dev-lang/rust, dev-lang/rust-1.70.0.
+/// optionally version, slot and repository e.g.: `dev-lang/rust-1.70.0`.
 static ATOM_SIMPLE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"^{ATOM_CP}{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}$")).unwrap()
+});
+
+/// Regex to capture atoms with operator, category, package,
+/// version, ... e.g.: `>=dev-lang/rust-1.70`
+static ATOM_OPERATOR_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
-        r"^{CAT_PKG}(?:\:(?P<slot>{SLOT_LOOSE}))?(?:\:\:(?P<repo>{REPOSITORY}))?$"
+        r"^{ATOM_OPERATOR}{ATOM_CPV_REV}{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}$"
     ))
     .unwrap()
 });
 
-/// Regex to capture atoms with operator, category, package,
-/// version, slot and repository e.g.: >=dev-lang/rust-1.70
-static ATOM_OPERATOR_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(&format!(r"^{ATOM_OP}{CAT_PKG_VER_REV}$")).unwrap());
+/// Regex to capture atoms with an equal operator, category, package and a version wildcard, ...
+/// e.g.: `=dev-lang/rust-1.70*`
+static ATOM_WILDCARD_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"^={ATOM_CPV_REV}\*{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}$"
+    ))
+    .unwrap()
+});
 
-/// Regex to capture atoms with '=' category, package and a version wildcard.
-static ATOM_STAR_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(&format!(r"^={CAT_PKG_VER_REV}\*$")).unwrap());
-
+/// Specifies the operator of an atom, which determines how packages are matched.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 enum Operator {
     Less,
@@ -66,16 +90,19 @@ impl fmt::Display for Operator {
     }
 }
 
+/// Specifies the variant of an atom, which determines how packages are matched.
 #[derive(Default, Clone, Debug, Eq, Hash, PartialEq)]
-pub enum AtomVariant {
+enum Variant {
     #[default]
     Simple,
     VersionOperator,
     VersionWildcard,
 }
 
-/// Represents a portage package atom. An atom is simply a dependency that is used by portage when
-/// calculating relationships between packages.
+/// Represents a portage package atom.
+///
+/// An atom can match one or more [`Package`] and is used for
+/// calculating dependencies between packages.
 /// TODO:
 ///  * implement remaining atom variants (see man 5 ebuild)
 #[derive(Default, Clone, Debug, PartialEq, Hash, Eq)]
@@ -84,18 +111,19 @@ pub struct Atom {
     category: String,
     package: String,
     version: Option<PackageVersion>,
-    slot: Option<String>,
+    slot: Option<PackageSlot>,
     repo: Option<String>,
-    variant: AtomVariant,
+    variant: Variant,
 }
 
 impl Atom {
-    /// Creates an Atom from the given string representation.
-    /// Returns an error if the string is not a valid atom.
+    /// Creates an [`Atom`] from the given `atom` string.
+    ///
+    /// Returns `Err` if the string is not a valid atom.
     pub fn new(atom: &str) -> Result<Self> {
         if let Some(caps) = ATOM_OPERATOR_RE.captures(atom) {
             return Ok(
-                Self::from_regex_capture(&caps, AtomVariant::VersionOperator)?.with_operator(
+                Self::from_regex_capture(&caps, Variant::VersionOperator)?.with_operator(
                     match caps.name("operator") {
                         Some(m) => Some(Operator::from_str(m.as_str())?),
                         None => None,
@@ -103,20 +131,19 @@ impl Atom {
                 ),
             );
         }
-        if let Some(caps) = ATOM_STAR_RE.captures(atom) {
-            return Ok(
-                Self::from_regex_capture(&caps, AtomVariant::VersionWildcard)?
-                    .with_operator(Some(Operator::Equal)),
-            );
+        if let Some(caps) = ATOM_WILDCARD_RE.captures(atom) {
+            return Ok(Self::from_regex_capture(&caps, Variant::VersionWildcard)?
+                .with_operator(Some(Operator::Equal)));
         }
         if let Some(caps) = ATOM_SIMPLE_RE.captures(atom) {
-            return Self::from_regex_capture(&caps, AtomVariant::Simple);
+            return Self::from_regex_capture(&caps, Variant::Simple);
         }
 
         Err(anyhow!("'{atom}' is not a valid package atom"))
     }
 
-    /// Returns the qualified name for this atom in the format category/name e.g. app-editors/vim.
+    /// Returns the qualified name for this atom in the format
+    /// `category/name` e.g. `app-editors/vim`.
     pub fn qualified_name(&self) -> String {
         format!("{}/{}", self.category, self.package)
     }
@@ -143,8 +170,8 @@ impl Atom {
             return true;
         };
         match self.variant {
-            AtomVariant::Simple => atom_ver == pkg_ver,
-            AtomVariant::VersionOperator => match self.operator {
+            Variant::Simple => atom_ver == pkg_ver,
+            Variant::VersionOperator => match self.operator {
                 Some(Operator::Less) => pkg_ver < atom_ver,
                 Some(Operator::LessEqual) => pkg_ver <= atom_ver,
                 Some(Operator::Equal) => {
@@ -169,16 +196,17 @@ impl Atom {
                 }
                 None => unreachable!("BUG: atom is expected to have an operator"),
             },
-            AtomVariant::VersionWildcard => todo!("wildcard matching not implemented"),
+            Variant::VersionWildcard => todo!("wildcard matching not implemented"),
         }
     }
 
-    /// Creates an Atom from the given regex captures.
+    /// Creates an Atom from the given regex `captures` and `variant`.
+    ///
     /// It assumes the correct regex has been used.
     /// NOTE: this does not set the operator field, see [`Self::with_operator`].
-    fn from_regex_capture(caps: &Captures, variant: AtomVariant) -> Result<Self> {
-        let version = match Self::parse_version(caps)? {
-            Some(_) if variant == AtomVariant::Simple => Err(anyhow!(
+    fn from_regex_capture(captures: &Captures, variant: Variant) -> Result<Self> {
+        let version = match Self::parse_version(captures)? {
+            Some(_) if variant == Variant::Simple => Err(anyhow!(
                 "atom must have an operator or be in format <category>/<package>"
             ))?,
             v => v,
@@ -186,32 +214,36 @@ impl Atom {
 
         Ok(Self {
             operator: None,
-            category: caps
+            category: captures
                 .name("category")
                 .ok_or_else(|| anyhow!("atom missing <category>"))?
                 .as_str()
                 .to_owned(),
-            package: caps
+            package: captures
                 .name("package")
                 .ok_or_else(|| anyhow!("atom missing <package>"))?
                 .as_str()
                 .to_owned(),
             version,
-            slot: caps.name("slot").map(|m| m.as_str().to_owned()),
-            repo: caps.name("repo").map(|m| m.as_str().to_owned()),
+            slot: captures
+                .name("slot")
+                .map(|m| PackageSlot::from_str(m.as_str()))
+                .transpose()?,
+            repo: captures.name("repo").map(|m| m.as_str().to_owned()),
             variant,
         })
     }
 
-    /// Parses the version including suffixes and revision from the given regex captures `caps`.
-    /// If no version is found, returns `Ok(None)`.
-    fn parse_version(caps: &Captures) -> Result<Option<PackageVersion>> {
-        let version = match caps.name("version") {
+    /// Parses the version including suffixes and revision from the given regex `captures`.
+    ///
+    /// Return `Ok(None)` if no version can be matched.
+    fn parse_version(captures: &Captures) -> Result<Option<PackageVersion>> {
+        let version = match captures.name("version") {
             Some(m) => m.as_str(),
             None => return Ok(None),
         };
-        let suffixes = caps.name("suffixes").map(|m| m.as_str());
-        let revision = caps.name("revision").map(|m| m.as_str());
+        let suffixes = captures.name("suffixes").map(|m| m.as_str());
+        let revision = captures.name("revision").map(|m| m.as_str());
 
         Ok(Some(PackageVersion::new(version, suffixes, revision)?))
     }
@@ -237,7 +269,11 @@ impl fmt::Display for Atom {
         }
         write!(f, "{}/{}", self.category, self.package)?;
         if let Some(version) = &self.version {
-            write!(f, "-{version}")?;
+            if self.variant == Variant::VersionWildcard {
+                write!(f, "-{version}*")?;
+            } else {
+                write!(f, "-{version}")?;
+            }
         }
         if let Some(slot) = &self.slot {
             write!(f, ":{slot}")?;
@@ -269,16 +305,16 @@ mod tests {
                 Atom {
                     category: "dev-lang".into(),
                     package: "rust".into(),
-                    slot: Some("1.92.0".into()),
+                    slot: Some(PackageSlot::Simple("1.92.0".into())),
                     ..Default::default()
                 },
             ),
             (
-                "net-misc/dhcp:0::gentoo",
+                "net-misc/dhcp:*::gentoo",
                 Atom {
                     category: "net-misc".into(),
                     package: "dhcp".into(),
-                    slot: Some("0".into()),
+                    slot: Some(PackageSlot::Any),
                     repo: Some("gentoo".into()),
                     ..Default::default()
                 },
@@ -288,14 +324,16 @@ mod tests {
                 Atom {
                     category: "x11-drivers".into(),
                     package: "nvidia-drivers".into(),
-                    slot: Some("0/390".into()),
+                    slot: Some(PackageSlot::WithSubSlot("0".into(), "390".into())),
                     ..Default::default()
                 },
             ),
         ];
 
         for (atom_str, expected_atom) in test_cases {
-            assert_eq!(Atom::new(atom_str).unwrap(), expected_atom);
+            let atom = Atom::new(atom_str).unwrap();
+            assert_eq!(atom, expected_atom);
+            assert_eq!(atom.to_string(), atom_str);
         }
     }
 
@@ -309,18 +347,7 @@ mod tests {
                     category: "sys-apps".into(),
                     package: "memtest86+".into(),
                     version: PackageVersion::new("7.2.0", None, None).ok(),
-                    variant: AtomVariant::VersionOperator,
-                    ..Default::default()
-                },
-            ),
-            (
-                ">dev-lang/rust-1.70.0_beta-r2",
-                Atom {
-                    operator: Some(Operator::Greater),
-                    category: "dev-lang".into(),
-                    package: "rust".into(),
-                    version: PackageVersion::new("1.70.0", Some("beta"), Some("2")).ok(),
-                    variant: AtomVariant::VersionOperator,
+                    variant: Variant::VersionOperator,
                     ..Default::default()
                 },
             ),
@@ -331,7 +358,7 @@ mod tests {
                     category: "sys-apps".into(),
                     package: "sed".into(),
                     version: PackageVersion::new("4.8", None, None).ok(),
-                    variant: AtomVariant::VersionOperator,
+                    variant: Variant::VersionOperator,
                     ..Default::default()
                 },
             ),
@@ -342,7 +369,7 @@ mod tests {
                     category: "net-misc".into(),
                     package: "dhcp".into(),
                     version: PackageVersion::new("3", None, None).ok(),
-                    variant: AtomVariant::VersionOperator,
+                    variant: Variant::VersionOperator,
                     ..Default::default()
                 },
             ),
@@ -353,18 +380,32 @@ mod tests {
                     category: "net-misc".into(),
                     package: "dhcp".into(),
                     version: PackageVersion::new("3.0", Some("p2"), None).ok(),
-                    variant: AtomVariant::VersionOperator,
+                    variant: Variant::VersionOperator,
                     ..Default::default()
                 },
             ),
             (
-                "~dev-lang/rust-1.70.0",
+                ">dev-lang/python-3.14.3_beta-r2:3.14",
+                Atom {
+                    operator: Some(Operator::Greater),
+                    category: "dev-lang".into(),
+                    package: "python".into(),
+                    version: PackageVersion::new("3.14.3", Some("beta"), Some("2")).ok(),
+                    slot: Some(PackageSlot::Simple("3.14".into())),
+                    variant: Variant::VersionOperator,
+                    ..Default::default()
+                },
+            ),
+            (
+                "~dev-lang/rust-1.70.0:1.70.0/1=::gentoo",
                 Atom {
                     operator: Some(Operator::Approximate),
                     category: "dev-lang".into(),
                     package: "rust".into(),
                     version: PackageVersion::new("1.70.0", None, None).ok(),
-                    variant: AtomVariant::VersionOperator,
+                    slot: Some(PackageSlot::EqualsWithSubSlot("1.70.0".into(), "1".into())),
+                    repo: Some("gentoo".into()),
+                    variant: Variant::VersionOperator,
                     ..Default::default()
                 },
             ),
@@ -373,24 +414,13 @@ mod tests {
         for (atom_str, expected_atom) in test_cases {
             let atom = Atom::new(atom_str).unwrap();
             assert_eq!(atom, expected_atom);
+            assert_eq!(atom.to_string(), atom_str);
         }
     }
 
-    /// TODO: handle wildcards in version properly
     #[test]
-    fn test_atom_from_str_star() {
+    fn test_atom_from_str_wildcard() {
         let test_cases = vec![
-            (
-                "=dev-lang/rust-1.70.0*",
-                Atom {
-                    operator: Some(Operator::Equal),
-                    category: "dev-lang".into(),
-                    package: "rust".into(),
-                    version: PackageVersion::new("1.70.0", None, None).ok(),
-                    variant: AtomVariant::VersionWildcard,
-                    ..Default::default()
-                },
-            ),
             (
                 "=dev-libs/glib-2*",
                 Atom {
@@ -398,7 +428,32 @@ mod tests {
                     category: "dev-libs".into(),
                     package: "glib".into(),
                     version: PackageVersion::new("2", None, None).ok(),
-                    variant: AtomVariant::VersionWildcard,
+                    variant: Variant::VersionWildcard,
+                    ..Default::default()
+                },
+            ),
+            (
+                "=dev-lang/rust-1.70*:1.70.0",
+                Atom {
+                    operator: Some(Operator::Equal),
+                    category: "dev-lang".into(),
+                    package: "rust".into(),
+                    version: PackageVersion::new("1.70", None, None).ok(),
+                    variant: Variant::VersionWildcard,
+                    slot: Some(PackageSlot::Simple("1.70.0".into())),
+                    ..Default::default()
+                },
+            ),
+            (
+                "=kde-frameworks/kwindowsystem-6*:6/6.23=::gentoo",
+                Atom {
+                    operator: Some(Operator::Equal),
+                    category: "kde-frameworks".into(),
+                    package: "kwindowsystem".into(),
+                    version: PackageVersion::new("6", None, None).ok(),
+                    variant: Variant::VersionWildcard,
+                    slot: Some(PackageSlot::EqualsWithSubSlot("6".into(), "6.23".into())),
+                    repo: Some("gentoo".into()),
                     ..Default::default()
                 },
             ),
@@ -407,6 +462,7 @@ mod tests {
         for (atom_str, expected_atom) in test_cases {
             let atom = Atom::new(atom_str).unwrap();
             assert_eq!(atom, expected_atom);
+            assert_eq!(atom.to_string(), atom_str);
         }
     }
 
@@ -416,6 +472,7 @@ mod tests {
             "invalid-atom",
             "dev-lang/",
             "/rust",
+            "x11-drivers/nvidia-drivers:0/",
             ">=dev-lang/rust-",
             "dev-lang/rust-1.70.0",
             "=dev-lang/rust-1.70.0_extra",
@@ -462,6 +519,7 @@ mod tests {
 
     #[test]
     fn test_atom_matches_false() {
+        // TODO: test wildcards and slot matching
         let atoms = vec![
             "sys-devel/gcc::local",
             "sys-devel/binutils",
@@ -503,19 +561,57 @@ mod tests {
 
     #[test]
     fn test_atom_display() {
-        let atom = Atom {
-            operator: Some(Operator::GreaterEqual),
-            category: "dev-lang".into(),
-            package: "rust".into(),
-            version: PackageVersion::new("1.70.0", Some("beta_p11"), Some("2")).ok(),
-            slot: Some("1.70".into()),
-            repo: Some("gentoo".into()),
-            variant: AtomVariant::VersionOperator,
-        };
-        assert_eq!(
-            atom.to_string(),
-            ">=dev-lang/rust-1.70.0_beta_p11-r2:1.70::gentoo"
-        );
+        let test_data = [
+            (
+                Atom {
+                    category: "dev-lang".into(),
+                    package: "python".into(),
+                    variant: Variant::Simple,
+                    repo: Some("gentoo".into()),
+                    ..Default::default()
+                },
+                "dev-lang/python::gentoo",
+            ),
+            (
+                Atom {
+                    operator: Some(Operator::Equal),
+                    category: "sys-apps".into(),
+                    package: "attr".into(),
+                    version: PackageVersion::new("2.5.2", None, Some("1")).ok(),
+                    variant: Variant::VersionOperator,
+                    ..Default::default()
+                },
+                "=sys-apps/attr-2.5.2-r1",
+            ),
+            (
+                Atom {
+                    operator: Some(Operator::GreaterEqual),
+                    category: "dev-lang".into(),
+                    package: "rust".into(),
+                    version: PackageVersion::new("1.70.0", Some("beta_p11"), Some("2")).ok(),
+                    slot: Some(PackageSlot::Simple("1.70".into())),
+                    repo: Some("gentoo".into()),
+                    variant: Variant::VersionOperator,
+                },
+                ">=dev-lang/rust-1.70.0_beta_p11-r2:1.70::gentoo",
+            ),
+            (
+                Atom {
+                    operator: Some(Operator::Equal),
+                    category: "dev-libs".into(),
+                    package: "libffi".into(),
+                    version: PackageVersion::new("3.5", None, None).ok(),
+                    slot: Some(PackageSlot::WithSubSlot("0".into(), "8".into())),
+                    variant: Variant::VersionWildcard,
+                    ..Default::default()
+                },
+                "=dev-libs/libffi-3.5*:0/8",
+            ),
+        ];
+
+        for (atom, expected_str) in test_data {
+            assert_eq!(atom.to_string(), expected_str);
+        }
     }
 
     #[test]

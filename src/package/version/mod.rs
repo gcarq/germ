@@ -1,8 +1,9 @@
 use crate::package::version::suffix::VersionSuffixes;
-use crate::regex::VER_REV;
+use crate::regex::V_REV;
 use anyhow::{Context, Result, anyhow};
 use number::VersionNumber;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -11,13 +12,13 @@ pub mod number;
 pub mod suffix;
 
 /// Regex to validate and parse `version`, `suffixes` and the `revision`.
-static VERSION_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(&format!(r"^{VER_REV}$")).unwrap());
+static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_REV}$")).unwrap());
 
 /// Represents a package version according to PMS section 3.2 and 3.3.
-/// This includes the base version components (e.g., "1.2.3a"), any suffixes
-/// (e.g., "_alpha1", "_p20240101"), and the revision number (e.g., "-r1").
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+///
+/// This includes the base version components (e.g., `1.2.3a`), any suffixes
+/// (e.g., `_alpha1`, `_p20240101`), and the revision number (e.g., `-r1`).
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct PackageVersion {
     pub number: VersionNumber,
     pub suffixes: VersionSuffixes,
@@ -26,6 +27,7 @@ pub struct PackageVersion {
 
 impl PackageVersion {
     /// Creates a new [`PackageVersion`] from the given `version`, `suffixes`, and `revision`.
+    ///
     /// For example: `PackageVersion::new("1.2.3a", Some("_alpha1_p20240101"), "1")`
     pub fn new(version: &str, suffixes: Option<&str>, revision: Option<&str>) -> Result<Self> {
         Ok(Self {
@@ -65,8 +67,7 @@ impl PackageVersion {
 impl TryFrom<&str> for PackageVersion {
     type Error = anyhow::Error;
 
-    /// Create a `PackageVersion` from a full version string,
-    /// for example: `1.2.3_alpha1-r1`.
+    /// Create a `PackageVersion` from a full version string, for example: `1.2.3_alpha1-r1`.
     fn try_from(version: &str) -> Result<Self, Self::Error> {
         let caps = VERSION_RE
             .captures(version)
@@ -80,8 +81,9 @@ impl TryFrom<&str> for PackageVersion {
 }
 
 impl fmt::Display for PackageVersion {
-    /// Returns the full version string including suffixes and revision,
-    /// for example: `1.2.3_alpha1-r1`. This is also referred to as the `PVR` in PMS.
+    /// Returns the full version string including suffixes and revision.
+    ///
+    /// For example: `1.2.3_alpha1-r1`. This is also referred to as the `PVR` in PMS.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.number, self.suffixes)?;
         if self.revision > 0 {

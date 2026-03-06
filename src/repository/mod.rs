@@ -9,11 +9,10 @@ use crate::deps::Atom;
 use crate::eapi::Eapi;
 use crate::ebuild::Ebuild;
 use crate::linefile::LineBasedFile;
-use crate::makenv::MakeEnv;
 use crate::package::Package;
 use crate::package::version::PackageVersion;
-use crate::regex::PKG_VER_REV;
-use crate::repository::cache::MetadataCache;
+use crate::regex::PV_REV;
+use crate::repository::cache::PackageCache;
 use crate::repository::config::RepositoryConfig;
 use crate::repository::desc::ProfileDescription;
 use crate::repository::eclass::Eclasses;
@@ -21,20 +20,19 @@ use crate::repository::sync::{SyncHandler, build_sync_handler};
 use crate::utils;
 use crate::utils::FileFromPath;
 use anyhow::{Context, Result, anyhow};
-use log::{debug, info, trace, warn};
+use log::{info, trace};
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
-use std::fs::File;
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::LazyLock;
-use std::{fmt, fs, io};
+use std::{fmt, fs};
 
 /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision`
 /// from an ebuild name.
 static EBUILD_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(&format!(r"^{PKG_VER_REV}.ebuild$")).unwrap());
+    LazyLock::new(|| Regex::new(&format!(r"^{PV_REV}.ebuild$")).unwrap());
 
 /// Represents a package repository with its location, name, eapi version, categories, packages,
 /// and other metadata. The repository will be synced using a [`SyncHandler`].
@@ -45,15 +43,13 @@ pub struct Repository {
     masters: Vec<String>,
     pub eapi: Eapi,
     categories: Vec<String>,
-    /// Maps packages to their ebuild file paths.
-    packages: HashMap<Package, PathBuf>,
+    packages: HashSet<Package>,
     pub package_mask: LineBasedFile,
     pub package_unmask: LineBasedFile,
     pub eclasses: Eclasses,
     pub arch_list: LineBasedFile,
     pub profiles_desc: Vec<ProfileDescription>,
 
-    metadata_cache: Option<MetadataCache>,
     sync_handler: Option<Box<dyn SyncHandler>>,
 }
 
@@ -69,7 +65,7 @@ impl Repository {
         let eapi = Self::read_eapi(&location)?;
         let profiles = location.join("profiles");
         let repository = Self {
-            packages: HashMap::new(),
+            packages: HashSet::new(),
             categories: Vec::new(),
             package_mask: LineBasedFile::from_path(
                 &profiles.join("package.mask"),
@@ -92,7 +88,6 @@ impl Repository {
             location,
             sync_handler: build_sync_handler(&config.raw_properties)?,
             eapi,
-            metadata_cache: None,
         };
         Ok(repository)
     }
@@ -108,49 +103,50 @@ impl Repository {
         self.eclasses = self
             .collect_eclasses(masters)
             .with_context(|| "unable to collect eclasses")?;
+
+        // TODO: replace hardcoded testing path
+        let path = PathBuf::from(format!("/tmp/package-manager/metadata/{self}"));
+        if let Some(mut cache) = PackageCache::load_from_path(&path)? {
+            cache.sync(&self.packages);
+            self.packages = cache.drain();
+        }
         Ok(())
     }
 
-    /// Generates metadata cache for all packages and serializes it to disk.
-    /// If `force` is true, metadata will be generated regardless of cache state.
-    pub fn generate_metadata(&mut self, make_env: &MakeEnv, force: bool) -> Result<()> {
-        info!("Generating metadata cache for {self} ...");
-        self.load_cache()?;
-        // Safe to unwrap since we loaded the cache right before this
-        let cache = self.metadata_cache.as_ref().unwrap();
+    /// Generates and caches metadata for all packages and serializes it to disk.
+    pub fn generate_metadata(&mut self) -> Result<()> {
+        info!("Generating metadata for {self} ...");
 
-        let metadata = self
+        let cache = self
             .packages
             .iter()
-            .filter(|(_, path)| force || !cache.is_cached(path))
-            .map(|(pkg, path)| {
-                let ebuild = Ebuild::new(path, pkg, self)
-                    .with_context(|| anyhow!("failed to construct ebuild for {pkg}"))?;
+            .map(|pkg| {
+                let ebuild = self
+                    .resolve_ebuild(pkg)
+                    .with_context(|| anyhow!("failed to resolve ebuild for {pkg}"))?;
                 let metadata = ebuild
-                    .generate_metadata(make_env)
+                    .generate_metadata()
                     .with_context(|| anyhow!("unable to generate metadata for {ebuild}"))?;
-                Ok((ebuild.path.to_path_buf(), metadata))
+                let mut pkg = pkg.clone();
+                pkg.attach_metadata(metadata);
+                Ok(pkg)
             })
-            .collect::<Result<HashMap<_, _>>>()?;
+            .collect::<Result<PackageCache>>()?;
 
-        // Safe to unwrap since we loaded the cache in this function
-        let cache_mut = self.metadata_cache.as_mut().unwrap();
-        cache_mut.extend(metadata);
-
-        self.write_cache()
-            .with_context(|| anyhow!("unable to write cache for {self} to disk"))?;
-
-        info!("Updated metadata cache for {self}");
+        let path = PathBuf::from(format!("/tmp/package-manager/metadata/{self}"));
+        cache.write_to_path(&path)?;
+        self.packages = cache.drain();
+        info!("Updated package metadata for {self}");
         Ok(())
     }
 
-    /// Returns an `Iterator` over all packages in the repository.
+    /// Returns an `Iterator` over all packages.
     /// TODO: Order the returned packages by version
     pub fn packages(&self) -> impl Iterator<Item = &Package> {
-        self.packages.keys()
+        self.packages.iter()
     }
 
-    /// Returns all packages in the repository that match the given `atom`.
+    /// Returns all packages that match the given `atom`.
     /// TODO: Order the returned packages by version
     /// TODO: Consider returning an iterator
     pub fn find_packages(&self, atom: &Atom) -> Vec<&Package> {
@@ -158,8 +154,9 @@ impl Repository {
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
+    ///
     /// The repository location prefix must be stripped from the passed `profile_path` string
-    /// e.g.: default/linux/23.0
+    /// e.g.: `default/linux/23.0`
     pub fn is_known_profile(&self, arch: &str, profile_path: &str) -> bool {
         self.profiles_desc
             .iter()
@@ -175,7 +172,20 @@ impl Repository {
         Ok(())
     }
 
+    /// Resolves the [`Ebuild`] for the given `package`.
+    ///
+    /// Returns `Err` if the ebuild file doesn't exist or is invalid.
+    fn resolve_ebuild<'a>(&'a self, package: &'a Package) -> Result<Ebuild<'a>> {
+        let path = self
+            .location
+            .join(&package.category)
+            .join(&package.name)
+            .join(format!("{}-{}.ebuild", package.name, package.version));
+        Ebuild::new(path, package, self)
+    }
+
     /// Collects and returns all categories from the repo `location`.
+    ///
     /// Categories from the given `masters` are inherited and added to the collected categories.
     fn collect_categories(&self, masters: &[&Repository]) -> Result<Vec<String>> {
         let mut categories = masters
@@ -197,10 +207,11 @@ impl Repository {
     }
 
     /// Collects all packages from the repository.
+    ///
     /// [`Self::collect_categories`] must be called before calling this method since only
     /// known categories are considered when collecting packages.
-    fn collect_packages(&self) -> Result<HashMap<Package, PathBuf>> {
-        let mut packages = HashMap::new();
+    fn collect_packages(&self) -> Result<HashSet<Package>> {
+        let mut packages = HashSet::new();
         for category in &self.categories {
             let cat_path = self.location.join(category);
 
@@ -229,7 +240,7 @@ impl Repository {
                         version,
                         &self.name,
                     )?;
-                    packages.insert(pkg, ebuild_path);
+                    packages.insert(pkg);
                 }
             }
         }
@@ -248,51 +259,8 @@ impl Repository {
         Ok(eclasses)
     }
 
-    /// Loads the metadata cache from disk and assigns it to `metadata_cache`.
-    fn load_cache(&mut self) -> Result<()> {
-        let path = PathBuf::from(format!("/tmp/package-manager/metadata/{self}"));
-        debug!(
-            "Loading metadata cache for {self} from {} ...",
-            path.display()
-        );
-        let reader = match File::open(&path) {
-            Ok(file) => file,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                warn!("missing metadata cache for {self}");
-                self.metadata_cache = Some(MetadataCache::default());
-                return Ok(());
-            }
-            Err(err) => Err(anyhow!("unable to open metadata cache from disk: {err}"))?,
-        };
-        let mut cache = MetadataCache::deserialize(reader)?;
-        cache.retain(&self.packages.values().collect::<HashSet<_>>());
-        self.metadata_cache = Some(cache);
-        Ok(())
-    }
-
-    /// Writes the metadata cache to disk.
-    /// TODO: replace hardcoded testing path
-    fn write_cache(&self) -> Result<()> {
-        let cache = self
-            .metadata_cache
-            .as_ref()
-            .ok_or_else(|| anyhow!("metadata cache is not loaded"))?;
-
-        let path = PathBuf::from(format!("/tmp/package-manager/metadata/{self}"));
-        debug!(
-            "Writing metadata cache for {self} to {} ...",
-            path.display()
-        );
-        let writer = File::create(&path).with_context(|| {
-            anyhow!(
-                "unable to create metadata cache file at '{}'",
-                path.display()
-            )
-        })?;
-        cache.serialize(writer)
-    }
-
     /// Reads the repository eapi version from the given repository `path`.
+    ///
     /// Returns `Eapi::default()` if no eapi file exists.
     fn read_eapi(path: &Path) -> Result<Eapi> {
         let eapi_file = path.join("profiles").join("eapi");

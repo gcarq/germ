@@ -4,9 +4,6 @@ use constcat::concat;
 use regex::Regex;
 use std::sync::LazyLock;
 
-/// Regex to capture atom operators.
-pub const ATOM_OP: &str = r"(?<operator>[=~]|[><]=?)";
-
 /// PMS 3.1.1 Category names
 /// A category name may contain any of the characters [A-Za-z0-9+_.-].
 /// It must not begin with a hyphen, a dot or a plus sign.
@@ -22,24 +19,18 @@ pub const PACKAGE: &str = r"(?<package>[a-zA-Z0-9_][a-zA-Z0-9_+-]*[a-zA-Z0-9_+])
 /// A slot name may contain any of the characters [A-Za-z0-9+_.-].
 /// It must not begin with a hyphen, a dot or a plus sign.
 pub const SLOT: &str = r"([a-zA-Z0-9_][a-zA-Z0-9_+.-]*)";
-pub const SLOT_LOOSE: &str = r"([a-zA-Z0-9_+./*=-]+)";
 
 /// Regex to validate repository names according to PMS 3.1.5.
-pub const REPOSITORY: &str = r"[[a-zA-Z0-9_]][a-zA-Z0-9_-]*";
+pub const REPOSITORY: &str = r"(?P<repo>[a-zA-Z0-9_][a-zA-Z0-9_-]*)";
 
 pub const VERSION: &str =
     r"(?<version>[0-9]+(?:\.[0-9]+)*[a-z]?)(?<suffixes>(?:_(?:alpha|beta|pre|rc|p)[0-9]*)*)";
 
 pub const REVISION: &str = r"(?<revision>[0-9]*)";
 
-pub const VER_REV: &str = concat!(VERSION, "(:?-r", REVISION, ")?");
+pub const V_REV: &str = concat!(VERSION, "(:?-r", REVISION, ")?");
 
-pub const PKG_VER_REV: &str = concat!(PACKAGE, "-", VER_REV);
-
-/// Category and package with optional version and revision
-pub const CAT_PKG: &str = constcat::concat!(CATEGORY, "/", PACKAGE, "(?:-", VER_REV, ")?");
-
-pub const CAT_PKG_VER_REV: &str = concat!(CATEGORY, "/", PACKAGE, "-", VER_REV);
+pub const PV_REV: &str = concat!(PACKAGE, "-", V_REV);
 
 /// Regex to validate if a string is a valid category name.
 pub static CATEGORY_RE: LazyLock<Regex> =

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::str::FromStr;
 use std::{fmt, hash};
@@ -7,7 +8,7 @@ const SUFFIX_PREFIXES: [&str; 5] = ["alpha", "beta", "pre", "rc", "p"];
 
 /// Holds a list of [`VersionSuffix`] for a package version.
 /// For example, `"_rc1_p20"`.
-#[derive(Default, Clone, Eq, Debug)]
+#[derive(Serialize, Deserialize, Default, Clone, Eq, Debug)]
 pub struct VersionSuffixes(Vec<VersionSuffix>);
 
 impl VersionSuffixes {
@@ -91,7 +92,7 @@ impl fmt::Display for VersionSuffixes {
 
 /// Represents the different package version suffixes outlined in section 3.2.
 /// For example: `"alpha1", "beta2", "pre", "rc", "p20230101"`.
-#[derive(Clone, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Eq, Debug)]
 pub enum VersionSuffix {
     Alpha(Option<String>),
     Beta(Option<String>),

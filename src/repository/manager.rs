@@ -50,12 +50,7 @@ impl RepoManager {
             .repos
             .get(&package.repo)
             .ok_or_else(|| anyhow!("repository {} doesn't exist", package.name))?;
-
-        let path = match repo.packages.get(package) {
-            Some(path) => path,
-            None => Err(anyhow!("unable to find {package} in {repo}"))?,
-        };
-        Ebuild::new(path, package, repo)
+        repo.resolve_ebuild(package)
     }
 
     /// Helper function to recursively resolve all master repositories for a given `repo` and return

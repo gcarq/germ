@@ -51,7 +51,7 @@ impl Eclasses {
 
 /// Represents an eclass defined in PMS chapter 10.
 /// TODO: parse documentation
-#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
+#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Hash, Debug)]
 pub struct Eclass {
     pub name: String,
     pub path: PathBuf,

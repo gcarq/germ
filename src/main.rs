@@ -69,9 +69,6 @@ enum Command {
     Gencache {
         #[arg(value_name = "repo")]
         repo: Option<String>,
-
-        #[arg(short, long)]
-        force: bool,
     },
 
     /// Sync the repositories
@@ -103,9 +100,9 @@ fn run(args: Args) -> Result<()> {
 
     match args.command {
         Some(Command::Info { atom }) => info(atom, &repo_manager, &conf.make_env)?,
-        Some(Command::Install { atom }) => install(atom, &repo_manager, &conf.make_env)?,
-        Some(Command::Gencache { repo, force }) => {
-            gencache(repo, &mut repo_manager, &conf.make_env, force)?;
+        Some(Command::Install { atom }) => install(atom, &repo_manager)?,
+        Some(Command::Gencache { repo }) => {
+            gencache(repo, &mut repo_manager)?;
         }
         Some(Command::Sync) => sync(&repo_manager)?,
         None => {}
@@ -138,7 +135,7 @@ fn info(atom: Option<Atom>, repo_manager: &RepoManager, make_env: &MakeEnv) -> R
 
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.
-fn install(atom: Atom, repo_manager: &RepoManager, make_env: &MakeEnv) -> Result<()> {
+fn install(atom: Atom, repo_manager: &RepoManager) -> Result<()> {
     let pkg = repo_manager
         .repos
         .values()
@@ -148,29 +145,24 @@ fn install(atom: Atom, repo_manager: &RepoManager, make_env: &MakeEnv) -> Result
         return Err(anyhow!("no matching package found for atom '{atom}'"));
     };
     let ebuild = repo_manager.resolve_ebuild(&pkg)?;
-    let metadata = ebuild.generate_metadata(make_env)?;
+    let metadata = ebuild.generate_metadata()?;
     println!("{metadata}");
 
     Ok(())
 }
 
 /// Generates metadata cache for repositories.
-fn gencache(
-    repo_name: Option<String>,
-    repo_manager: &mut RepoManager,
-    make_env: &MakeEnv,
-    force: bool,
-) -> Result<()> {
+fn gencache(repo_name: Option<String>, repo_manager: &mut RepoManager) -> Result<()> {
     if let Some(repo) = repo_name {
         let repo = repo_manager
             .repos
             .get_mut(&repo)
             .ok_or_else(|| anyhow!("repository '{repo}' doesn't exist"))?;
-        return repo.generate_metadata(make_env, force);
+        return repo.generate_metadata();
     }
 
     for repo in repo_manager.repos.values_mut() {
-        repo.generate_metadata(make_env, force)?;
+        repo.generate_metadata()?;
     }
     Ok(())
 }
