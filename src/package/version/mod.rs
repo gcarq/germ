@@ -1,3 +1,4 @@
+use crate::deps::{Atom, AtomOperator, AtomVariant};
 use crate::package::version::suffix::VersionSuffixes;
 use crate::regex::V_REV;
 use anyhow::{Context, Result, anyhow};
@@ -8,8 +9,8 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-pub mod number;
-pub mod suffix;
+mod number;
+mod suffix;
 
 /// Regex to validate and parse `version`, `suffixes` and the `revision`.
 static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_REV}$")).unwrap());
@@ -19,10 +20,11 @@ static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_
 /// This includes the base version components (e.g., `1.2.3a`), any suffixes
 /// (e.g., `_alpha1`, `_p20240101`), and the revision number (e.g., `-r1`).
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct PackageVersion {
-    pub number: VersionNumber,
-    pub suffixes: VersionSuffixes,
-    pub revision: usize,
+    number: VersionNumber,
+    suffixes: VersionSuffixes,
+    revision: usize,
 }
 
 impl PackageVersion {
@@ -58,9 +60,39 @@ impl PackageVersion {
         }
     }
 
-    /// Returns the version and revision (if any), for example `7.0.174` or `7.0.174-r1`.
-    pub fn pvr(&self) -> String {
-        self.to_string()
+    /// Checks if the given `atom` matches this version.
+    pub fn matches_atom(&self, atom: &Atom) -> bool {
+        let Some(atom_ver) = &atom.version else {
+            // If the atom doesn't specify a version, it matches any version
+            return true;
+        };
+        match atom.variant {
+            AtomVariant::Simple => self == atom_ver,
+            AtomVariant::VersionOperator => match atom.operator {
+                Some(AtomOperator::Less) => self < atom_ver,
+                Some(AtomOperator::LessEqual) => self <= atom_ver,
+                Some(AtomOperator::Equal) => self == atom_ver,
+                Some(AtomOperator::Greater) => self > atom_ver,
+                Some(AtomOperator::GreaterEqual) => self >= atom_ver,
+                Some(AtomOperator::Approximate) => {
+                    self.number == atom_ver.number && self.suffixes == atom_ver.suffixes
+                }
+                None => unreachable!("BUG: atom is expected to have an operator"),
+            },
+            AtomVariant::VersionWildcard => {
+                let mut atom_iter = atom_ver.number.iter();
+                let mut self_iter = self.number.iter();
+                loop {
+                    match (atom_iter.next(), self_iter.next()) {
+                        (Some(a), Some(b)) if a == b => {}
+                        // If the next component in the atom is None,
+                        // it means the wildcard matches any remaining components
+                        (None, _) => return true,
+                        _ => return false,
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -87,7 +119,8 @@ impl fmt::Display for PackageVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.number, self.suffixes)?;
         if self.revision > 0 {
-            write!(f, "-r{}", self.revision)?;
+            f.write_str("-r")?;
+            write!(f, "{}", self.revision)?;
         }
         Ok(())
     }

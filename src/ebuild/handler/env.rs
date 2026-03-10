@@ -190,13 +190,13 @@ impl EbuildEnv {
                 // TODO: add support for enabling debug mode
                 ("EBUILD_DEBUG".to_owned(), "0".to_owned()),
                 // Ebuild variables, see PMS 11.1
-                ("P".to_owned(), ebuild.pkg.p()),
-                ("PF".to_owned(), ebuild.pkg.pf()),
-                ("PN".to_owned(), ebuild.pkg.pn()),
-                ("CATEGORY".to_owned(), ebuild.pkg.category()),
-                ("PV".to_owned(), ebuild.pkg.pv()),
-                ("PR".to_owned(), ebuild.pkg.pr()),
-                ("PVR".to_owned(), ebuild.pkg.pvr()),
+                ("P".to_owned(), ebuild.cpv.p()),
+                ("PF".to_owned(), ebuild.cpv.pf()),
+                ("PN".to_owned(), ebuild.cpv.pn()),
+                ("CATEGORY".to_owned(), ebuild.cpv.category().to_owned()),
+                ("PV".to_owned(), ebuild.cpv.pv()),
+                ("PR".to_owned(), ebuild.cpv.pr()),
+                ("PVR".to_owned(), ebuild.cpv.pvr()),
                 (
                     "EBUILD".to_owned(),
                     ebuild.path.to_str().unwrap().to_owned(),

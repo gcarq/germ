@@ -49,7 +49,7 @@ impl MakeEnv {
 
 impl FileFromPath for MakeEnv {
     /// Builds a [`MakeEnv`] from the given content of a make.conf or make.defaults file.
-    fn from_file_content(content: String) -> Result<Self>
+    fn from_string(content: String) -> Result<Self>
     where
         Self: Sized,
     {
@@ -92,23 +92,8 @@ impl Inherit for MakeEnv {
             // incremental variables, otherwise just insert it.
             match self.vars.get_mut(key) {
                 Some(self_value) => {
-                    *self_value = self_value.expand(parent_ctx.as_slice());
-                    if let EnvValue::Incremental(self_v) = self_value
-                        && let EnvValue::Incremental(parent_v) = parent_value
-                    {
-                        let mut values = Vec::new();
-                        for value in parent_v.iter().chain(self_v.iter()) {
-                            if value == "-*" {
-                                values.clear();
-                            } else if value.starts_with('-') {
-                                values.retain(|v| v != &value[1..]);
-                            } else if !values.contains(value) {
-                                values.push(value.clone());
-                            }
-                        }
-                        //values.sort_unstable();
-                        *self_value = EnvValue::Incremental(values);
-                    }
+                    *self_value = self_value.expand(&parent_ctx);
+                    self_value.inherit_from(parent_value);
                 }
                 None => {
                     self.vars.insert(key.clone(), parent_value.clone());
@@ -168,6 +153,30 @@ impl EnvValue {
     }
 }
 
+impl Inherit for EnvValue {
+    /// Inherits the value of the given `parent`.
+    ///
+    /// Only Incremental values can be inherited, otherwise this method does nothing.
+    /// See PMS 5.3.1 for the inheritance rules.
+    fn inherit_from(&mut self, parent: &Self) {
+        let (EnvValue::Incremental(values), EnvValue::Incremental(parent)) = (&self, parent) else {
+            return;
+        };
+        let mut new_values = Vec::new();
+        for value in parent.iter().chain(values) {
+            if value == "-*" {
+                new_values.clear();
+            } else if let Some(negated) = value.strip_prefix('-') {
+                new_values.retain(|v| v != negated);
+            } else if !new_values.contains(value) {
+                new_values.push(value.clone());
+            }
+        }
+        //values.sort_unstable();
+        *self = EnvValue::Incremental(new_values);
+    }
+}
+
 impl Deref for EnvValue {
     type Target = Vec<String>;
 
@@ -184,7 +193,7 @@ impl fmt::Display for EnvValue {
             EnvValue::Literal(values) | EnvValue::Incremental(values) => values,
         }
         .join(" ");
-        write!(f, "{value}")
+        f.write_str(&value)
     }
 }
 
@@ -193,7 +202,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_make_env_from_file_content() {
+    fn test_make_env_from_string_ok() {
         let content = r#"
 # This is a comment
 USE="cet"
@@ -208,7 +217,7 @@ USE="${USE} -bar"
 
 enable_year2038="no"
         "#;
-        let make_env = MakeEnv::from_file_content(content.into()).unwrap();
+        let make_env = MakeEnv::from_string(content.into()).unwrap();
         assert_eq!(make_env.get("USE").unwrap().to_string(), "cet -foo -bar");
         assert_eq!(
             make_env.get("BOOTSTRAP_USE").unwrap().to_string(),
@@ -218,13 +227,26 @@ enable_year2038="no"
     }
 
     #[test]
+    fn test_make_env_from_string_err() {
+        assert!(MakeEnv::from_string("/VAR1=test".into()).is_err());
+    }
+
+    #[test]
     fn test_make_env_inherit_from() {
-        let parent_content = r#"USE="cet -iconv""#;
-        let child_content = r#"USE="${USE} seccomp branding -cet""#;
-        let parent = MakeEnv::from_file_content(parent_content.into()).unwrap();
-        let mut child = MakeEnv::from_file_content(child_content.into()).unwrap();
+        let parent_content = r#"
+        USE="cet -iconv"
+        INPUT_DEVICES="libinput"
+        "#;
+        let child_content = r#"
+        USE="${USE} seccomp branding -cet"
+        GRUB_PLATFORM="efi-64"
+        "#;
+        let parent = MakeEnv::from_string(parent_content.into()).unwrap();
+        let mut child = MakeEnv::from_string(child_content.into()).unwrap();
         child.inherit_from(&parent);
         assert_eq!(child.get("USE").unwrap().to_string(), "seccomp branding");
+        assert_eq!(child.get("INPUT_DEVICES").unwrap().to_string(), "libinput");
+        assert_eq!(child.get("GRUB_PLATFORM").unwrap().to_string(), "efi-64");
     }
 
     #[test]
@@ -235,6 +257,22 @@ enable_year2038="no"
         ];
         let value = EnvValue::new("${VAR1} $VAR2 ${VAR3}".into(), false);
         assert_eq!(value.expand(&context).to_string(), "value1 value2 ${VAR3}");
+    }
+
+    #[test]
+    fn test_env_value_inherit_from_incremental() {
+        let parent = EnvValue::new("X branding -* asm accessibility".into(), true);
+        let mut child = EnvValue::new("blas -accessibility".into(), true);
+        child.inherit_from(&parent);
+        assert_eq!(child.to_string(), "asm blas");
+    }
+
+    #[test]
+    fn test_env_value_inherit_from_literal() {
+        let parent = EnvValue::new("X branding -*".into(), false);
+        let mut child = EnvValue::new("blas".into(), false);
+        child.inherit_from(&parent);
+        assert_eq!(child.to_string(), "blas");
     }
 
     #[test]

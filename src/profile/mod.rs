@@ -4,7 +4,7 @@ use crate::eapi::Eapi;
 use crate::linefile::LineBasedFile;
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
-use crate::repository::manager::RepoManager;
+use crate::repository::set::RepoSet;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use log::{debug, warn};
@@ -21,6 +21,7 @@ pub struct Profile {
 
     pub make_defaults: MakeEnv,
 
+    // Defines a system set for this profile
     packages: LineBasedFile,
     // Prevents packages from being installed in this profile
     pub package_mask: LineBasedFile,
@@ -47,9 +48,9 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Builds a profile from the given `location` and all available repositories from `repo_manager`.
+    /// Builds a profile from the given `location` and all available repositories from `repo_set`.
     /// An error is returned if the `path` doesn't exist or the profile directory is invalid.
-    pub fn new(location: &Path, repo_manager: &RepoManager) -> Result<Self> {
+    pub fn new(location: &Path, repo_set: &RepoSet) -> Result<Self> {
         let eapi = Self::read_eapi(&location.join("eapi"))?;
         let mut profile = Self {
             make_defaults: MakeEnv::from_path(&location.join("make.defaults"), false, true)?,
@@ -117,7 +118,7 @@ impl Profile {
             eapi,
             location: location.canonicalize()?,
         };
-        for parent in Self::resolve_parents(location, repo_manager)? {
+        for parent in Self::resolve_parents(location, repo_set)? {
             profile.inherit_from(&parent);
         }
 
@@ -131,9 +132,9 @@ impl Profile {
     }
 
     /// Takes a `path` to a profile directory and resolves all profiles listed in the parent file.
-    /// Also takes a `repo_manager` to resolve profiles that reference a specific repository.
+    /// Also takes a `repo_set` to resolve profiles that reference a specific repository.
     /// Parents are returned in the order they are listed or an empty vec if there are none.
-    fn resolve_parents(path: &Path, repo_manager: &RepoManager) -> Result<Vec<Self>> {
+    fn resolve_parents(path: &Path, repo_set: &RepoSet) -> Result<Vec<Self>> {
         let parent = path.join("parent");
         if !parent.exists() {
             return Ok(Vec::new());
@@ -143,8 +144,7 @@ impl Profile {
         let parent_profiles = content
             .lines()
             .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .collect::<Vec<_>>();
+            .filter(|line| !line.is_empty() && !line.starts_with('#'));
 
         let mut profiles = Vec::new();
         for profile in parent_profiles {
@@ -154,14 +154,14 @@ impl Profile {
             // TODO: this behavior is controlled via profile-formats in <repo>/metadata/layout.conf
             let path = match profile.split_once(':') {
                 Some((repo_name, profile_path)) => {
-                    let repo = repo_manager.repos.get(repo_name).ok_or_else(|| {
+                    let repo = repo_set.get(repo_name).ok_or_else(|| {
                         anyhow!("Repository '{repo_name}' not found for profile '{profile}'")
                     })?;
                     repo.location.join("profiles").join(profile_path)
                 }
                 None => path.join(profile),
             };
-            profiles.push(Profile::new(&path, repo_manager)?);
+            profiles.push(Profile::new(&path, repo_set)?);
         }
         Ok(profiles)
     }
@@ -207,5 +207,37 @@ impl Inherit for Profile {
 impl fmt::Display for Profile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.location.display())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_profile_inherit_from() {
+        let parent = Profile {
+            make_defaults: MakeEnv::from_string("USE=\"foo\"".into()).unwrap(),
+            use_mask: LineBasedFile::from_string("bar".into()).unwrap(),
+            ..Default::default()
+        };
+
+        let mut child = Profile {
+            make_defaults: MakeEnv::from_string("USE=\"bar\"".into()).unwrap(),
+            use_mask: LineBasedFile::from_string("-bar baz".into()).unwrap(),
+            package_use_mask: LineBasedFile::from_string("dev-lang/rust baz".into()).unwrap(),
+            ..Default::default()
+        };
+
+        child.inherit_from(&parent);
+        assert_eq!(
+            child.make_defaults.get("USE").unwrap().to_string(),
+            "foo bar"
+        );
+        assert_eq!(child.use_mask.into_inner(), vec!["bar".to_owned()]);
+        assert_eq!(
+            child.package_use_mask.into_inner(),
+            vec!["dev-lang/rust baz".to_owned()]
+        );
     }
 }

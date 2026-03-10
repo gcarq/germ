@@ -1,5 +1,5 @@
 use crate::ebuild::handler::prot::ParentMessage;
-use crate::package::Package;
+use crate::package::cpv::CPV;
 use crate::package::version::PackageVersion;
 use anyhow::{Result, anyhow};
 use std::cmp::Ordering;
@@ -7,15 +7,15 @@ use std::cmp::Ordering;
 /// Implements the `ver_cut` function for ebuilds that extracts version components,
 /// e.g.: `"ver_cut 1-2 1.2.3" -> "1.2"`.
 ///
-/// Takes a `pkg`, a `range` string, and an optional `version` string as input.
+/// Takes a `cpv`, a `range` string, and an optional `version` string as input.
 /// The `range` specifies which components to extract from the version.
 /// If `version` is `None`, the package's PV is used.
 /// Returns `Err` if the EAPI does not support `ver_cut`.
-pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<ParentMessage> {
+pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> Result<ParentMessage> {
     // Use PV as fallback if
     let version = match version {
         Some(v) => v,
-        None => &pkg.version.pv(),
+        None => &cpv.pv(),
     };
     let parts: Vec<(String, String)> = ver_split(version);
     let (mut start, end) = parse_range(range, parts.len())?;
@@ -40,11 +40,11 @@ pub fn ver_cut(pkg: &Package, range: &str, version: Option<&str>) -> Result<Pare
 /// Implements the `ver_rs` function for ebuilds that replaces separators for the given ranges,
 /// e.g.: `"ver_rs 1-2 - 1.2.3.4" -> "1-2-3.4"`.
 ///
-/// Takes a `pkg` and unsanitized function `args` as input.
+/// Takes a `cpv` and unsanitized function `args` as input.
 /// If the len of `args` is odd, the last element is treated as the version string,
 /// otherwise the package's PV is used.
 /// Returns the modified version string or an `Err` if parsing fails.
-pub fn ver_rs(pkg: &Package, args: &[String]) -> Result<ParentMessage> {
+pub fn ver_rs(cpv: &CPV, args: &[String]) -> Result<ParentMessage> {
     if args.len() < 2 {
         return Err(anyhow!("ver_rs requires at least two arguments"));
     }
@@ -58,7 +58,7 @@ pub fn ver_rs(pkg: &Package, args: &[String]) -> Result<ParentMessage> {
     // Fallback to PV if no version is provided
     let version = match version {
         Some(v) => v,
-        None => &pkg.version.pv(),
+        None => &cpv.pv(),
     };
 
     let mut parts: Vec<(String, String)> = ver_split(version);
@@ -93,20 +93,20 @@ pub fn ver_rs(pkg: &Package, args: &[String]) -> Result<ParentMessage> {
 /// Implements the `ver_test` function for ebuilds that checks if the relation
 /// `version1 op version2` holds, e.g.: `"ver_test 6.0 -gt 5.0" -> true`.
 ///
-/// Takes a `pkg`, an optional `version1`, an operator `op` and a `version2` as input.
+/// Takes a `cpv`, an optional `version1`, an operator `op` and a `version2` as input.
 /// If `version1` is `None`, the package's `PVR` is used.
 /// The operator `op` must be one of: `"-gt"`, `"-ge"`, `"-eq"`, `"-ne"`, `"-le"` or `"-lt"`.
-/// Returns `Ok(true)` if the comparison holds, `Ok(false)` otherwise.
 ///
+/// Returns `Ok(true)` if the comparison holds, `Ok(false)` otherwise.
 pub fn ver_test(
-    pkg: &Package,
+    cpv: &CPV,
     version1: Option<&str>,
     op: &str,
     version2: &str,
 ) -> Result<ParentMessage> {
     let v1 = match version1 {
         Some(v) => &PackageVersion::try_from(v)?,
-        None => &pkg.version,
+        None => cpv.version(),
     };
     let v2 = &PackageVersion::try_from(version2)?;
 
@@ -166,6 +166,7 @@ fn ver_split(version: &str) -> Vec<(String, String)> {
 /// Returns a tuple (start, end) representing the range,
 /// where both start and end are inclusive and 1-based indices.
 /// `max` is the maximum valid index (inclusive) for the range.
+///
 /// Returns `Err` if the range is invalid.
 fn parse_range(range: &str, max: usize) -> Result<(usize, usize)> {
     if let Some((a, b)) = range.split_once('-') {
@@ -217,17 +218,16 @@ mod tests {
             ("0", Some("1.2.3"), ""),
             ("4-", Some("1.2.3"), ""),
         ];
-        let pkg = Package::new(
+        let cpv = CPV::new(
             "app-editors",
             "vim",
             PackageVersion::new("1.2.3b", Some("alpha4"), None).unwrap(),
-            "gentoo",
         )
         .unwrap();
         for (range, version, expected) in test_cases {
             let response = ParentMessage::Ok(Some(expected.to_owned()));
             assert_eq!(
-                ver_cut(&pkg, range, version).unwrap_or_else(|_| panic!(
+                ver_cut(&cpv, range, version).unwrap_or_else(|_| panic!(
                     "Failed for input range: {range}, version: {version:?}"
                 )),
                 response,
@@ -238,11 +238,10 @@ mod tests {
 
     #[test]
     fn test_ver_cut_err() {
-        let pkg = Package::new(
+        let pkg = CPV::new(
             "app-editors",
             "vim",
             PackageVersion::new("1.2.3b", Some("alpha4"), None).unwrap(),
-            "gentoo",
         )
         .unwrap();
         let test_cases = ["-2", "3-2", "foo", "2-bar"];
@@ -276,18 +275,17 @@ mod tests {
             (vec!["3-5", ".", "1.2.3"], "1.2.3"),
             (vec!["2-3", "-"], "1.2-alpha-4"),
         ];
-        let pkg = Package::new(
+        let cpv = CPV::new(
             "app-editors",
             "vim",
             PackageVersion::new("1.2", Some("alpha4"), None).unwrap(),
-            "gentoo",
         )
         .unwrap();
         for (args, expected) in test_cases {
             let response = ParentMessage::Ok(Some(expected.to_owned()));
             let args = args.into_iter().map(String::from).collect::<Vec<_>>();
             assert_eq!(
-                ver_rs(&pkg, &args).unwrap_or_else(|_| panic!("Failed for input args: {args:?}")),
+                ver_rs(&cpv, &args).unwrap_or_else(|_| panic!("Failed for input args: {args:?}")),
                 response,
                 "Failed for input args: {args:?}"
             );
@@ -296,11 +294,10 @@ mod tests {
 
     #[test]
     fn test_ver_rs_err() {
-        let pkg = Package::new(
+        let pkg = CPV::new(
             "app-editors",
             "vim",
             PackageVersion::new("1.2b", Some("alpha4"), None).unwrap(),
-            "gentoo",
         )
         .unwrap();
         let test_cases = [vec![], vec!["1"], vec!["foo", "-"]];
@@ -409,17 +406,16 @@ mod tests {
             (None, "-eq", "1.0", true),
         ];
 
-        let pkg = Package::new(
+        let cpv = CPV::new(
             "sys-apps",
             "coreutils",
             PackageVersion::new("1.0", None, None).unwrap(),
-            "gentoo",
         )
         .unwrap();
         for (version1, op, version2, expected) in test_cases {
             let response = ParentMessage::from_bool(expected);
             assert_eq!(
-                ver_test(&pkg, version1, op, version2).unwrap_or_else(|_| panic!(
+                ver_test(&cpv, version1, op, version2).unwrap_or_else(|_| panic!(
                     "Failed for input version1: {version1:?}, op: {op}, version2: {version2}"
                 )),
                 response,
@@ -430,11 +426,10 @@ mod tests {
 
     #[test]
     fn test_ver_test_err() {
-        let pkg = Package::new(
+        let cpv = CPV::new(
             "sys-apps",
             "coreutils",
             PackageVersion::new("1.0", None, None).unwrap(),
-            "gentoo",
         )
         .unwrap();
         let test_cases = [
@@ -458,7 +453,7 @@ mod tests {
         ];
         for (version1, op, version2) in test_cases {
             assert!(
-                ver_test(&pkg, version1, op, version2).is_err(),
+                ver_test(&cpv, version1, op, version2).is_err(),
                 "Expected error for input version1: {version1:?}, op: {op}, version2: {version2}"
             );
         }

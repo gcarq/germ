@@ -1,34 +1,32 @@
-pub mod cpv;
-pub mod metadata;
-pub mod slot;
-pub mod version;
-
 use crate::deps::Atom;
 use crate::package::cpv::CPV;
-use metadata::PackageMetadata;
-use serde::{Deserialize, Serialize};
-use std::fmt;
+use crate::package::slot::PackageSlot;
+use anyhow::Result;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::{fmt, fs};
 
-/// Represents a package within a [`Repository`] with its category, name, version and additional
-/// metadata required to install it.
-#[derive(Serialize, Deserialize, Debug)]
 #[cfg_attr(test, derive(Default))]
-pub struct Package {
+pub struct InstalledPackage {
     pub cpv: CPV,
     pub repo: String,
-    pub metadata: PackageMetadata,
+    pub slot: PackageSlot,
+    path: PathBuf,
 }
 
-impl Package {
-    /// Creates a new [`Package`] from the given `cpv`, `repo` and `metadata`.
+impl InstalledPackage {
+    /// Creates a new [`InstalledPackage`] from the given `CPV`.
     ///
-    /// Returns `Err` if `category` or `name` are invalid according to PMS 3.1.1 and 3.1.2.
-    pub const fn new(cpv: CPV, repo: String, metadata: PackageMetadata) -> Self {
-        Self {
+    /// `path` is the path to the packages vdb directory where additional metadata can be queried.
+    pub fn new(cpv: CPV, path: PathBuf) -> Result<Self> {
+        let repo = fs::read_to_string(path.join("repository"))?.trim().into();
+        let slot = PackageSlot::from_str(fs::read_to_string(path.join("SLOT"))?.trim())?;
+        Ok(Self {
             cpv,
             repo,
-            metadata,
-        }
+            slot,
+            path,
+        })
     }
 
     /// Checks if the given [`Atom`] matches this package.
@@ -38,22 +36,18 @@ impl Package {
         {
             return false;
         }
+
         if let Some(slot) = &atom.slot
-            && slot != &self.metadata.slot
+            && slot != &self.slot
         {
             return false;
         }
-        self.cpv.matches_atom(atom)
-    }
 
-    /// Returns the qualified name of the package in the format `category/name`
-    /// e.g. `app-editors/vim`.
-    pub fn qualified_name(&self) -> String {
-        self.cpv.qualified_name()
+        self.cpv.matches_atom(atom)
     }
 }
 
-impl fmt::Display for Package {
+impl fmt::Display for InstalledPackage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.cpv)
     }
@@ -62,20 +56,18 @@ impl fmt::Display for Package {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::package::slot::PackageSlot;
     use crate::package::version::PackageVersion;
 
     #[test]
-    fn test_pkg_matches_atom_true() {
+    fn test_installed_pkg_matches_atom_true() {
         let atoms = vec![
             "sys-devel/gcc",
             "sys-devel/gcc::gentoo",
-            "=sys-devel/gcc-15*",
+            "<sys-devel/gcc-16",
+            "<=sys-devel/gcc-15.2.2_p20260101",
             "sys-devel/gcc:15",
-            "sys-devel/gcc:15=",
-            "sys-devel/gcc:*",
         ];
-        let pkg = Package {
+        let pkg = InstalledPackage {
             cpv: CPV::new(
                 "sys-devel",
                 "gcc",
@@ -83,10 +75,8 @@ mod tests {
             )
             .unwrap(),
             repo: "gentoo".into(),
-            metadata: PackageMetadata {
-                slot: PackageSlot::Eq("15".into()),
-                ..Default::default()
-            },
+            slot: PackageSlot::Eq("15".into()),
+            ..Default::default()
         };
         for atom in atoms {
             let atom = Atom::new(atom).unwrap();
@@ -95,17 +85,15 @@ mod tests {
     }
 
     #[test]
-    fn test_pkg_matches_atom_false() {
+    fn test_installed_pkg_matches_atom_false() {
         let atoms = vec![
             "sys-devel/gcc::local",
             "sys-devel/binutils",
             "virtual/gcc",
-            "<sys-devel/gcc-15",
+            "~sys-devel/gcc-15.2.1",
             "sys-devel/gcc:14",
-            "sys-devel/gcc:14=",
-            "sys-devel/gcc:15/0",
         ];
-        let pkg = Package {
+        let pkg = InstalledPackage {
             cpv: CPV::new(
                 "sys-devel",
                 "gcc",
@@ -113,10 +101,8 @@ mod tests {
             )
             .unwrap(),
             repo: "gentoo".into(),
-            metadata: PackageMetadata {
-                slot: PackageSlot::Eq("15".into()),
-                ..Default::default()
-            },
+            slot: PackageSlot::Eq("15".into()),
+            ..Default::default()
         };
         for atom in atoms {
             let atom = Atom::new(atom).unwrap();
@@ -125,8 +111,8 @@ mod tests {
     }
 
     #[test]
-    fn test_package_fmt() {
-        let package = Package {
+    fn test_installed_package_fmt() {
+        let pkg = InstalledPackage {
             cpv: CPV::new(
                 "app-editors",
                 "vim",
@@ -135,7 +121,6 @@ mod tests {
             .unwrap(),
             ..Default::default()
         };
-        assert_eq!(package.to_string(), "app-editors/vim-7.0.174-r1");
-        assert_eq!(package.qualified_name(), "app-editors/vim");
+        assert_eq!(pkg.to_string(), "app-editors/vim-7.0.174-r1");
     }
 }

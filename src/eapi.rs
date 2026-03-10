@@ -89,7 +89,7 @@ impl fmt::Display for Eapi {
             Self::Eight => "8",
             Self::Nine => "9",
         };
-        write!(f, "{version}")
+        f.write_str(version)
     }
 }
 
@@ -110,6 +110,25 @@ mod tests {
     fn test_eapi_new_err() {
         let eapi = Eapi::from_str("abc");
         assert!(eapi.is_err());
+    }
+
+    #[test]
+    fn test_is_supported_for_ebuilds() {
+        let test_cases = vec![
+            (Eapi::Zero, false),
+            (Eapi::One, false),
+            (Eapi::Two, false),
+            (Eapi::Three, false),
+            (Eapi::Four, false),
+            (Eapi::Five, false),
+            (Eapi::Six, false),
+            (Eapi::Seven, true),
+            (Eapi::Eight, true),
+            (Eapi::Nine, true),
+        ];
+        for (eapi, exp_supported) in test_cases {
+            assert_eq!(eapi.is_supported_for_ebuilds(), exp_supported);
+        }
     }
 
     #[test]

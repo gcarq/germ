@@ -1,86 +1,14 @@
-use crate::ebuild::Ebuild;
-use crate::ebuild::handler::functions::version::{ver_cut, ver_rs, ver_test};
 use crate::ebuild::handler::prot::ParentMessage;
-use crate::ebuild::handler::prot::func::{FuncCall, FuncType};
 use crate::repository::Repository;
 use anyhow::{Result, anyhow};
 use log::{debug, error};
-use std::ops::Deref;
 use std::process;
 
-mod version;
-
-/// Takes an `ebuild` and executes a function for the given [`FuncCall`].
-///
-/// Returns a [`ParentMessage`] with the result of the function or an `Err` if the request
-/// is invalid or the function execution fails.
-pub fn handle_request(ebuild: &Ebuild, call: FuncCall) -> Result<ParentMessage> {
-    let args = call.args.deref();
-    match call.func {
-        FuncType::ResolveEclass => match args {
-            [name] => resolve_eclass(name, ebuild.repo),
-            _ => Err(anyhow!(
-                "invalid arguments: __resolve_eclass <name>: {args:?}",
-            )),
-        },
-        FuncType::ContainsWord => match args {
-            [word, args @ ..] => Ok(contains_word(word, args)),
-            _ => Err(anyhow!(
-                "invalid arguments: contains_word <word> <string>: {args:?}",
-            )),
-        },
-        FuncType::DebugPrint => Ok(debug_print(args)),
-        FuncType::Die => match args {
-            [first, args @ ..] if first == "-n" => Ok(die(args, false)),
-            args => Ok(die(args, true)),
-        },
-        FuncType::Has => match args {
-            [word, args @ ..] => match args.contains(word) {
-                true => Ok(ParentMessage::Ok(None)),
-                false => Ok(ParentMessage::Err(None)),
-            },
-            _ => Err(anyhow!("invalid arguments: has <word> <args>: {args:?}",)),
-        },
-        FuncType::HasV if ebuild.eapi.supports_hasv() => match args {
-            [word, args @ ..] => match args.contains(word) {
-                true => Ok(ParentMessage::Ok(Some(word.clone()))),
-                false => Ok(ParentMessage::Err(None)),
-            },
-            _ => Err(anyhow!("invalid arguments: hasv <word> <args>: {args:?}",)),
-        },
-        FuncType::HasQ if ebuild.eapi.supports_hasq() => match args {
-            [word, args @ ..] => match args.contains(word) {
-                true => Ok(ParentMessage::Ok(None)),
-                false => Ok(ParentMessage::Err(None)),
-            },
-            _ => Err(anyhow!("invalid arguments: hasq <word> <args>: {args:?}",)),
-        },
-        FuncType::VerCut => match args {
-            [range] => ver_cut(ebuild.pkg, range, None),
-            [range, version] => ver_cut(ebuild.pkg, range, Some(version)),
-            _ => Err(anyhow!(
-                "invalid arguments: ver_cut <range> [<version>]: {args:?}",
-            )),
-        },
-        FuncType::VerRs => ver_rs(ebuild.pkg, args),
-        FuncType::VerTest => match args {
-            [op, v2] => ver_test(ebuild.pkg, None, op, v2),
-            [v1, op, v2] => ver_test(ebuild.pkg, Some(v1), op, v2),
-            _ => Err(anyhow!(
-                "invalid arguments: ver_test [<v1>] op <v2>: {args:?}",
-            )),
-        },
-        FuncType::HasV | FuncType::HasQ => Err(anyhow!(
-            "unsupported function '{}' for EAPI '{}'",
-            call.func,
-            ebuild.eapi,
-        )),
-    }
-}
+pub mod version;
 
 /// Checks if the given `word` is present anywhere in the list of `args`.
 /// Returns `Err` if `word` contains whitespace or is not present.
-fn contains_word(word: &str, args: &[String]) -> ParentMessage {
+pub fn contains_word(word: &str, args: &[String]) -> ParentMessage {
     if word.contains(' ') {
         return ParentMessage::Err(None);
     }
@@ -95,13 +23,13 @@ fn contains_word(word: &str, args: &[String]) -> ParentMessage {
 }
 
 /// Logs the given `args` using `debug!()`.
-fn debug_print(args: &[String]) -> ParentMessage {
+pub fn debug_print(args: &[String]) -> ParentMessage {
     debug!(target: "ebuild", "{}", args.join(" "));
     ParentMessage::Ok(None)
 }
 
 /// Logs the given `message` to `error!()` and exits with code 1 if `fatal` is true.
-fn die(args: &[String], fatal: bool) -> ParentMessage {
+pub fn die(args: &[String], fatal: bool) -> ParentMessage {
     error!("die: {}", args.join(" "));
     if fatal {
         process::exit(1);
@@ -110,11 +38,11 @@ fn die(args: &[String], fatal: bool) -> ParentMessage {
 }
 
 /// Resolves the given eclass `name` from `repository` and returns the path as string.
-fn resolve_eclass(name: &str, repository: &Repository) -> Result<ParentMessage> {
+pub fn resolve_eclass(name: &str, repository: &Repository) -> Result<ParentMessage> {
     let eclass = repository
         .eclasses
         .get(name)
-        .ok_or_else(|| anyhow!("{name} not found in {repository} or its masters"))?;
+        .ok_or_else(|| anyhow!("eclass {name} not found in {repository} or its masters"))?;
 
     let path = eclass
         .path
@@ -129,27 +57,15 @@ mod tests {
     use super::*;
     use crate::eapi::Eapi;
     use crate::ebuild::Ebuild;
-    use crate::package::Package;
+    use crate::ebuild::handler::prot::func::FuncCall;
+    use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
+    use crate::makenv::MakeEnv;
+    use crate::package::cpv::CPV;
     use crate::package::version::PackageVersion;
     use std::path::PathBuf;
 
     #[test]
     fn test_exec_ebuild_fn_ok() {
-        let pkg = Package::new(
-            "app-editors",
-            "vim",
-            PackageVersion::new("1.2.3b", Some("alpha4"), None).unwrap(),
-            "gentoo",
-        )
-        .unwrap();
-
-        let ebuild = Ebuild {
-            eapi: Eapi::Eight,
-            pkg: &pkg,
-            repo: &Repository::default(),
-            path: PathBuf::default(),
-        };
-
         // (func call, expected response)
         let test_data = [
             (
@@ -173,8 +89,23 @@ mod tests {
                 ParentMessage::Ok(None),
             ),
         ];
+
+        let cpv = CPV::new(
+            "app-editors",
+            "vim",
+            PackageVersion::new("1.2.3b", Some("alpha4"), None).unwrap(),
+        )
+        .unwrap();
+
+        let ebuild = Ebuild {
+            eapi: Eapi::Eight,
+            cpv: &cpv,
+            repo: &Repository::default(),
+            path: PathBuf::default(),
+        };
+        let handler = EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default());
         for (func, response) in test_data {
-            assert_eq!(handle_request(&ebuild, func).unwrap(), response,)
+            assert_eq!(handler.handle_request(func).unwrap(), response,)
         }
     }
 }

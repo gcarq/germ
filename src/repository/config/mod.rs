@@ -20,14 +20,14 @@ static REPO_RE: LazyLock<Regex> =
 // List of properties in repos.conf and layout.conf that are currently not supported.
 const UNSUPPORTED_CONF_PROPERTIES: &[&str] = &["aliases", "eclass-overrides", "force"];
 
-pub struct RepoManagerConfig {
+pub struct RepoSetConfig {
     pub main_repo_name: String,
     pub repo_confs: Vec<RepositoryConfig>,
 }
 
-impl RepoManagerConfig {
+impl RepoSetConfig {
     /// Loads the `repos.conf` file or directory from the given `location` and returns a
-    /// [`RepoManagerConfig`] instance.
+    /// [`RepoSetConfig`] instance.
     ///
     /// If the location is a directory, it loads and merges all files in the directory
     /// except files starting with `.` or ending with `~`.
@@ -56,14 +56,19 @@ impl RepoManagerConfig {
             .collect::<Result<Vec<_>>>()?;
 
         // Sort repositories based on their masters to ensure correct resolution order.
-        // TODO: This is not a perfect topological sort and may fail for complex master relationships,
-        //  but it should work for now.
+        // TODO: This is not a perfect topological sort and may fail for complex master
+        //  relationships, but it should work for now.
         repo_confs.sort();
 
         Ok(Self {
             main_repo_name,
             repo_confs,
         })
+    }
+
+    /// Returns the [`RepositoryConfig`] with the given `name`, if it exists.
+    pub fn get(&self, name: &str) -> Option<&RepositoryConfig> {
+        self.repo_confs.iter().find(|conf| conf.name == name)
     }
 
     /// Helper function to merge and parse `repos.conf` from the given `location`.

@@ -9,27 +9,27 @@ use std::str::FromStr;
 
 /// Holds all metadata of a [`Package`].
 /// TODO: parse eclasses
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default, Debug)]
 pub struct PackageMetadata {
-    eapi: Eapi,
-    description: String,
-    homepage: Vec<String>,
-    src_uri: Vec<String>,
-    license: Vec<String>,
-    keywords: Vec<String>,
-    inherit: Vec<String>,
-    restrict: String,
-    defined_phases: Vec<String>,
-    isue: Vec<String>,
-    required_use: String,
-    slot: PackageSlot,
-    depend: String,
-    bdepend: String,
-    idepend: String,
-    pdepend: String,
-    rdepend: String,
-    eclasses: Vec<Eclass>,
-    md5sum: String,
+    pub eapi: Eapi,
+    pub description: String,
+    pub homepage: Vec<String>,
+    pub src_uri: Vec<String>,
+    pub license: Vec<String>,
+    pub keywords: Vec<String>,
+    pub inherit: Vec<String>,
+    pub restrict: String,
+    pub defined_phases: Vec<String>,
+    pub isue: Vec<String>,
+    pub required_use: String,
+    pub slot: PackageSlot,
+    pub depend: String,
+    pub bdepend: String,
+    pub idepend: String,
+    pub pdepend: String,
+    pub rdepend: String,
+    pub eclasses: Vec<Eclass>,
+    pub md5sum: String,
 }
 
 impl PackageMetadata {
@@ -169,7 +169,7 @@ mod tests {
             metadata.required_use,
             "^^ ( python_single_target_python3_11 )"
         );
-        assert_eq!(metadata.slot, PackageSlot::Simple("0".into()));
+        assert_eq!(metadata.slot, PackageSlot::Eq("0".into()));
         assert_eq!(metadata.depend, "");
         assert_eq!(
             metadata.bdepend,

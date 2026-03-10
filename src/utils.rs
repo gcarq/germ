@@ -11,7 +11,7 @@ pub trait Inherit {
 
     /// Inherits the configuration of the given parent into self and returns the result as a new
     /// instance.
-    #[must_use = "this returns the inherited instance as a new allocation"]
+    #[must_use = "this method returns the inherited instance"]
     fn inherit(self, parent: &Self) -> Self
     where
         Self: Sized,
@@ -40,7 +40,7 @@ pub trait FileFromPath {
         };
         if metadata.is_file() {
             let content = fs::read_to_string(path)?;
-            return Self::from_file_content(content);
+            return Self::from_string(content);
         }
 
         if !recursive {
@@ -61,11 +61,11 @@ pub trait FileFromPath {
             })
             .collect::<Result<Vec<_>>>()?
             .join("\n");
-        Self::from_file_content(content)
+        Self::from_string(content)
     }
 
-    /// Creates an instance from the given file `content`.
-    fn from_file_content(content: String) -> Result<Self>
+    /// Creates an instance from the `content`.
+    fn from_string(content: String) -> Result<Self>
     where
         Self: Sized;
 }
@@ -93,7 +93,7 @@ pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
 /// Extracts the filename from the given path as a `String`.
 pub fn path_to_filename(path: &Path) -> Result<&str> {
     path.file_name()
-        .ok_or_else(|| anyhow!("path has no filename: '{}'", path.display()))?
+        .ok_or_else(|| anyhow!("path has is not a file: '{}'", path.display()))?
         .to_str()
         .ok_or_else(|| anyhow!("filename contains invalid unicode: '{}'", path.display()))
 }
@@ -136,13 +136,13 @@ where
     let iter = fs::read_dir(path)
         .with_context(|| anyhow!("unable to read directory: '{}'", path.display()))?
         .filter_map(move |entry| match entry {
-            Ok(entry) => match func(&entry) {
-                Ok(true) => match entry.file_name().as_bytes() {
-                    [b'.', ..] | [.., b'~'] => None,
-                    _ => Some(Ok(entry)),
+            Ok(entry) => match entry.file_name().as_bytes() {
+                [b'.', ..] | [.., b'~'] => None,
+                _ => match func(&entry) {
+                    Ok(true) => Some(Ok(entry)),
+                    Ok(false) => None,
+                    Err(err) => Some(Err(anyhow!(err))),
                 },
-                Ok(false) => None,
-                Err(err) => Some(Err(anyhow!(err))),
             },
             Err(err) => Some(Err(anyhow!(err))),
         });

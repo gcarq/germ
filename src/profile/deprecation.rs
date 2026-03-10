@@ -18,11 +18,11 @@ impl DeprecationInfo {
             return Ok(None);
         }
         let content = fs::read_to_string(path).with_context(|| "unable to read deprecated file")?;
-        Ok(Some(DeprecationInfo::from_file_content(content)?))
+        Ok(Some(DeprecationInfo::from_string(content)?))
     }
 
     /// Builds [`DeprecationInfo`] from the given content of a deprecated file.
-    fn from_file_content(content: String) -> Result<Self> {
+    fn from_string(content: String) -> Result<Self> {
         let mut lines = content.lines();
         let recommended_profile = lines
             .next()
@@ -41,9 +41,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_deprecation_info_from_file_content() {
+    fn test_deprecation_info_from_string() {
         let content = "default/linux/amd64/23.0\n\nThis profile is deprecated. Please upgrade.";
-        let deprecation_info = DeprecationInfo::from_file_content(content.to_owned()).unwrap();
+        let deprecation_info = DeprecationInfo::from_string(content.to_owned()).unwrap();
         assert_eq!(
             deprecation_info.recommended_profile,
             "default/linux/amd64/23.0"

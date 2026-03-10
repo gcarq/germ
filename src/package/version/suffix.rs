@@ -8,15 +8,8 @@ const SUFFIX_PREFIXES: [&str; 5] = ["alpha", "beta", "pre", "rc", "p"];
 
 /// Holds a list of [`VersionSuffix`] for a package version.
 /// For example, `"_rc1_p20"`.
-#[derive(Serialize, Deserialize, Default, Clone, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Eq, Default, Debug)]
 pub struct VersionSuffixes(Vec<VersionSuffix>);
-
-impl VersionSuffixes {
-    /// Returns an iterator over the contained [`VersionSuffix`].
-    pub fn iter(&self) -> impl Iterator<Item = &VersionSuffix> {
-        self.0.iter()
-    }
-}
 
 impl FromStr for VersionSuffixes {
     type Err = anyhow::Error;
@@ -94,11 +87,11 @@ impl fmt::Display for VersionSuffixes {
 /// For example: `"alpha1", "beta2", "pre", "rc", "p20230101"`.
 #[derive(Serialize, Deserialize, Clone, Eq, Debug)]
 pub enum VersionSuffix {
-    Alpha(Option<String>),
-    Beta(Option<String>),
-    Pre(Option<String>),
-    Rc(Option<String>),
-    Patch(Option<String>),
+    Alpha(Option<Box<str>>),
+    Beta(Option<Box<str>>),
+    Pre(Option<Box<str>>),
+    Rc(Option<Box<str>>),
+    Patch(Option<Box<str>>),
 }
 
 impl VersionSuffix {
@@ -122,7 +115,7 @@ impl VersionSuffix {
             number
                 .parse::<usize>()
                 .with_context(|| anyhow!("unable to parse version suffix number: '{number}'"))?;
-            Some(number.to_string())
+            Some(number.into())
         };
 
         let suffix = match suffix {
@@ -137,7 +130,7 @@ impl VersionSuffix {
     }
 
     /// Deconstructs the suffix into its string representation and optional number.
-    const fn deconstruct(&self) -> (&str, &Option<String>) {
+    const fn deconstruct(&self) -> (&str, &Option<Box<str>>) {
         match self {
             VersionSuffix::Alpha(num) => ("alpha", num),
             VersionSuffix::Beta(num) => ("beta", num),
@@ -216,9 +209,9 @@ impl hash::Hash for VersionSuffix {
 impl fmt::Display for VersionSuffix {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (suffix, num) = self.deconstruct();
-        write!(f, "{suffix}")?;
+        f.write_str(suffix)?;
         if let Some(num) = num {
-            write!(f, "{num}")?;
+            f.write_str(num)?;
         }
         Ok(())
     }

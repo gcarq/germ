@@ -1,59 +1,81 @@
+use crate::regex::SLOT;
 use anyhow::{Result, anyhow};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Write;
 use std::str::FromStr;
+use std::sync::LazyLock;
+
+pub static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{SLOT}$")).unwrap());
 
 /// Represents all possible slot definitions a [`Package`] can have.
 ///
-/// See `man 5 ebuild` for more details.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Hash, Eq)]
+/// See <https://devmanual.gentoo.org/general-concepts/dependencies/index.html#slot-dependencies>
+/// or `man 5 ebuild` for more details.
+/// TODO: To implement the equals slot operators = and slot=, the package manager will need to
+///   store the slot/sub-slot pair of the best installed version of the matching package.
+///   This syntax is only for package manager use and must not be used by ebuilds.
+#[derive(Serialize, Deserialize, Eq, Clone, Default, Debug)]
 pub enum PackageSlot {
+    // `:=` - Any slot is acceptable
+    #[default]
     Any,
-    Equals,
-    Simple(String),
-    EqualsSimple(String),
-    WithSubSlot(String, String),
-    EqualsWithSubSlot(String, String),
+    // `:*` - Any slot is acceptable, but the package should be rebuilt if the slot changes
+    AnyRebuild,
+    // `:SLOT=` The slot must match, but the package should be rebuilt if the sub-slot changes
+    EqRebuild(Box<str>),
+    // `:SLOT` - The slot must match
+    Eq(Box<str>),
+    // The slot and sub-slot must match
+    EqSubSlot(Box<str>, Box<str>),
 }
 
 impl FromStr for PackageSlot {
     type Err = anyhow::Error;
 
     /// Creates a new [`Slot`] from the given `slot` string.
-    fn from_str(slot: &str) -> Result<Self> {
-        match slot {
+    fn from_str(slot_str: &str) -> Result<Self> {
+        match slot_str {
             "*" => return Ok(Self::Any),
-            "=" => return Ok(Self::Equals),
+            "=" => return Ok(Self::AnyRebuild),
             _ => (),
         };
 
-        let slot = match slot.split_once('/') {
-            Some((slot, sub_slot)) => {
-                if slot.is_empty() || sub_slot.is_empty() {
-                    Err(anyhow!("invalid slot '{slot}'"))?;
-                }
-                match sub_slot.strip_suffix('=') {
-                    Some(sub_slot) => Self::EqualsWithSubSlot(slot.into(), sub_slot.into()),
-                    None => Self::WithSubSlot(slot.into(), sub_slot.into()),
-                }
+        let slot = match slot_str.split_once('/') {
+            Some((slot, sub_slot)) if SLOT_RE.is_match(slot) && SLOT_RE.is_match(sub_slot) => {
+                Self::EqSubSlot(slot.into(), sub_slot.into())
             }
-            None if slot.ends_with('=') => Self::EqualsSimple(slot[..slot.len() - 1].into()),
-            None if !slot.is_empty() && !slot.contains('*') => Self::Simple(slot.into()),
-            None => Err(anyhow!("invalid slot '{slot}'"))?,
+            None => match slot_str.strip_suffix('=') {
+                Some(slot) if SLOT_RE.is_match(slot) => Self::EqRebuild(slot.into()),
+                None if SLOT_RE.is_match(slot_str) => Self::Eq(slot_str.into()),
+                _ => Err(anyhow!("invalid slot '{slot_str}'"))?,
+            },
+            _ => Err(anyhow!("invalid slot '{slot_str}'"))?,
         };
         Ok(slot)
+    }
+}
+
+impl PartialEq<Self> for PackageSlot {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Any | Self::AnyRebuild, _) | (_, Self::Any | Self::AnyRebuild) => true,
+            (Self::Eq(s1) | Self::EqRebuild(s1), Self::Eq(s2) | Self::EqRebuild(s2)) => s1 == s2,
+            (Self::EqSubSlot(s1, ss1), Self::EqSubSlot(s2, ss2)) => s1 == s2 && ss1 == ss2,
+            _ => false,
+        }
     }
 }
 
 impl fmt::Display for PackageSlot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Any => write!(f, "*"),
-            Self::Equals => write!(f, "="),
-            Self::Simple(slot) => write!(f, "{slot}"),
-            Self::EqualsSimple(slot) => write!(f, "{slot}="),
-            Self::WithSubSlot(slot, sub_slot) => write!(f, "{slot}/{sub_slot}"),
-            Self::EqualsWithSubSlot(slot, sub_slot) => write!(f, "{slot}/{sub_slot}="),
+            Self::Any => f.write_char('*'),
+            Self::AnyRebuild => f.write_char('='),
+            Self::Eq(slot) => f.write_str(slot),
+            Self::EqSubSlot(slot, sub_slot) => write!(f, "{slot}/{sub_slot}"),
+            Self::EqRebuild(slot) => write!(f, "{slot}="),
         }
     }
 }
@@ -65,29 +87,24 @@ mod tests {
     #[test]
     fn test_atom_from_str_ok() {
         assert_eq!(PackageSlot::from_str("*").unwrap(), PackageSlot::Any);
-        assert_eq!(PackageSlot::from_str("=").unwrap(), PackageSlot::Equals);
+        assert_eq!(PackageSlot::from_str("=").unwrap(), PackageSlot::AnyRebuild);
         assert_eq!(
             PackageSlot::from_str("3").unwrap(),
-            PackageSlot::Simple("3".to_owned())
+            PackageSlot::Eq("3".into())
         );
         assert_eq!(
             PackageSlot::from_str("2=").unwrap(),
-            PackageSlot::EqualsSimple("2".to_owned())
+            PackageSlot::EqRebuild("2".into())
         );
         assert_eq!(
             PackageSlot::from_str("2/2.30").unwrap(),
-            PackageSlot::WithSubSlot("2".to_owned(), "2.30".to_owned())
-        );
-        assert_eq!(
-            PackageSlot::from_str("6/6.23=").unwrap(),
-            PackageSlot::EqualsWithSubSlot("6".to_owned(), "6.23".to_owned())
+            PackageSlot::EqSubSlot("2".into(), "2.30".into())
         );
     }
 
     #[test]
     fn test_atom_from_str_err() {
         assert!(PackageSlot::from_str("").is_err());
-        assert!(PackageSlot::from_str("3*").is_err());
         assert!(PackageSlot::from_str("3/").is_err());
         assert!(PackageSlot::from_str("/3").is_err());
     }

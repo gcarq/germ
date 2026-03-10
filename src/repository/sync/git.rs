@@ -5,6 +5,7 @@ use log::info;
 use std::collections::HashMap;
 use std::process::Command;
 
+#[derive(Debug)]
 pub struct GitSyncHandler {
     config: SyncConfig,
     // If set to 0, the depth is unlimited. Defaults to 1.

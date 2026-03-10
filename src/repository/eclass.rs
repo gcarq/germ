@@ -5,6 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -13,7 +14,7 @@ use std::sync::LazyLock;
 static ECLASS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][a-zA-Z0-9_.-]*$").unwrap());
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Eclasses(BTreeMap<String, Eclass>);
 
 impl Eclasses {
@@ -40,12 +41,15 @@ impl Eclasses {
         self.0.insert(eclass.name.clone(), eclass);
     }
 
-    pub fn get(&self, name: &str) -> Option<&Eclass> {
-        self.0.get(name)
-    }
-
     pub fn extend(&mut self, other: &Self) {
         self.0.extend(other.0.clone());
+    }
+}
+
+impl Deref for Eclasses {
+    type Target = BTreeMap<String, Eclass>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -76,7 +80,7 @@ impl Eclass {
 
 impl fmt::Display for Eclass {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name)
+        f.write_str(&self.name)
     }
 }
 
@@ -90,6 +94,7 @@ mod tests {
         for name in names {
             let eclass = Eclass::new(name.into(), PathBuf::from("/path/to/eclass.eclass"));
             assert!(eclass.is_ok(), "Eclass name '{name}' should be valid");
+            assert_eq!(eclass.unwrap().to_string(), name);
         }
     }
 

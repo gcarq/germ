@@ -42,7 +42,7 @@ impl fmt::Display for ChildMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Call(func_call) => write!(f, "{func_call}"),
-            Self::Data(data) => write!(f, "{data}"),
+            Self::Data(data) => f.write_str(data),
         }
     }
 }
@@ -69,13 +69,7 @@ impl ParentMessage {
 
 impl ParentToChildMsg for ParentMessage {
     fn into_bytes(self) -> Vec<u8> {
-        let msg = match self {
-            Self::Ok(Some(value)) => format!("OK {value}"),
-            Self::Ok(None) => "OK".to_owned(),
-            Self::Err(Some(value)) => format!("ERR {value}"),
-            Self::Err(None) => "ERR".to_owned(),
-        };
-        msg.into()
+        self.to_string().into_bytes()
     }
 }
 

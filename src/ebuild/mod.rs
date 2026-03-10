@@ -1,14 +1,9 @@
 use crate::eapi::Eapi;
-use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
-use crate::makenv::MakeEnv;
-use crate::package::Package;
-use crate::package::metadata::PackageMetadata;
+use crate::package::cpv::CPV;
 use crate::repository::Repository;
-use crate::utils;
 use anyhow::{Context, Result, anyhow};
-use log::debug;
+use log::trace;
 use regex::Regex;
-use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -26,22 +21,20 @@ static PMS_EAPI_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 /// An ebuild is associated with a package and contains the metadata and instructions
 /// how to build it. See PMS 6 and 7.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Debug)]
 pub struct Ebuild<'a> {
     pub path: PathBuf,
     pub eapi: Eapi,
-    pub pkg: &'a Package,
+    pub cpv: &'a CPV,
     pub repo: &'a Repository,
 }
 
 impl<'a> Ebuild<'a> {
-    /// Creates an [`Ebuild`] from the given `path` and `pkg` it relates to.
+    /// Creates an [`Ebuild`] from the given `path` and [`CPV`] it relates to.
+    ///
     /// Returns an `Err` if the EAPI is not found or unsupported for ebuilds.
-    pub fn new(path: PathBuf, pkg: &'a Package, repo: &'a Repository) -> Result<Self> {
-        debug!(
-            "Loading ebuild for '{pkg}' from path '{}' ...",
-            path.display()
-        );
+    pub fn new(path: PathBuf, cpv: &'a CPV, repo: &'a Repository) -> Result<Self> {
+        trace!("Loading ebuild '{}' for '{cpv}' ...", path.display());
         let file =
             File::open(&path).with_context(|| anyhow!("unable to open {}", path.display()))?;
         let reader = BufReader::with_capacity(256, file);
@@ -55,36 +48,47 @@ impl<'a> Ebuild<'a> {
                 return Ok(Self {
                     path,
                     eapi,
-                    pkg,
+                    cpv,
                     repo,
                 });
             }
         }
         Err(anyhow!("EAPI not found in ebuild: {}", path.display()))
     }
+}
 
-    /// Generates metadata for `self` by running the ebuild `depend` phase.
-    ///
-    /// Returns an `Err` if the ebuild process fails or metadata is missing.
-    pub fn generate_metadata(&self) -> Result<PackageMetadata> {
-        let mut handler = EbuildPhaseHandler::new(self, EbuildPhase::Depend, &MakeEnv::default());
-        let data = handler
-            .spawn()
-            .with_context(|| "ebuild script execution failed")?;
-        let data = data
-            .iter()
-            .filter_map(|d| d.split_once('='))
-            .collect::<HashMap<_, _>>();
+impl Eq for Ebuild<'_> {}
 
-        let md5sum =
-            utils::md5sum(&self.path).with_context(|| anyhow!("failed to calculate md5sum"))?;
-        PackageMetadata::from_map(data, md5sum)
-            .with_context(|| anyhow!("unable to create metadata from ebuild output"))
+impl PartialEq for Ebuild<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
     }
 }
 
 impl fmt::Display for Ebuild<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.path.display())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ebuild_eq() {
+        let ebuild1 = Ebuild {
+            path: PathBuf::from("/dev/null"),
+            eapi: Eapi::Eight,
+            cpv: &CPV::default(),
+            repo: &Repository::default(),
+        };
+        let ebuild2 = Ebuild {
+            path: PathBuf::from("/dev/null"),
+            eapi: Eapi::Eight,
+            cpv: &CPV::default(),
+            repo: &Repository::default(),
+        };
+        assert_eq!(ebuild1, ebuild2);
     }
 }

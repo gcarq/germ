@@ -4,8 +4,7 @@ use crate::consts::DEFAULT_PORTAGE_CONF_PATH;
 use crate::linefile::LineBasedFile;
 use crate::makenv::MakeEnv;
 use crate::profile::Profile;
-use crate::repository::Repository;
-use crate::repository::manager::RepoManager;
+use crate::repository::set::RepoSet;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use log::debug;
@@ -20,11 +19,11 @@ pub struct PortageConf {
 }
 
 impl PortageConf {
-    /// Builds a [`PortageConf`] from the given portage configuration `path` and `repo_manager`.
-    pub fn new(path: &Path, repo_manager: &RepoManager) -> Result<Self> {
+    /// Builds a [`PortageConf`] from the given portage configuration `path` and `repo_set`.
+    pub fn new(path: &Path, repo_set: &RepoSet) -> Result<Self> {
         let profile_path = path.join("make.profile");
         debug!("Active profile {}", profile_path.canonicalize()?.display());
-        let profile = Profile::new(&profile_path, repo_manager)
+        let profile = Profile::new(&profile_path, repo_set)
             .with_context(|| "unable to build profile from make.profile")?;
 
         let make_env = Self::init_make_env(path, &profile)?;
@@ -33,11 +32,11 @@ impl PortageConf {
             .get("ARCH")
             .with_context(|| "missing ARCH variable")?
             .to_string();
-        Self::validate_arch(&arch, &mut repo_manager.repos.values())?;
-        Self::validate_profile(&profile, &arch, &mut repo_manager.repos.values())?;
+        Self::validate_arch(&arch, repo_set)?;
+        Self::validate_profile(&profile, &arch, repo_set)?;
 
         let mask_manager = MaskManager::new(
-            &mut repo_manager.repos.values(),
+            repo_set,
             &profile,
             LineBasedFile::from_path(&path.join("package.mask"), true, true)?,
             LineBasedFile::from_path(&path.join("package.unmask"), true, true)?,
@@ -67,13 +66,9 @@ impl PortageConf {
         Ok(make_env)
     }
 
-    /// Sanity check to ensure the given `ARCH` is supported by at least one repository
-    /// for the given `repos`.
-    fn validate_arch<'a>(
-        arch: &str,
-        repos: &mut impl Iterator<Item = &'a Repository>,
-    ) -> Result<()> {
-        match repos.any(|repo| repo.arch_list.contains(arch)) {
+    /// Sanity check to ensure the given `ARCH` is supported by at least one repository.
+    fn validate_arch(arch: &str, repo_set: &RepoSet) -> Result<()> {
+        match repo_set.values().any(|repo| repo.arch_list.contains(arch)) {
             true => Ok(()),
             false => Err(anyhow!(
                 "ARCH value '{arch}' is not supported by any configured repository"
@@ -81,16 +76,11 @@ impl PortageConf {
         }
     }
 
-    /// Sanity check to ensure the given `profile` is valid for at least one repository
-    /// for the given `ARCH` and `repos`.
+    /// Sanity check to ensure the given `profile` is valid for at least one repository.
     ///
     /// The profile- and the repository location are expected to be absolute paths.
-    fn validate_profile<'a>(
-        profile: &Profile,
-        arch: &str,
-        repos: &mut impl Iterator<Item = &'a Repository>,
-    ) -> Result<()> {
-        for repo in repos {
+    fn validate_profile(profile: &Profile, arch: &str, repo_set: &RepoSet) -> Result<()> {
+        for repo in repo_set.values() {
             let profile_prefix = format!("{}/profiles/", repo.location.display());
             if let Some(p) = profile
                 .location

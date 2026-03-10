@@ -6,6 +6,7 @@ mod git;
 use crate::repository::sync::git::GitSyncHandler;
 use anyhow::{Context, Result, anyhow};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::PathBuf;
 
 enum SyncType {
@@ -24,6 +25,7 @@ impl SyncType {
 /// Configuration for the synchronization mechanism.
 /// This struct holds common options that are used for all [`SyncType`],
 /// such as `location`, `auto_sync`, `sync_uri`, etc.
+#[derive(Debug)]
 struct SyncConfig {
     // Absolute path to the repository location on the local filesystem.
     pub location: PathBuf,
@@ -80,7 +82,7 @@ pub fn build_sync_handler(
 
 /// Trait for handling repository synchronization.
 /// This trait can be implemented for different synchronization mechanisms such as git, rsync, etc.
-pub trait SyncHandler {
+pub trait SyncHandler: Debug {
     /// Creates a new instance of the `SyncHandler` based on the provided INI `properties`
     /// for this repository coming from `repos.conf`.
     fn new(properties: &HashMap<String, String>) -> Result<Self>

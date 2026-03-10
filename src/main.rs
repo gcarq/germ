@@ -2,7 +2,7 @@ use crate::conf::PortageConf;
 use crate::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
 use crate::deps::Atom;
 use crate::makenv::MakeEnv;
-use crate::repository::manager::RepoManager;
+use crate::repository::set::RepoSet;
 use crate::vdb::Vdb;
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
@@ -86,7 +86,20 @@ fn main() {
 
     match run(args) {
         Ok(()) => (),
-        Err(e) => error!("{e:#}"),
+        Err(err) => {
+            let error_cause = err
+                .chain()
+                .skip(1)
+                .enumerate()
+                .map(|(i, cause)| format!("   {i}: {cause}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if error_cause.is_empty() {
+                error!("{err}");
+            } else {
+                error!("{err}\nCaused by\n{error_cause}");
+            }
+        }
     }
 }
 
@@ -94,40 +107,39 @@ fn main() {
 fn run(args: Args) -> Result<()> {
     let config_path = Path::new(DEFAULT_USE_PORTAGE_CONF_PATH);
 
-    let mut repo_manager = RepoManager::new(&config_path.join("repos.conf"))
+    let mut repo_set = RepoSet::new(&config_path.join("repos.conf"))
         .with_context(|| "unable to process repos.conf")?;
-    let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH), &repo_manager)?;
+    let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH), &repo_set)?;
 
     match args.command {
-        Some(Command::Info { atom }) => info(atom, &repo_manager, &conf.make_env)?,
-        Some(Command::Install { atom }) => install(atom, &repo_manager)?,
+        Some(Command::Info { atom }) => info(atom, &repo_set, &conf.make_env)?,
+        Some(Command::Install { atom }) => install(atom, &mut repo_set)?,
         Some(Command::Gencache { repo }) => {
-            gencache(repo, &mut repo_manager)?;
+            gencache(repo, &mut repo_set)?;
         }
-        Some(Command::Sync) => sync(&repo_manager)?,
+        Some(Command::Sync) => sync(&repo_set),
         None => {}
     }
 
-    Ok(())
+    repo_set.flush()
 }
 
 /// Prints information about the current portage `conf`.
-fn info(atom: Option<Atom>, repo_manager: &RepoManager, make_env: &MakeEnv) -> Result<()> {
-    println!("Repositories:\n\n{repo_manager}");
+fn info(atom: Option<Atom>, repo_set: &RepoSet, make_env: &MakeEnv) -> Result<()> {
+    println!("Repositories:\n\n{repo_set}");
     let mut make_env = make_env.iter().collect::<Vec<(&String, &EnvValue)>>();
     make_env.sort_by_key(|(name, _)| *name);
     for (key, value) in make_env {
         println!("{key}=\"{value}\"");
     }
 
-    if let Some(atom) = atom {
-        let vdb = Vdb::from_path(PathBuf::from_str("/var/db/pkg")?)
-            .with_context(|| "unable to build VDB")?;
-
-        println!("\nInstalled packages matching '{atom}':\n");
-        for pkg in vdb.packages.iter().filter(|pkg| atom.matches(pkg)) {
-            println!("{pkg}");
-        }
+    let Some(atom) = atom else { return Ok(()) };
+    let vdb =
+        Vdb::from_path(PathBuf::from_str("/var/db/pkg")?).with_context(|| "unable to build VDB")?;
+    let packages = vdb.find_by_atom(&atom);
+    println!("\nInstalled packages matching {atom}\n");
+    for pkg in packages {
+        println!("{pkg}");
     }
 
     Ok(())
@@ -135,47 +147,43 @@ fn info(atom: Option<Atom>, repo_manager: &RepoManager, make_env: &MakeEnv) -> R
 
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.
-fn install(atom: Atom, repo_manager: &RepoManager) -> Result<()> {
-    let pkg = repo_manager
-        .repos
-        .values()
-        .find_map(|repo| repo.find_packages(&atom).first().map(|p| (*p).clone()));
+fn install(atom: Atom, repo_set: &mut RepoSet) -> Result<()> {
+    let packages = repo_set.find_packages(&atom)?;
+    let package = packages
+        .first()
+        .ok_or_else(|| anyhow!("no matching package found for atom '{atom}'"))?;
 
-    let Some(pkg) = pkg else {
-        return Err(anyhow!("no matching package found for atom '{atom}'"));
-    };
-    let ebuild = repo_manager.resolve_ebuild(&pkg)?;
-    let metadata = ebuild.generate_metadata()?;
-    println!("{metadata}");
+    println!("{}", package.metadata);
 
     Ok(())
 }
 
 /// Generates metadata cache for repositories.
-fn gencache(repo_name: Option<String>, repo_manager: &mut RepoManager) -> Result<()> {
+fn gencache(repo_name: Option<String>, repo_set: &mut RepoSet) -> Result<()> {
     if let Some(repo) = repo_name {
-        let repo = repo_manager
-            .repos
+        let repo = repo_set
             .get_mut(&repo)
             .ok_or_else(|| anyhow!("repository '{repo}' doesn't exist"))?;
-        return repo.generate_metadata();
+        repo.build_package_index()
+            .with_context(|| anyhow!("unable to build package index for {repo}"))?;
     }
 
-    for repo in repo_manager.repos.values_mut() {
-        repo.generate_metadata()?;
+    for repo in repo_set.values_mut() {
+        repo.build_package_index()
+            .with_context(|| anyhow!("unable to build package index for {repo}"))?;
     }
+
     Ok(())
 }
 
 /// Syncs all repositories.
-fn sync(repo_manager: &RepoManager) -> Result<()> {
-    for repo in repo_manager.repos.values() {
+fn sync(repo_set: &RepoSet) {
+    for repo in repo_set.values() {
         match repo.sync() {
             Ok(()) => (),
             Err(e) => error!("failed to sync repository '{}'\n\t{e}", repo.name),
         }
     }
-    Ok(())
 }
 
 /// Sets up application logger with the given `log_level`.

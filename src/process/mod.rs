@@ -2,7 +2,7 @@ pub mod ipc;
 
 use crate::process::ipc::IpcHandler;
 use anyhow::{Context, Result, anyhow};
-use log::debug;
+use log::trace;
 use nix::spawn::{PosixSpawnAttr, PosixSpawnFileActions, posix_spawn};
 use nix::sys::signal::{Signal, kill};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
@@ -26,7 +26,6 @@ impl Process {
         let actions =
             PosixSpawnFileActions::init().with_context(|| "unable to init posix_spawn actions")?;
         let pid = Self::spawn(command, env, &actions)?;
-        debug!("Started process (PID: {pid})");
         Ok(Self { pid, ipc: None })
     }
 
@@ -44,7 +43,6 @@ impl Process {
         let (ipc, pid) =
             IpcHandler::new(child_channel, |actions| Self::spawn(command, env, &actions))
                 .with_context(|| "unable to setup IPC handler")?;
-        debug!("Started process (PID: {pid}) with IPC handler");
         Ok(Self {
             pid,
             ipc: Some(ipc),
@@ -79,7 +77,7 @@ impl Process {
         env: &HashMap<String, String>,
         actions: &PosixSpawnFileActions,
     ) -> Result<Pid> {
-        debug!("Spawning process: '{}' ...", command.join(" "),);
+        trace!("Spawning process: '{}' ...", command.join(" "),);
         let binary = command
             .first()
             .ok_or_else(|| anyhow!("no arguments provided to spawn process"))?

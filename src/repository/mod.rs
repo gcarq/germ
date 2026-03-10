@@ -1,28 +1,27 @@
-mod cache;
 mod config;
 mod desc;
 pub mod eclass;
-pub mod manager;
+mod index;
+pub mod set;
 mod sync;
 
 use crate::deps::Atom;
 use crate::eapi::Eapi;
-use crate::ebuild::Ebuild;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
+use crate::package::cpv::CPV;
 use crate::package::version::PackageVersion;
 use crate::regex::PV_REV;
-use crate::repository::cache::PackageCache;
 use crate::repository::config::RepositoryConfig;
 use crate::repository::desc::ProfileDescription;
 use crate::repository::eclass::Eclasses;
+use crate::repository::index::{AvailablePackageIndex, ResolvedPackageIndex};
 use crate::repository::sync::{SyncHandler, build_sync_handler};
 use crate::utils;
-use crate::utils::FileFromPath;
+use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
-use log::{info, trace};
+use log::{debug, info};
 use regex::Regex;
-use std::collections::HashSet;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -36,19 +35,20 @@ static EBUILD_RE: LazyLock<Regex> =
 
 /// Represents a package repository with its location, name, eapi version, categories, packages,
 /// and other metadata. The repository will be synced using a [`SyncHandler`].
-#[derive(Default)]
+#[derive(Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct Repository {
     pub location: PathBuf,
     pub name: String,
-    masters: Vec<String>,
-    pub eapi: Eapi,
+    eapi: Eapi,
     categories: Vec<String>,
-    packages: HashSet<Package>,
     pub package_mask: LineBasedFile,
     pub package_unmask: LineBasedFile,
     pub eclasses: Eclasses,
     pub arch_list: LineBasedFile,
-    pub profiles_desc: Vec<ProfileDescription>,
+    pub profiles_desc: Box<[ProfileDescription]>,
+    avail_package_idx: AvailablePackageIndex,
+    resolved_package_idx: ResolvedPackageIndex,
 
     sync_handler: Option<Box<dyn SyncHandler>>,
 }
@@ -65,8 +65,7 @@ impl Repository {
         let eapi = Self::read_eapi(&location)?;
         let profiles = location.join("profiles");
         let repository = Self {
-            packages: HashSet::new(),
-            categories: Vec::new(),
+            categories: Vec::default(),
             package_mask: LineBasedFile::from_path(
                 &profiles.join("package.mask"),
                 eapi.supports_profile_file_dirs(),
@@ -83,74 +82,48 @@ impl Repository {
                 .into_iter()
                 .map(|line| ProfileDescription::from_line(&line))
                 .collect::<Result<_>>()?,
-            masters: config.masters.clone(),
             name: config.name.clone(),
-            location,
+            avail_package_idx: AvailablePackageIndex::default(),
+            resolved_package_idx: ResolvedPackageIndex::default(),
             sync_handler: build_sync_handler(&config.raw_properties)?,
+            location,
+
             eapi,
         };
         Ok(repository)
     }
 
-    /// Populates all categories and packages. Categories are inherited from the given `masters`.
-    pub fn populate(&mut self, masters: &[&Repository]) -> Result<()> {
-        self.categories = self
-            .collect_categories(masters)
-            .with_context(|| "unable to collect categories")?;
-        self.packages = self
-            .collect_packages()
-            .with_context(|| "unable to collect packages")?;
-        self.eclasses = self
-            .collect_eclasses(masters)
-            .with_context(|| "unable to collect eclasses")?;
+    /// Finds and returns all packages that match the given `atom`.
+    /// TODO: optimize this function
+    pub fn find_packages(&mut self, atom: &Atom) -> Result<Vec<&Package>> {
+        let Some(cpvs) = self.avail_package_idx.find_packages(atom) else {
+            return Ok(Vec::new());
+        };
 
-        // TODO: replace hardcoded testing path
-        let path = PathBuf::from(format!("/tmp/package-manager/metadata/{self}"));
-        if let Some(mut cache) = PackageCache::load_from_path(&path)? {
-            cache.sync(&self.packages);
-            self.packages = cache.drain();
+        // Resolve all packages first to avoid borrowing conflicts when collecting references later
+        for cpv in cpvs.iter() {
+            if !self.resolved_package_idx.contains_key(cpv.fqn()) {
+                self.resolved_package_idx.insert(self.resolve_package(cpv)?);
+            }
+        }
+
+        cpvs.iter()
+            .map(|cpv| -> Result<&Package> {
+                self.resolved_package_idx
+                    .get(cpv.fqn())
+                    .ok_or_else(|| anyhow!("package {cpv} not found"))
+            })
+            .collect()
+    }
+
+    /// Builds the resolved package index for all packages.
+    pub fn build_package_index(&mut self) -> Result<()> {
+        for cpv in self.avail_package_idx.values().flatten() {
+            if !self.resolved_package_idx.contains_key(cpv.fqn()) {
+                self.resolved_package_idx.insert(self.resolve_package(cpv)?);
+            }
         }
         Ok(())
-    }
-
-    /// Generates and caches metadata for all packages and serializes it to disk.
-    pub fn generate_metadata(&mut self) -> Result<()> {
-        info!("Generating metadata for {self} ...");
-
-        let cache = self
-            .packages
-            .iter()
-            .map(|pkg| {
-                let ebuild = self
-                    .resolve_ebuild(pkg)
-                    .with_context(|| anyhow!("failed to resolve ebuild for {pkg}"))?;
-                let metadata = ebuild
-                    .generate_metadata()
-                    .with_context(|| anyhow!("unable to generate metadata for {ebuild}"))?;
-                let mut pkg = pkg.clone();
-                pkg.attach_metadata(metadata);
-                Ok(pkg)
-            })
-            .collect::<Result<PackageCache>>()?;
-
-        let path = PathBuf::from(format!("/tmp/package-manager/metadata/{self}"));
-        cache.write_to_path(&path)?;
-        self.packages = cache.drain();
-        info!("Updated package metadata for {self}");
-        Ok(())
-    }
-
-    /// Returns an `Iterator` over all packages.
-    /// TODO: Order the returned packages by version
-    pub fn packages(&self) -> impl Iterator<Item = &Package> {
-        self.packages.iter()
-    }
-
-    /// Returns all packages that match the given `atom`.
-    /// TODO: Order the returned packages by version
-    /// TODO: Consider returning an iterator
-    pub fn find_packages(&self, atom: &Atom) -> Vec<&Package> {
-        self.packages().filter(|pkg| atom.matches(pkg)).collect()
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
@@ -172,61 +145,93 @@ impl Repository {
         Ok(())
     }
 
-    /// Resolves the [`Ebuild`] for the given `package`.
-    ///
-    /// Returns `Err` if the ebuild file doesn't exist or is invalid.
-    fn resolve_ebuild<'a>(&'a self, package: &'a Package) -> Result<Ebuild<'a>> {
-        let path = self
+    /// Resolves the given `cpv` into a [`Package`] with its metadata.
+    fn resolve_package(&self, cpv: &CPV) -> Result<Package> {
+        let ebuild_path = self
             .location
-            .join(&package.category)
-            .join(&package.name)
-            .join(format!("{}-{}.ebuild", package.name, package.version));
-        Ebuild::new(path, package, self)
+            .join(cpv.category())
+            .join(cpv.package())
+            .join(format!("{}.ebuild", cpv.pf()));
+        let metadata = cpv
+            .generate_metadata(&ebuild_path, self)
+            .with_context(|| anyhow!("unable to generate metadata for {cpv}"))?;
+        Ok(Package {
+            cpv: cpv.clone(),
+            repo: self.name.clone(),
+            metadata,
+        })
     }
 
-    /// Collects and returns all categories from the repo `location`.
-    ///
-    /// Categories from the given `masters` are inherited and added to the collected categories.
-    fn collect_categories(&self, masters: &[&Repository]) -> Result<Vec<String>> {
-        let mut categories = masters
-            .iter()
-            .flat_map(|repo| &repo.categories)
-            .cloned()
-            .collect::<Vec<String>>();
+    /// Writes the resolved package index to disk.
+    fn write_index(&self) -> Result<()> {
+        // TODO: replace hardcoded testing path
+        let path = PathBuf::from(format!("/tmp/package-manager/metadata/{self}"));
+        self.resolved_package_idx.write_to_path(&path)?;
+        Ok(())
+    }
 
-        let path = self.location.join("profiles").join("categories");
-        if path.exists() {
-            categories.extend(
-                fs::read_to_string(&path)
-                    .with_context(|| anyhow!("unable to read '{}'", path.display()))?
-                    .lines()
-                    .map(ToOwned::to_owned),
-            );
+    /// Loads the resolved package index from disk.
+    fn load_index(&mut self) -> Result<()> {
+        // TODO: replace hardcoded testing path
+        let path = PathBuf::from(format!("/tmp/package-manager/metadata/{self}"));
+        if let Some(index) = ResolvedPackageIndex::load_from_path(&path)? {
+            self.resolved_package_idx = index;
         }
-        Ok(categories)
+
+        // Remove all packages that are no longer available
+        self.resolved_package_idx
+            .retain(|_, pkg| self.avail_package_idx.contains(&pkg.cpv));
+
+        Ok(())
     }
 
-    /// Collects all packages from the repository.
+    /// Populates all categories, packages and eclasses.
     ///
-    /// [`Self::collect_categories`] must be called before calling this method since only
-    /// known categories are considered when collecting packages.
-    fn collect_packages(&self) -> Result<HashSet<Package>> {
-        let mut packages = HashSet::new();
+    /// NOTE: The caller must ensure [`Inherit::inherit_from`] has been called before.
+    fn populate(&mut self) -> Result<()> {
+        self.collect_eclasses()
+            .with_context(|| "unable to collect eclasses")?;
+        self.collect_categories();
+        self.collect_cpvs()
+            .with_context(|| "unable to collect packages")?;
+        Ok(())
+    }
+
+    /// Collects all known eclasses in the repo.
+    fn collect_eclasses(&mut self) -> Result<()> {
+        let eclasses = Eclasses::from_path(&self.location.join("eclass"))?;
+        self.eclasses.extend(&eclasses);
+        Ok(())
+    }
+
+    /// Collects all known categories in the repository.
+    fn collect_categories(&mut self) {
+        let path = self.location.join("profiles").join("categories");
+        if let Ok(content) = fs::read_to_string(&path) {
+            self.categories
+                .extend(content.lines().map(ToOwned::to_owned));
+        }
+    }
+
+    /// Collects all known packages in the repository as [`CPV`].
+    ///
+    /// NOTE: The caller must ensure to [`Self::collect_categories`] has been called before,
+    /// since only known categories are considered when collecting packages.
+    fn collect_cpvs(&mut self) -> Result<()> {
         for category in &self.categories {
             let cat_path = self.location.join(category);
-
             let Ok(pkg_paths) = utils::list_dirs(&cat_path) else {
                 continue;
             };
 
             for pkg_path in pkg_paths {
                 let pkg_path = pkg_path?;
-                let pkg_name = utils::path_to_filename(&pkg_path)?;
+                let package = utils::path_to_filename(&pkg_path)?;
 
                 for ebuild_path in utils::list_files(&pkg_path)? {
                     let ebuild_path = ebuild_path?;
                     let caps = match EBUILD_RE.captures(utils::path_to_filename(&ebuild_path)?) {
-                        Some(caps) if caps["package"].starts_with(pkg_name) => caps,
+                        Some(caps) if caps["package"].starts_with(package) => caps,
                         _ => continue,
                     };
                     let version = PackageVersion::new(
@@ -234,29 +239,12 @@ impl Repository {
                         Some(&caps["suffixes"]),
                         caps.name("revision").map(|m| m.as_str()),
                     )?;
-                    let pkg = Package::new(
-                        utils::path_to_filename(&cat_path)?,
-                        pkg_name,
-                        version,
-                        &self.name,
-                    )?;
-                    packages.insert(pkg);
+                    let cpv = CPV::new(category, package, version)?;
+                    self.avail_package_idx.insert(cpv);
                 }
             }
         }
-        packages.shrink_to_fit();
-        Ok(packages)
-    }
-
-    /// Collects all eclasses from the repo `location` and its `masters`.
-    fn collect_eclasses(&self, masters: &[&Repository]) -> Result<Eclasses> {
-        let mut eclasses = Eclasses::from_path(&self.location.join("eclass"))?;
-
-        for master in masters {
-            trace!("Extending eclasses for '{self}' from repository '{master}'");
-            eclasses.extend(&master.eclasses);
-        }
-        Ok(eclasses)
+        Ok(())
     }
 
     /// Reads the repository eapi version from the given repository `path`.
@@ -276,6 +264,15 @@ impl Repository {
     }
 }
 
+impl Inherit for Repository {
+    /// Inherits relevant metadata from the given `master` repository.
+    fn inherit_from(&mut self, master: &Repository) {
+        debug!("Inheriting '{self}' from '{master}' ...");
+        self.categories.extend(master.categories.iter().cloned());
+        self.eclasses.extend(&master.eclasses);
+    }
+}
+
 impl Eq for Repository {}
 
 impl PartialEq for Repository {
@@ -292,7 +289,7 @@ impl Hash for Repository {
 
 impl fmt::Display for Repository {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name)
+        f.write_str(&self.name)
     }
 }
 

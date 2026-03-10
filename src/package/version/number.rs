@@ -1,19 +1,21 @@
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::fmt::Write;
 use std::str::FromStr;
 use std::{fmt, hash};
 
 /// Represents the base version number as individual components and an optional letter suffix.
 #[derive(Serialize, Deserialize, Clone, Eq, Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct VersionNumber {
-    pub components: Vec<NumberComponent>,
-    pub letter: Option<char>,
+    components: Vec<NumberComponent>,
+    letter: Option<char>,
 }
 
 impl VersionNumber {
     /// Returns an iterator over the string representations of each component
-    /// followed by the optional letter suffix as the last element (if it exists).
+    /// including the optional letter suffix as the last element.
     pub fn iter(&self) -> impl Iterator<Item = String> {
         self.components
             .iter()
@@ -101,15 +103,16 @@ impl hash::Hash for VersionNumber {
 
 impl fmt::Display for VersionNumber {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let repr = self
-            .components
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(".");
-        write!(f, "{repr}")?;
+        let mut iter = self.components.iter();
+        if let Some(first) = iter.next() {
+            write!(f, "{first}")?;
+        }
+        for comp in iter {
+            f.write_char('.')?;
+            write!(f, "{comp}")?;
+        }
         if let Some(letter) = self.letter {
-            write!(f, "{letter}")?;
+            f.write_char(letter)?;
         }
         Ok(())
     }
@@ -123,9 +126,9 @@ impl fmt::Display for VersionNumber {
 /// and not part of this enum.
 /// See PMS 3.2 and 3.3 for more details.
 #[derive(Serialize, Deserialize, Clone, Eq, Debug)]
-pub enum NumberComponent {
-    Numeric(String),
-    Alphabetic(String),
+enum NumberComponent {
+    Numeric(Box<str>),
+    Alphabetic(Box<str>),
 }
 
 impl NumberComponent {
@@ -138,8 +141,8 @@ impl NumberComponent {
             return Err(anyhow!("invalid version component: '{number}'"));
         }
         let component = match index == 0 || !number.starts_with('0') {
-            true => NumberComponent::Numeric(number.to_owned()),
-            false => NumberComponent::Alphabetic(number.to_owned()),
+            true => NumberComponent::Numeric(number.into()),
+            false => NumberComponent::Alphabetic(number.into()),
         };
         Ok(component)
     }
@@ -190,7 +193,7 @@ impl fmt::Display for NumberComponent {
             NumberComponent::Numeric(n) => n,
             NumberComponent::Alphabetic(a) => a,
         };
-        write!(f, "{repr}")
+        f.write_str(repr)
     }
 }
 

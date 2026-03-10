@@ -2,7 +2,7 @@ use crate::deps::Atom;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
 use crate::profile::Profile;
-use crate::repository::Repository;
+use crate::repository::set::RepoSet;
 use crate::utils::Inherit;
 use anyhow::{Context, Result};
 use log::debug;
@@ -11,10 +11,9 @@ use std::collections::HashMap;
 /// Holds all package masks and should be used as the single source of truth  when checking
 /// if a package is masked. Masks and unmasks are stored in a `HashMap` that maps the
 /// qualified package name to a vector of [`Atom`].
-#[derive(Debug)]
 pub struct MaskManager {
-    pub mask: HashMap<String, Vec<Atom>>,
-    pub unmask: HashMap<String, Vec<Atom>>,
+    pub mask: HashMap<Box<str>, Vec<Atom>>,
+    pub unmask: HashMap<Box<str>, Vec<Atom>>,
 }
 
 impl MaskManager {
@@ -22,15 +21,15 @@ impl MaskManager {
     /// 1. Repository
     /// 2. Profile
     /// 3. User defined
-    pub fn new<'a>(
-        repos: &mut impl Iterator<Item = &'a Repository>,
+    pub fn new(
+        repo_set: &RepoSet,
         profile: &Profile,
         user_mask: LineBasedFile,
         user_unmask: LineBasedFile,
     ) -> Result<Self> {
         let mut mask = LineBasedFile::default().inherit(&profile.package_mask);
         let mut unmask = LineBasedFile::default().inherit(&profile.package_unmask);
-        for repo in repos {
+        for repo in repo_set.values() {
             mask.inherit_from(&repo.package_mask);
             unmask.inherit_from(&repo.package_unmask);
         }
@@ -58,20 +57,20 @@ impl MaskManager {
         }
     }
 
-    /// Helper function to check if a map contains a package according to its atoms.
-    fn map_contains_pkg(map: &HashMap<String, Vec<Atom>>, pkg: &Package) -> bool {
-        map.get(&pkg.qualified_name())
-            .is_some_and(|atoms| atoms.iter().any(|atom| atom.matches(pkg)))
+    /// Helper function to check if the given `map` contains a package according to its atoms.
+    fn map_contains_pkg(map: &HashMap<Box<str>, Vec<Atom>>, pkg: &Package) -> bool {
+        map.get(&*pkg.qualified_name())
+            .is_some_and(|atoms| atoms.iter().any(|atom| pkg.matches_atom(atom)))
     }
 
     /// Helper function to build a map from qualified atom names to [`Atom`]
     /// from a [`LineBasedFile`].
-    fn map_from_linefile(linefile: LineBasedFile) -> Result<HashMap<String, Vec<Atom>>> {
+    fn map_from_linefile(linefile: LineBasedFile) -> Result<HashMap<Box<str>, Vec<Atom>>> {
         let mut map = HashMap::new();
         for atom in linefile.into_iter().map(|line| Atom::new(&line)) {
             let atom = atom?;
-            map.entry(atom.qualified_name())
-                .or_insert_with(Vec::new)
+            map.entry(atom.qualified_name().into())
+                .or_insert_with(|| Vec::with_capacity(1))
                 .push(atom);
         }
         Ok(map)
@@ -81,55 +80,59 @@ impl MaskManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::package::cpv::CPV;
     use crate::package::version::PackageVersion;
 
     #[test]
     fn test_is_masked() {
         let mask_lines = LineBasedFile::from_iter(["dev-lang/rust", "app-editors/vim"]);
-        let unmask_lines = LineBasedFile::from_iter(["=dev-lang/rust-1.50"]);
-        let repos = Vec::new();
-        let manager = MaskManager::new(
-            &mut repos.iter(),
-            &Profile::default(),
-            mask_lines,
-            unmask_lines,
-        )
-        .unwrap();
+        let unmask_lines = LineBasedFile::from_iter(["=dev-lang/rust-1.50*"]);
+        let repo_set = RepoSet::default();
+        let manager =
+            MaskManager::new(&repo_set, &Profile::default(), mask_lines, unmask_lines).unwrap();
 
-        let pkg1 = Package::new(
-            "dev-lang",
-            "rust",
-            PackageVersion::new("1.50", None, Some("2")).unwrap(),
-            "gentoo",
-        )
-        .unwrap();
+        let pkg1 = Package {
+            cpv: CPV::new(
+                "dev-lang",
+                "rust",
+                PackageVersion::new("1.50", None, Some("2")).unwrap(),
+            )
+            .unwrap(),
+            ..Default::default()
+        };
         assert!(!manager.is_masked(&pkg1), "{pkg1} should not be masked");
 
-        let pkg2 = Package::new(
-            "dev-lang",
-            "rust",
-            PackageVersion::new("1.60", None, Some("1")).unwrap(),
-            "gentoo",
-        )
-        .unwrap();
+        let pkg2 = Package {
+            cpv: CPV::new(
+                "dev-lang",
+                "rust",
+                PackageVersion::new("1.60", None, Some("1")).unwrap(),
+            )
+            .unwrap(),
+            ..Default::default()
+        };
         assert!(manager.is_masked(&pkg2), "{pkg2} should be masked");
 
-        let pkg3 = Package::new(
-            "app-editors",
-            "vim",
-            PackageVersion::new("8.2", None, None).unwrap(),
-            "gentoo",
-        )
-        .unwrap();
+        let pkg3 = Package {
+            cpv: CPV::new(
+                "app-editors",
+                "vim",
+                PackageVersion::new("8.2", None, None).unwrap(),
+            )
+            .unwrap(),
+            ..Default::default()
+        };
         assert!(manager.is_masked(&pkg3), "{pkg3} should be masked");
 
-        let pkg4 = Package::new(
-            "app-editors",
-            "nano",
-            PackageVersion::new("5.0", None, None).unwrap(),
-            "gentoo",
-        )
-        .unwrap();
+        let pkg4 = Package {
+            cpv: CPV::new(
+                "app-editors",
+                "nano",
+                PackageVersion::new("5.0", None, None).unwrap(),
+            )
+            .unwrap(),
+            ..Default::default()
+        };
         assert!(!manager.is_masked(&pkg4), "{pkg4} should not be masked");
     }
 }
