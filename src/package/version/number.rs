@@ -9,7 +9,7 @@ use std::{fmt, hash};
 #[derive(Serialize, Deserialize, Clone, Eq)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct VersionNumber {
-    components: Vec<NumberComponent>,
+    components: Box<[NumberComponent]>,
     letter: Option<char>,
 }
 
@@ -207,11 +207,12 @@ mod tests {
         assert_eq!(
             VersionNumber::from_str("1.2.3a").unwrap(),
             VersionNumber {
-                components: vec![
+                components: [
                     NumberComponent::Numeric("1".into()),
                     NumberComponent::Numeric("2".into()),
                     NumberComponent::Numeric("3".into()),
-                ],
+                ]
+                .into(),
                 letter: Some('a'),
             }
         );
@@ -219,11 +220,12 @@ mod tests {
         assert_eq!(
             VersionNumber::from_str("2.0.1").unwrap(),
             VersionNumber {
-                components: vec![
+                components: [
                     NumberComponent::Numeric("2".into()),
                     NumberComponent::Numeric("0".into()),
                     NumberComponent::Numeric("1".into()),
-                ],
+                ]
+                .into(),
                 letter: None,
             }
         );
@@ -231,11 +233,12 @@ mod tests {
         assert_eq!(
             VersionNumber::from_str("1.2.03").unwrap(),
             VersionNumber {
-                components: vec![
+                components: [
                     NumberComponent::Numeric("1".into()),
                     NumberComponent::Numeric("2".into()),
                     NumberComponent::Alphabetic("03".into()),
-                ],
+                ]
+                .into(),
                 letter: None,
             }
         );
@@ -243,7 +246,7 @@ mod tests {
         assert_eq!(
             VersionNumber::from_str("20251122").unwrap(),
             VersionNumber {
-                components: vec![NumberComponent::Numeric("20251122".into()),],
+                components: [NumberComponent::Numeric("20251122".into())].into(),
                 letter: None,
             }
         );

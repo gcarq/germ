@@ -10,7 +10,7 @@ const SUFFIX_PREFIXES: [&str; 5] = ["alpha", "beta", "pre", "rc", "p"];
 /// For example, `"_rc1_p20"`.
 #[derive(Serialize, Deserialize, Clone, Eq, Default)]
 #[cfg_attr(test, derive(Debug))]
-pub struct VersionSuffixes(Vec<VersionSuffix>);
+pub struct VersionSuffixes(Box<[VersionSuffix]>);
 
 impl FromStr for VersionSuffixes {
     type Err = anyhow::Error;
@@ -225,23 +225,25 @@ mod tests {
 
     #[test]
     fn test_version_suffixes_from_str() {
-        let test_cases = vec![
-            ("", vec![]),
-            ("_alpha", vec![VersionSuffix::Alpha(None)]),
+        let test_cases = [
+            ("", [].into()),
+            ("_alpha", [VersionSuffix::Alpha(None)].into()),
             (
                 "_alpha1_beta2",
-                vec![
+                [
                     VersionSuffix::Alpha(Some("1".into())),
                     VersionSuffix::Beta(Some("2".into())),
-                ],
+                ]
+                .into(),
             ),
             (
                 "pre_rc_p20230101",
-                vec![
+                [
                     VersionSuffix::Pre(None),
                     VersionSuffix::Rc(None),
                     VersionSuffix::Patch(Some("20230101".into())),
-                ],
+                ]
+                .into(),
             ),
         ];
         for (input, expected) in test_cases {
