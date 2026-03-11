@@ -14,16 +14,12 @@ pub struct LineBasedFile {
 }
 
 impl LineBasedFile {
-    pub fn iter(&self) -> impl Iterator<Item = &String> {
-        self.lines.iter()
+    pub fn contains(&self, line: &str) -> bool {
+        self.lines.iter().any(|l| l == line)
     }
 
     pub fn into_iter(self) -> impl Iterator<Item = String> {
         self.lines.into_iter()
-    }
-
-    pub fn contains(&self, line: &str) -> bool {
-        self.iter().any(|l| l == line)
     }
 
     pub fn into_inner(self) -> Vec<String> {

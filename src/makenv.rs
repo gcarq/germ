@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
 /// Regex to capture variable references for expansion.
@@ -33,17 +33,19 @@ const INCREMENTAL_VARIABLES: [&str; 14] = [
 
 /// Holds all environment variables defined in a make.conf or make.defaults file.
 #[derive(Default, Clone)]
-pub struct MakeEnv {
-    vars: HashMap<String, EnvValue>,
+pub struct MakeEnv(HashMap<String, EnvValue>);
+
+impl Deref for MakeEnv {
+    type Target = HashMap<String, EnvValue>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-impl MakeEnv {
-    pub fn get(&self, key: &str) -> Option<&EnvValue> {
-        self.vars.get(key)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &EnvValue)> {
-        self.vars.iter()
+impl DerefMut for MakeEnv {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -74,29 +76,26 @@ impl FileFromPath for MakeEnv {
             vars[i].1 = vars[i].1.expand(&vars[..i]);
         }
 
-        Ok(Self {
-            vars: vars.into_iter().collect(),
-        })
+        Ok(Self(vars.into_iter().collect()))
     }
 }
 
 impl Inherit for MakeEnv {
     fn inherit_from(&mut self, parent: &MakeEnv) {
         let parent_ctx = parent
-            .vars
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect::<Vec<_>>();
-        for (key, parent_value) in &parent.vars {
+        for (key, parent_value) in parent.iter() {
             // If the variable exists, expand it with the parent's context and take care of
             // incremental variables, otherwise just insert it.
-            match self.vars.get_mut(key) {
+            match self.get_mut(key) {
                 Some(self_value) => {
                     *self_value = self_value.expand(&parent_ctx);
                     self_value.inherit_from(parent_value);
                 }
                 None => {
-                    self.vars.insert(key.clone(), parent_value.clone());
+                    self.insert(key.clone(), parent_value.clone());
                 }
             }
         }
