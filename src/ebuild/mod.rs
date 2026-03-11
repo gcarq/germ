@@ -21,7 +21,7 @@ static PMS_EAPI_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 /// An ebuild is associated with a package and contains the metadata and instructions
 /// how to build it. See PMS 6 and 7.
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Ebuild<'a> {
     pub path: PathBuf,
     pub eapi: Eapi,

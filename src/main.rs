@@ -1,11 +1,11 @@
 use crate::conf::PortageConf;
 use crate::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
-use crate::deps::Atom;
 use crate::makenv::MakeEnv;
 use crate::repository::set::RepoSet;
 use crate::vdb::Vdb;
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
+use deps::atom::Atom;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::error;
 use makenv::EnvValue;

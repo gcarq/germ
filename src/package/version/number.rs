@@ -6,8 +6,8 @@ use std::str::FromStr;
 use std::{fmt, hash};
 
 /// Represents the base version number as individual components and an optional letter suffix.
-#[derive(Serialize, Deserialize, Clone, Eq, Debug)]
-#[cfg_attr(test, derive(Default))]
+#[derive(Serialize, Deserialize, Clone, Eq)]
+#[cfg_attr(test, derive(Default, Debug))]
 pub struct VersionNumber {
     components: Vec<NumberComponent>,
     letter: Option<char>,
@@ -125,7 +125,8 @@ impl fmt::Display for VersionNumber {
 /// E.g., in "1.2.03a", "1" and "2" are Numeric, "03" is Alphabetic, and "a" is handled separately
 /// and not part of this enum.
 /// See PMS 3.2 and 3.3 for more details.
-#[derive(Serialize, Deserialize, Clone, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Eq)]
+#[cfg_attr(test, derive(Debug))]
 enum NumberComponent {
     Numeric(Box<str>),
     Alphabetic(Box<str>),

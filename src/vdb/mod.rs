@@ -1,6 +1,6 @@
 pub mod package;
 
-use crate::deps::Atom;
+use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
 use crate::package::version::PackageVersion;
 use crate::regex::PV_REV;

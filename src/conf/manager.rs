@@ -1,4 +1,4 @@
-use crate::deps::Atom;
+use crate::deps::atom::Atom;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
 use crate::profile::Profile;

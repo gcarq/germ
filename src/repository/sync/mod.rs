@@ -6,7 +6,7 @@ mod git;
 use crate::repository::sync::git::GitSyncHandler;
 use anyhow::{Context, Result, anyhow};
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt;
 use std::path::PathBuf;
 
 enum SyncType {
@@ -82,7 +82,7 @@ pub fn build_sync_handler(
 
 /// Trait for handling repository synchronization.
 /// This trait can be implemented for different synchronization mechanisms such as git, rsync, etc.
-pub trait SyncHandler: Debug {
+pub trait SyncHandler: fmt::Debug {
     /// Creates a new instance of the `SyncHandler` based on the provided INI `properties`
     /// for this repository coming from `repos.conf`.
     fn new(properties: &HashMap<String, String>) -> Result<Self>
@@ -135,7 +135,7 @@ mod tests {
         let handler = build_sync_handler(&properties)
             .expect("failed to build sync handler")
             .expect("sync handler should be created");
-        assert_eq!(handler.is_initialized(), false);
+        assert!(!handler.is_initialized());
     }
 
     #[test]

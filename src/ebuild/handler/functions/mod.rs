@@ -105,7 +105,7 @@ mod tests {
         };
         let handler = EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default());
         for (func, response) in test_data {
-            assert_eq!(handler.handle_request(func).unwrap(), response,)
+            assert_eq!(handler.handle_request(func).unwrap(), response);
         }
     }
 }

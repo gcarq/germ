@@ -3,7 +3,7 @@ pub mod metadata;
 pub mod slot;
 pub mod version;
 
-use crate::deps::Atom;
+use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
 use metadata::PackageMetadata;
 use serde::{Deserialize, Serialize};
@@ -11,8 +11,8 @@ use std::fmt;
 
 /// Represents a package within a [`Repository`] with its category, name, version and additional
 /// metadata required to install it.
-#[derive(Serialize, Deserialize, Debug)]
-#[cfg_attr(test, derive(Default))]
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default, Debug))]
 pub struct Package {
     pub cpv: CPV,
     pub repo: String,

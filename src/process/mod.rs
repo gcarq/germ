@@ -118,7 +118,7 @@ mod tests {
         fn from_bytes(bytes: &[u8]) -> Result<Self> {
             let s = String::from_utf8(bytes.to_owned())
                 .with_context(|| "invalid UTF-8 in child message")?
-                .to_string();
+                .clone();
             Ok(Self(s))
         }
     }

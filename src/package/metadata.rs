@@ -1,3 +1,6 @@
+use crate::deps::UseFlag;
+use crate::deps::atom::Atom;
+use crate::deps::expr::{DepExpression, ExpressionItem};
 use crate::eapi::Eapi;
 use crate::package::slot::PackageSlot;
 use crate::repository::eclass::Eclass;
@@ -9,7 +12,8 @@ use std::str::FromStr;
 
 /// Holds all metadata of a [`Package`].
 /// TODO: parse eclasses
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default, Debug)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
+#[cfg_attr(test, derive(Default, Debug))]
 pub struct PackageMetadata {
     pub eapi: Eapi,
     pub description: String,
@@ -18,16 +22,16 @@ pub struct PackageMetadata {
     pub license: Vec<String>,
     pub keywords: Vec<String>,
     pub inherit: Vec<String>,
-    pub restrict: String,
+    pub restrict: DepExpression<UseFlag>,
     pub defined_phases: Vec<String>,
     pub isue: Vec<String>,
-    pub required_use: String,
+    pub required_use: DepExpression<UseFlag>,
     pub slot: PackageSlot,
-    pub depend: String,
-    pub bdepend: String,
-    pub idepend: String,
-    pub pdepend: String,
-    pub rdepend: String,
+    pub depend: DepExpression<Atom>,
+    pub bdepend: DepExpression<Atom>,
+    pub idepend: DepExpression<Atom>,
+    pub pdepend: DepExpression<Atom>,
+    pub rdepend: DepExpression<Atom>,
     pub eclasses: Vec<Eclass>,
     pub md5sum: String,
 }
@@ -46,34 +50,39 @@ impl PackageMetadata {
                 .get("DESCRIPTION")
                 .ok_or_else(|| anyhow!("DESCRIPTION not set"))?
                 .to_string(),
-            homepage: Self::sanitize_value(&map, "HOMEPAGE")?,
-            src_uri: Self::sanitize_value(&map, "SRC_URI")?,
-            license: Self::sanitize_value(&map, "LICENSE")?,
-            keywords: Self::sanitize_value(&map, "KEYWORDS")?,
-            inherit: Self::sanitize_value(&map, "INHERIT")?,
+            homepage: Self::parse_values(&map, "HOMEPAGE")?,
+            src_uri: Self::parse_values(&map, "SRC_URI")?,
+            license: Self::parse_values(&map, "LICENSE")?,
+            keywords: Self::parse_values(&map, "KEYWORDS")?,
+            inherit: Self::parse_values(&map, "INHERIT")?,
             eclasses: Vec::new(), // TODO: parse eclasses
-            restrict: map
-                .get("RESTRICT")
-                .ok_or_else(|| anyhow!("RESTRICT not set"))?
-                .to_string(),
-            defined_phases: Self::sanitize_value(&map, "DEFINED_PHASES")?,
-            isue: Self::sanitize_value(&map, "IUSE")?,
-            required_use: Self::sanitize_value(&map, "REQUIRED_USE")?.join(" "),
+            restrict: Self::parse_expression("RESTRICT", &map)?,
+            defined_phases: Self::parse_values(&map, "DEFINED_PHASES")?,
+            isue: Self::parse_values(&map, "IUSE")?,
+            required_use: Self::parse_expression("REQUIRED_USE", &map)?,
             slot: map
                 .get("SLOT")
                 .map(|s| PackageSlot::from_str(s))
                 .ok_or_else(|| anyhow!("SLOT not set"))??,
-            depend: Self::sanitize_value(&map, "DEPEND")?.join(" "),
-            bdepend: Self::sanitize_value(&map, "BDEPEND")?.join(" "),
-            idepend: Self::sanitize_value(&map, "IDEPEND")?.join(" "),
-            pdepend: Self::sanitize_value(&map, "PDEPEND")?.join(" "),
-            rdepend: Self::sanitize_value(&map, "RDEPEND")?.join(" "),
+            depend: Self::parse_expression("DEPEND", &map)?,
+            bdepend: Self::parse_expression("BDEPEND", &map)?,
+            idepend: Self::parse_expression("IDEPEND", &map)?,
+            pdepend: Self::parse_expression("PDEPEND", &map)?,
+            rdepend: Self::parse_expression("RDEPEND", &map)?,
             md5sum,
         };
         Ok(metadata)
     }
 
-    fn sanitize_value(map: &HashMap<&str, &str>, key: &str) -> Result<Vec<String>> {
+    fn parse_expression<T>(key: &str, map: &HashMap<&str, &str>) -> Result<DepExpression<T>>
+    where
+        T: ExpressionItem,
+    {
+        let value = map.get(key).ok_or_else(|| anyhow!("{key} is not set"))?;
+        DepExpression::parse(value)
+    }
+
+    fn parse_values(map: &HashMap<&str, &str>, key: &str) -> Result<Vec<String>> {
         let parts = map
             .get(key)
             .ok_or_else(|| anyhow!("{key} is missing"))?
@@ -129,15 +138,16 @@ mod tests {
             "IUSE=examples ipv6",
             "REQUIRED_USE=^^ ( python_single_target_python3_11 )",
             "PDEPEND=",
-            "BDEPEND= \tpython_single_target_python3_11? ( \t dev-python/setuptools[python_targets_python3_11(-)] \t )",
+            "BDEPEND= \tpython_single_target_python3_11? ( \t dev-python/setuptools \t )",
             "EAPI=8",
             "PROPERTIES=",
             "DEFINED_PHASES=",
             "IDEPEND=",
             "INHERIT= bash-completion-r1 eapi9-ver edo linux-info systemd",
-        ].iter()
-            .filter_map(|d| d.split_once('='))
-            .collect::<HashMap<_, _>>();
+        ]
+        .iter()
+        .filter_map(|d| d.split_once('='))
+        .collect::<HashMap<_, _>>();
 
         let metadata = PackageMetadata::from_map(data, String::new());
         assert!(metadata.is_ok(), "metadata should be parsed successfully");
@@ -162,23 +172,23 @@ mod tests {
                 "systemd"
             ]
         );
-        assert_eq!(metadata.restrict, "");
+        assert_eq!(metadata.restrict.to_string(), "");
         assert_eq!(metadata.defined_phases.len(), 0);
         assert_eq!(metadata.isue, vec!["examples", "ipv6"]);
         assert_eq!(
-            metadata.required_use,
+            metadata.required_use.to_string(),
             "^^ ( python_single_target_python3_11 )"
         );
         assert_eq!(metadata.slot, PackageSlot::Eq("0".into()));
-        assert_eq!(metadata.depend, "");
+        assert_eq!(metadata.depend.to_string(), "");
         assert_eq!(
-            metadata.bdepend,
-            "python_single_target_python3_11? ( dev-python/setuptools[python_targets_python3_11(-)] )"
+            metadata.bdepend.to_string(),
+            "python_single_target_python3_11? ( dev-python/setuptools )"
         );
-        assert_eq!(metadata.idepend, "");
-        assert_eq!(metadata.pdepend, "");
+        assert_eq!(metadata.idepend.to_string(), "");
+        assert_eq!(metadata.pdepend.to_string(), "");
         assert_eq!(
-            metadata.rdepend,
+            metadata.rdepend.to_string(),
             "python_single_target_python3_11? ( dev-lang/python:3.11 )"
         );
     }

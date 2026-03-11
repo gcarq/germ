@@ -16,7 +16,8 @@ pub static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{S
 /// TODO: To implement the equals slot operators = and slot=, the package manager will need to
 ///   store the slot/sub-slot pair of the best installed version of the matching package.
 ///   This syntax is only for package manager use and must not be used by ebuilds.
-#[derive(Serialize, Deserialize, Eq, Clone, Default, Debug)]
+#[derive(Serialize, Deserialize, Eq, Clone, Default)]
+#[cfg_attr(test, derive(Debug))]
 pub enum PackageSlot {
     // `:=` - Any slot is acceptable
     #[default]

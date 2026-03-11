@@ -51,7 +51,8 @@ impl fmt::Display for ChildMessage {
 /// The response can be either `Ok` or `Err`, and may optionally include a message.
 /// `Ok` will be interpreted as a successful execution (return 0),
 /// while `Err` indicates a failure (return 1).
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum ParentMessage {
     Ok(Option<String>),
     Err(Option<String>),

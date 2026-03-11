@@ -1,4 +1,4 @@
-use crate::deps::Atom;
+use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
 use crate::package::slot::PackageSlot;
 use anyhow::Result;

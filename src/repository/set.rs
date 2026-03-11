@@ -1,4 +1,4 @@
-use crate::deps::Atom;
+use crate::deps::atom::Atom;
 use crate::package::Package;
 use crate::repository::Repository;
 use crate::repository::config::{RepoSetConfig, RepositoryConfig};

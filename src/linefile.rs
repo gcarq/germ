@@ -7,7 +7,8 @@ use std::collections::HashSet;
 /// Lines beginning with a hyphen clear the content of previous lines that are equal to the
 /// remainder of that line.
 /// TODO: consider saving relevant file path and line numbers for better error messages.
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone)]
+#[cfg_attr(test, derive(Debug))]
 pub struct LineBasedFile {
     lines: Vec<String>,
 }

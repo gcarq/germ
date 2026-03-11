@@ -4,7 +4,6 @@ use std::path::Path;
 
 /// Information about a deprecated profile.
 /// Contains the recommended profile to upgrade to and an additional info that is shown to the user.
-#[derive(Debug)]
 pub struct DeprecationInfo {
     pub recommended_profile: String,
     pub info: String,

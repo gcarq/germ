@@ -5,7 +5,8 @@ use std::str::FromStr;
 use strum::{Display, EnumString};
 
 /// All supported ebuild functions that can be called from the ebuild process.
-#[derive(EnumString, Display, PartialEq, Debug)]
+#[derive(EnumString, Display, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
 pub enum FuncType {
     // Internal ebuild functions
     #[strum(serialize = "__resolve_eclass")]
@@ -38,6 +39,7 @@ pub enum FuncType {
 
 /// Holds a function call from the ebuild process,
 /// consisting of a `FuncType` and its arguments as `Vec<String>`.
+#[cfg_attr(test, derive(Debug))]
 pub struct FuncCall {
     pub func: FuncType,
     pub args: Vec<String>,

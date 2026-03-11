@@ -14,7 +14,8 @@ use std::sync::LazyLock;
 static ECLASS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][a-zA-Z0-9_.-]*$").unwrap());
 
-#[derive(Default, Debug)]
+#[derive(Default)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Eclasses(BTreeMap<String, Eclass>);
 
 impl Eclasses {
@@ -55,7 +56,8 @@ impl Deref for Eclasses {
 
 /// Represents an eclass defined in PMS chapter 10.
 /// TODO: parse documentation
-#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Eclass {
     pub name: String,
     pub path: PathBuf,

@@ -305,8 +305,7 @@ mod tests {
             let args = args.into_iter().map(String::from).collect::<Vec<_>>();
             assert!(
                 ver_rs(&pkg, &args).is_err(),
-                "Expected error for input args: {:?}",
-                args
+                "Expected error for input args: {args:?}",
             );
         }
     }

@@ -91,7 +91,8 @@ impl RepoSetConfig {
 
 /// Represents the configuration of a single repository.
 /// Properties taken from `repos.conf` take precedence over `layout.conf` where applicable.
-#[derive(Clone, Eq, Debug)]
+#[derive(Clone, Eq)]
+#[cfg_attr(test, derive(Debug))]
 pub struct RepositoryConfig {
     // The path to the repository on the filesystem
     pub location: PathBuf,

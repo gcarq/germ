@@ -1,4 +1,4 @@
-use crate::deps::Atom;
+use crate::deps::atom::Atom;
 use crate::package::Package;
 use crate::package::cpv::CPV;
 use anyhow::{Context, Result, anyhow};
@@ -11,7 +11,8 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
 /// Holds all available packages in a repository, mapping `category/package` to [`Vec<CPV>`].
-#[derive(Default, Debug)]
+#[derive(Default)]
+#[cfg_attr(test, derive(Debug))]
 pub struct AvailablePackageIndex(HashMap<String, Vec<CPV>>);
 
 impl AvailablePackageIndex {
@@ -46,7 +47,8 @@ impl Deref for AvailablePackageIndex {
 
 /// Holds all resolved packages in a repository, mapping the fully qualified name
 /// `category/package-version` to a [`Package`].
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(Debug))]
 pub struct ResolvedPackageIndex(HashMap<String, Package>);
 
 impl ResolvedPackageIndex {

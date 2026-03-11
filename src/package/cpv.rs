@@ -1,4 +1,4 @@
-use crate::deps::Atom;
+use crate::deps::atom::Atom;
 use crate::ebuild::Ebuild;
 use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
 use crate::makenv::MakeEnv;
@@ -17,8 +17,8 @@ use std::path::Path;
 ///
 /// NOTE: `fqn` holds the fully qualified name and is also used in the [`Display`] implementation
 /// for performance reasons, so `category`, `package` and `version` must NOT be changed.
-#[derive(Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Clone, Debug)]
-#[cfg_attr(test, derive(Default))]
+#[derive(Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Clone)]
+#[cfg_attr(test, derive(Default, Debug))]
 pub struct CPV {
     category: Box<str>,
     package: Box<str>,

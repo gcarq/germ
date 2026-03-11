@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 
 /// Represents a profile description as found in profiles.desc file.
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug))]
 pub struct ProfileDescription {
     pub keyword: String,
     pub profile_path: String,

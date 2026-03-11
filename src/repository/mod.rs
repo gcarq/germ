@@ -5,7 +5,7 @@ mod index;
 pub mod set;
 mod sync;
 
-use crate::deps::Atom;
+use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
@@ -35,8 +35,7 @@ static EBUILD_RE: LazyLock<Regex> =
 
 /// Represents a package repository with its location, name, eapi version, categories, packages,
 /// and other metadata. The repository will be synced using a [`SyncHandler`].
-#[derive(Debug)]
-#[cfg_attr(test, derive(Default))]
+#[cfg_attr(test, derive(Default, Debug))]
 pub struct Repository {
     pub location: PathBuf,
     pub name: String,

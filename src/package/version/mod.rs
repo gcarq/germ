@@ -1,4 +1,4 @@
-use crate::deps::{Atom, AtomOperator, AtomVariant};
+use crate::deps::atom::{Atom, AtomOperator, AtomVariant};
 use crate::package::version::suffix::VersionSuffixes;
 use crate::regex::V_REV;
 use anyhow::{Context, Result, anyhow};
@@ -19,8 +19,8 @@ static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_
 ///
 /// This includes the base version components (e.g., `1.2.3a`), any suffixes
 /// (e.g., `_alpha1`, `_p20240101`), and the revision number (e.g., `-r1`).
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-#[cfg_attr(test, derive(Default))]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(test, derive(Default, Debug))]
 pub struct PackageVersion {
     number: VersionNumber,
     suffixes: VersionSuffixes,
