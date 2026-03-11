@@ -24,7 +24,7 @@ pub struct PackageMetadata {
     pub inherit: Vec<String>,
     pub restrict: DepExpression<UseFlag>,
     pub defined_phases: Vec<String>,
-    pub isue: Vec<String>,
+    pub iuse: Vec<String>,
     pub required_use: DepExpression<UseFlag>,
     pub slot: PackageSlot,
     pub depend: DepExpression<Atom>,
@@ -58,7 +58,7 @@ impl PackageMetadata {
             eclasses: Vec::new(), // TODO: parse eclasses
             restrict: Self::parse_expression("RESTRICT", &map)?,
             defined_phases: Self::parse_values(&map, "DEFINED_PHASES")?,
-            isue: Self::parse_values(&map, "IUSE")?,
+            iuse: Self::parse_values(&map, "IUSE")?,
             required_use: Self::parse_expression("REQUIRED_USE", &map)?,
             slot: map
                 .get("SLOT")
@@ -103,7 +103,7 @@ impl fmt::Display for PackageMetadata {
         writeln!(f, "HOMEPAGE={}", self.homepage.join(" "))?;
         writeln!(f, "IDEPEND={}", self.idepend)?;
         writeln!(f, "INHERIT={}", self.inherit.join(" "))?;
-        writeln!(f, "IUSE={}", self.isue.join(" "))?;
+        writeln!(f, "IUSE={}", self.iuse.join(" "))?;
         writeln!(f, "KEYWORDS={}", self.keywords.join(" "))?;
         writeln!(f, "LICENSE={}", self.license.join(" "))?;
         writeln!(f, "PDEPEND={}", self.pdepend)?;
@@ -174,7 +174,7 @@ mod tests {
         );
         assert_eq!(metadata.restrict.to_string(), "");
         assert_eq!(metadata.defined_phases.len(), 0);
-        assert_eq!(metadata.isue, vec!["examples", "ipv6"]);
+        assert_eq!(metadata.iuse, vec!["examples", "ipv6"]);
         assert_eq!(
             metadata.required_use.to_string(),
             "^^ ( python_single_target_python3_11 )"
