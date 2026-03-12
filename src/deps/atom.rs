@@ -1,8 +1,9 @@
+use crate::deps::UseFlag;
 use crate::deps::expr::ExpressionItem;
 use crate::package::slot::PackageSlot;
 use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY, PACKAGE, PV_REV, REPOSITORY, V_REV};
-use anyhow::anyhow;
+use anyhow::{Result, anyhow};
 use constcat::concat;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
@@ -21,16 +22,21 @@ const ATOM_CPV_REV: &str = concat!(CATEGORY, "/", PV_REV);
 const ATOM_SLOT_LOOSE: &str = r"(?:\:(?P<slot>([a-zA-Z0-9_+./*=-]+)))?";
 /// Captures optional repository information in atoms.
 const ATOM_REPOSITORY: &str = concat!(r"(?:\:\:", REPOSITORY, ")?");
+/// Captures optional use flag in atoms, e.g. `=dev-lang/rust-1.70.0[clippy]`.
+const ATOM_USEDEP_LOOSE: &str = r"(\[(?P<use_deps>.*)\])?";
 /// Regex to capture simple atoms with category and package,
 /// optionally version, slot and repository e.g.: `dev-lang/rust-1.70.0`.
 static ATOM_SIMPLE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!(r"^{ATOM_CP}{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}$")).unwrap()
+    Regex::new(&format!(
+        r"^{ATOM_CP}{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}{ATOM_USEDEP_LOOSE}$"
+    ))
+    .unwrap()
 });
 /// Regex to capture atoms with operator, category, package,
 /// version, ... e.g.: `>=dev-lang/rust-1.70`
 static ATOM_OPERATOR_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
-        r"^{ATOM_OPERATOR}{ATOM_CPV_REV}{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}$"
+        r"^{ATOM_OPERATOR}{ATOM_CPV_REV}{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}{ATOM_USEDEP_LOOSE}$"
     ))
     .unwrap()
 });
@@ -38,7 +44,7 @@ static ATOM_OPERATOR_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// e.g.: `=dev-lang/rust-1.70*`
 static ATOM_WILDCARD_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
-        r"^={ATOM_CPV_REV}\*{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}$"
+        r"^={ATOM_CPV_REV}\*{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}{ATOM_USEDEP_LOOSE}$"
     ))
     .unwrap()
 });
@@ -58,7 +64,7 @@ pub enum AtomOperator {
 impl FromStr for AtomOperator {
     type Err = anyhow::Error;
 
-    fn from_str(operator: &str) -> anyhow::Result<Self> {
+    fn from_str(operator: &str) -> Result<Self> {
         let op = match operator {
             "<" => AtomOperator::Less,
             "<=" => AtomOperator::LessEqual,
@@ -111,6 +117,7 @@ pub struct Atom {
     pub version: Option<PackageVersion>,
     pub slot: Option<PackageSlot>,
     pub repo: Option<String>,
+    pub use_deps: Option<Vec<UseFlag>>,
     pub variant: AtomVariant,
 }
 
@@ -118,7 +125,7 @@ impl Atom {
     /// Creates an [`Atom`] from the given `atom` string.
     ///
     /// Returns `Err` if the string is not a valid atom.
-    pub fn new(atom: &str) -> anyhow::Result<Self> {
+    pub fn new(atom: &str) -> Result<Self> {
         if let Some(caps) = ATOM_OPERATOR_RE.captures(atom) {
             return Ok(
                 Self::from_regex_capture(&caps, AtomVariant::VersionOperator)?.with_operator(
@@ -152,7 +159,7 @@ impl Atom {
     ///
     /// It assumes the correct regex has been used.
     /// NOTE: this does not set the operator field, see [`Self::with_operator`].
-    fn from_regex_capture(captures: &Captures, variant: AtomVariant) -> anyhow::Result<Self> {
+    fn from_regex_capture(captures: &Captures, variant: AtomVariant) -> Result<Self> {
         let version = match Self::parse_version(captures)? {
             Some(_) if variant == AtomVariant::Simple => Err(anyhow!(
                 "atom must have an operator or be in format <category>/<package>"
@@ -178,6 +185,15 @@ impl Atom {
                 .map(|m| PackageSlot::from_str(m.as_str()))
                 .transpose()?,
             repo: captures.name("repo").map(|m| m.as_str().to_owned()),
+            use_deps: captures
+                .name("use_deps")
+                .map(|m| {
+                    m.as_str()
+                        .split(',')
+                        .map(UseFlag::parse)
+                        .collect::<Result<Vec<_>>>()
+                })
+                .transpose()?,
             variant,
         })
     }
@@ -190,7 +206,7 @@ impl Atom {
     /// Parses the version including suffixes and revision from the given regex `captures`.
     ///
     /// Return `Ok(None)` if no version can be matched.
-    fn parse_version(captures: &Captures) -> anyhow::Result<Option<PackageVersion>> {
+    fn parse_version(captures: &Captures) -> Result<Option<PackageVersion>> {
         let version = match captures.name("version") {
             Some(m) => m.as_str(),
             None => return Ok(None),
@@ -207,7 +223,7 @@ impl ExpressionItem for Atom {}
 impl FromStr for Atom {
     type Err = anyhow::Error;
 
-    fn from_str(atom: &str) -> anyhow::Result<Self> {
+    fn from_str(atom: &str) -> Result<Self> {
         Atom::new(atom)
     }
 }
@@ -236,6 +252,16 @@ impl fmt::Display for Atom {
         if let Some(repo) = &self.repo {
             f.write_str("::")?;
             f.write_str(repo)?;
+        }
+        if let Some(use_deps) = &self.use_deps {
+            f.write_char('[')?;
+            for (i, use_dep) in use_deps.iter().enumerate() {
+                if i > 0 {
+                    f.write_str(",")?;
+                }
+                write!(f, "{use_dep}")?;
+            }
+            f.write_char(']')?;
         }
         Ok(())
     }
@@ -284,6 +310,15 @@ mod tests {
                     category: "x11-drivers".into(),
                     package: "nvidia-drivers".into(),
                     slot: Some(PackageSlot::EqSubSlot("0".into(), "390".into())),
+                    ..Default::default()
+                },
+            ),
+            (
+                "sys-libs/glibc[audit,caps(-)]",
+                Atom {
+                    category: "sys-libs".into(),
+                    package: "glibc".into(),
+                    use_deps: Some(vec![UseFlag("audit".into()), UseFlag("caps(-)".into())]),
                     ..Default::default()
                 },
             ),
@@ -365,6 +400,20 @@ mod tests {
                     slot: Some(PackageSlot::EqSubSlot("1.70.0".into(), "1".into())),
                     repo: Some("gentoo".into()),
                     variant: AtomVariant::VersionOperator,
+                    ..Default::default()
+                },
+            ),
+            (
+                ">=sys-libs/glibc-2.41-r10:2.2::gentoo[cet,clang]",
+                Atom {
+                    operator: Some(AtomOperator::GreaterEqual),
+                    category: "sys-libs".into(),
+                    package: "glibc".into(),
+                    version: PackageVersion::new("2.41", None, Some("10")).ok(),
+                    slot: Some(PackageSlot::Eq("2.2".into())),
+                    repo: Some("gentoo".into()),
+                    variant: AtomVariant::VersionOperator,
+                    use_deps: Some(vec![UseFlag("cet".into()), UseFlag("clang".into())]),
                 },
             ),
         ];
@@ -412,6 +461,19 @@ mod tests {
                     variant: AtomVariant::VersionWildcard,
                     slot: Some(PackageSlot::EqSubSlot("6".into(), "6.23".into())),
                     repo: Some("gentoo".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "=app-arch/7zip-26*[rar]",
+                Atom {
+                    operator: Some(AtomOperator::Equal),
+                    category: "app-arch".into(),
+                    package: "7zip".into(),
+                    version: PackageVersion::new("26", None, None).ok(),
+                    variant: AtomVariant::VersionWildcard,
+                    use_deps: Some(vec![UseFlag("rar".into())]),
+                    ..Default::default()
                 },
             ),
         ];
@@ -437,6 +499,8 @@ mod tests {
             "dev-lang/rust*",
             "=dev-lang/rust*",
             "=dev-lang/rust-1.*",
+            "dev-lang/rust[]",
+            "dev-lang/rust[,]",
         ];
 
         for atom_str in invalid_atoms {
@@ -487,8 +551,10 @@ mod tests {
                     slot: Some(PackageSlot::Eq("1.70".into())),
                     repo: Some("gentoo".into()),
                     variant: AtomVariant::VersionOperator,
+                    use_deps: Some(vec![UseFlag("clippy".into())]),
+                    ..Default::default()
                 },
-                ">=dev-lang/rust-1.70.0_beta_p11-r2:1.70::gentoo",
+                ">=dev-lang/rust-1.70.0_beta_p11-r2:1.70::gentoo[clippy]",
             ),
             (
                 Atom {

@@ -17,6 +17,9 @@ use std::path::Path;
 ///
 /// NOTE: `fqn` holds the fully qualified name and is also used in the [`Display`] implementation
 /// for performance reasons, so `category`, `package` and `version` must NOT be changed.
+///
+/// TODO: consider adding a `new_unchecked` constructor, that also passes the `fqn` that doesn't
+///  validate for performance reasons
 #[derive(Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Clone)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct CPV {

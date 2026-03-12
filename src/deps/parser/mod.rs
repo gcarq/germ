@@ -5,7 +5,7 @@ use crate::deps::UseFlag;
 use crate::deps::expr::{DepExpression, ExpressionItem};
 use crate::deps::parser::ast::Expression;
 use crate::deps::parser::ast::Expression::{Forbidden, Group, Item, Negation};
-use crate::deps::parser::ast::Grouped::{AnyOff, AtMostOneOff, Condition, OneOff};
+use crate::deps::parser::ast::Grouped::{AllOff, AnyOff, AtMostOneOff, Condition, OneOff};
 use crate::deps::parser::lexer::{Lexer, Token};
 use anyhow::{Result, anyhow};
 use std::str::FromStr;
@@ -41,10 +41,21 @@ impl<'a> DepExpressionParser<'a> {
         T: ExpressionItem,
     {
         let expr = match token {
-            Token::OneOff => Group(OneOff(self.parse_grouped()?)),
-            Token::AnyOff => Group(AnyOff(self.parse_grouped()?)),
-            Token::AtMostOneOff => Group(AtMostOneOff(self.parse_grouped()?)),
+            Token::OneOff => {
+                self.expect_next(Token::LParen)?;
+                Group(OneOff(self.parse_grouped()?))
+            }
+            Token::LParen => Group(AllOff(self.parse_grouped()?)),
+            Token::AnyOff => {
+                self.expect_next(Token::LParen)?;
+                Group(AnyOff(self.parse_grouped()?))
+            }
+            Token::AtMostOneOff => {
+                self.expect_next(Token::LParen)?;
+                Group(AtMostOneOff(self.parse_grouped()?))
+            }
             Token::Condition(cond) => {
+                self.expect_next(Token::LParen)?;
                 Group(Condition(UseFlag::from_str(&cond)?, self.parse_grouped()?))
             }
             Token::Bang => {
@@ -56,9 +67,7 @@ impl<'a> DepExpressionParser<'a> {
                 let t = self.lexer.next().ok_or_else(|| anyhow!("unexpected EOF"))?;
                 Forbidden(Box::new(self.parse_expression(t)?))
             }
-            Token::LParen | Token::RParen | Token::Illegal(_) => {
-                Err(anyhow!("unexpected token {token}"))?
-            }
+            Token::RParen | Token::Illegal(_) => Err(anyhow!("unexpected token {token}"))?,
         };
         Ok(expr)
     }
@@ -68,10 +77,6 @@ impl<'a> DepExpressionParser<'a> {
     where
         T: ExpressionItem,
     {
-        let token = self.lexer.next().ok_or_else(|| anyhow!("unexpected EOF"))?;
-        if token != Token::LParen {
-            return Err(anyhow!("expected '(', got {token}"));
-        }
         let mut expressions = Vec::new();
         loop {
             match self.lexer.next() {
@@ -82,12 +87,133 @@ impl<'a> DepExpressionParser<'a> {
         }
         Ok(expressions.into())
     }
+
+    /// Expects the next token to be given `token`, otherwise returns `Err`.
+    fn expect_next(&mut self, token: Token) -> Result<()> {
+        match self.lexer.next().ok_or_else(|| anyhow!("unexpected EOF"))? {
+            next if next == token => Ok(()),
+            next => Err(anyhow!("expected '(', got {next}")),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::deps::atom::Atom;
+
+    #[test]
+    fn test_parser_group_one_off() {
+        let input = "^^ ( sys-libs/db app-misc/foo )";
+        let expr = DepExpression::parse(input).unwrap();
+        assert_eq!(
+            expr.as_slice(),
+            &[Group(OneOff(Box::new([
+                Item(Atom::parse("sys-libs/db").unwrap()),
+                Item(Atom::parse("app-misc/foo").unwrap()),
+            ])))]
+        );
+        assert_eq!(expr.to_string(), "^^ ( sys-libs/db app-misc/foo )");
+    }
+
+    #[test]
+    fn test_parser_group_all_off() {
+        let input = "( sys-libs/db app-misc/foo )";
+        let expr = DepExpression::parse(input).unwrap();
+        assert_eq!(
+            expr.as_slice(),
+            &[Group(AllOff(Box::new([
+                Item(Atom::parse("sys-libs/db").unwrap()),
+                Item(Atom::parse("app-misc/foo").unwrap()),
+            ])))]
+        );
+        assert_eq!(expr.to_string(), "( sys-libs/db app-misc/foo )");
+    }
+
+    #[test]
+    fn test_parser_group_any_off() {
+        let input = "|| ( sys-libs/db app-misc/foo )";
+        let expr = DepExpression::parse(input).unwrap();
+        assert_eq!(
+            expr.as_slice(),
+            &[Group(AnyOff(Box::new([
+                Item(Atom::parse("sys-libs/db").unwrap()),
+                Item(Atom::parse("app-misc/foo").unwrap()),
+            ])))]
+        );
+        assert_eq!(expr.to_string(), "|| ( sys-libs/db app-misc/foo )");
+    }
+
+    #[test]
+    fn test_parser_group_at_most_one_off() {
+        let input = "?? ( sys-libs/db app-misc/foo )";
+        let expr = DepExpression::parse(input).unwrap();
+        assert_eq!(
+            expr.as_slice(),
+            &[Group(AtMostOneOff(Box::new([
+                Item(Atom::parse("sys-libs/db").unwrap()),
+                Item(Atom::parse("app-misc/foo").unwrap()),
+            ])))]
+        );
+        assert_eq!(expr.to_string(), "?? ( sys-libs/db app-misc/foo )");
+    }
+
+    #[test]
+    fn test_parser_group_condition() {
+        let input = "bar? ( sys-libs/db app-misc/foo )";
+        let expr = DepExpression::parse(input).unwrap();
+        assert_eq!(
+            expr.as_slice(),
+            &[Group(Condition(
+                UseFlag::parse("bar").unwrap(),
+                Box::new([
+                    Item(Atom::parse("sys-libs/db").unwrap()),
+                    Item(Atom::parse("app-misc/foo").unwrap()),
+                ]),
+            ))]
+        );
+        assert_eq!(expr.to_string(), "bar? ( sys-libs/db app-misc/foo )");
+    }
+
+    #[test]
+    fn test_parser_negation() {
+        let input = "!sys-libs/db";
+        let expr = DepExpression::parse(input).unwrap();
+        assert_eq!(
+            expr.as_slice(),
+            &[Negation(Box::new(Item(
+                Atom::parse("sys-libs/db").unwrap()
+            )))]
+        );
+        assert_eq!(expr.to_string(), "!sys-libs/db");
+    }
+
+    #[test]
+    fn test_parser_forbidden() {
+        let input = "!!sys-libs/db";
+        let expr = DepExpression::parse(input).unwrap();
+        assert_eq!(
+            expr.as_slice(),
+            &[Forbidden(Box::new(Item(
+                Atom::parse("sys-libs/db").unwrap()
+            )))]
+        );
+        assert_eq!(expr.to_string(), "!!sys-libs/db");
+    }
+
+    #[test]
+    fn test_parser_item() {
+        let input = "media-libs/mesa[gbm(+)] dev-lang/R";
+        let expr = DepExpression::parse(input).unwrap();
+        assert_eq!(
+            expr.as_slice(),
+            &[
+                Item(Atom::parse("media-libs/mesa[gbm(+)]").unwrap()),
+                Item(Atom::parse("dev-lang/R").unwrap()),
+            ]
+        );
+        assert_eq!(expr.to_string(), "media-libs/mesa[gbm(+)] dev-lang/R");
+    }
 
     #[test]
     fn test_parser_atoms() {
@@ -134,9 +260,7 @@ mod tests {
     fn test_parser_use_flags() {
         let input = r"
             || ( wayland X )
-            ^^ ( gnutls openssl )
-            ?? ( mysql mariadb )
-            ssh? ( || ( rdp vnc ) )
+            ssh? ( || ( rdp ( vnc X ) ) )
         ";
         let expr = DepExpression::parse(input).unwrap();
         assert_eq!(
@@ -146,26 +270,21 @@ mod tests {
                     Item(UseFlag::parse("wayland").unwrap()),
                     Item(UseFlag::parse("X").unwrap()),
                 ]))),
-                Group(OneOff(Box::new([
-                    Item(UseFlag::parse("gnutls").unwrap()),
-                    Item(UseFlag::parse("openssl").unwrap()),
-                ]))),
-                Group(AtMostOneOff(Box::new([
-                    Item(UseFlag::parse("mysql").unwrap()),
-                    Item(UseFlag::parse("mariadb").unwrap()),
-                ]))),
                 Group(Condition(
                     UseFlag::parse("ssh").unwrap(),
                     Box::new([Group(AnyOff(Box::new([
                         Item(UseFlag::parse("rdp").unwrap()),
-                        Item(UseFlag::parse("vnc").unwrap()),
+                        Group(AllOff(Box::new([
+                            Item(UseFlag::parse("vnc").unwrap()),
+                            Item(UseFlag::parse("X").unwrap()),
+                        ])))
                     ])))]),
                 )),
             ]
         );
         assert_eq!(
             expr.to_string(),
-            "|| ( wayland X ) ^^ ( gnutls openssl ) ?? ( mysql mariadb ) ssh? ( || ( rdp vnc ) )"
+            "|| ( wayland X ) ssh? ( || ( rdp ( vnc X ) ) )"
         );
     }
 
@@ -175,8 +294,8 @@ mod tests {
         let test_data = [
             ("bar? sys-libs/db", "expected '(', got sys-libs/db"),
             ("|| sys-libs/db", "expected '(', got sys-libs/db"),
-            ("sys-libs/db)", "unexpected token )"),
-            ("(sys-libs/db", "unexpected token ("),
+            ("sys-libs/db)", "'sys-libs/db)' is not a valid package atom"),
+            ("(sys-libs/db", "unexpected EOF while parsing group"),
             ("bar? ( sys-libs/db", "unexpected EOF while parsing group"),
             ("bar? sys-libs/db )", "expected '(', got sys-libs/db"),
         ];

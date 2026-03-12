@@ -75,35 +75,30 @@ impl<'a> Lexer<'a> {
             }
             '(' => Token::LParen,
             ')' => Token::RParen,
-            c if Lexer::is_ident_char(c) => {
-                let mut literal = String::from(c);
-                while let Some(next_char) = self.input.peek() {
-                    if *next_char == '?' {
-                        self.input.next();
-                        return Some(Token::Condition(literal));
-                    }
-                    if !Lexer::is_ident_char(*next_char) {
-                        break;
-                    }
-                    // Safe to unwrap, because we know there is at least one more char
-                    literal.push(self.input.next().unwrap());
-                }
-                Token::Ident(literal)
-            }
+            c if Lexer::is_ident_char(c) => self.consume_identifier(c),
             c => Token::Illegal(c),
         };
         Some(token)
     }
 
+    /// Consumes characters from `self.input` to create either a `Condition` or `Ident`.
+    fn consume_identifier(&mut self, cur_char: char) -> Token {
+        let mut literal = String::from(cur_char);
+        while let Some(char) = self.input.next() {
+            if char == '?' && self.input.peek().is_some_and(|c| c.is_whitespace()) {
+                return Token::Condition(literal);
+            }
+            if !Lexer::is_ident_char(char) {
+                break;
+            }
+            literal.push(char);
+        }
+        Token::Ident(literal)
+    }
+
     /// Checks if the given character is a valid identifier character.
     const fn is_ident_char(char: char) -> bool {
-        !char.is_whitespace()
-            && char != '!'
-            && char != '^'
-            && char != '|'
-            && char != '?'
-            && char != '('
-            && char != ')'
+        !char.is_whitespace() && char != '^' && char != '|'
     }
 
     /// Skips whitespace characters in `self.input`.
@@ -137,6 +132,7 @@ mod tests {
             bar? ( sys-libs/db[baz] )
             || (
                 =sys-libs/db-5*:5
+                dev-lang/python-exec[python_targets_python3_14(-)]
             )
             !foo? ( !app-misc/foo )
             !!<dev-perl/Mail-Box-3
@@ -154,6 +150,7 @@ mod tests {
                 Token::AnyOff,
                 Token::LParen,
                 Token::Ident("=sys-libs/db-5*:5".into()),
+                Token::Ident("dev-lang/python-exec[python_targets_python3_14(-)]".into()),
                 Token::RParen,
                 Token::Bang,
                 Token::Condition("foo".into()),
@@ -173,7 +170,7 @@ mod tests {
             || ( wayland X )
             ^^ ( gnutls openssl )
             ?? ( mysql mariadb )
-            ssh? ( || ( rdp vnc ) )
+            ssh? ( || ( rdp ( vnc X ) ) )
         ";
         let lexer = Lexer::new(input);
         let tokens = lexer.collect::<Vec<_>>();
@@ -200,7 +197,10 @@ mod tests {
                 Token::AnyOff,
                 Token::LParen,
                 Token::Ident("rdp".into()),
+                Token::LParen,
                 Token::Ident("vnc".into()),
+                Token::Ident("X".into()),
+                Token::RParen,
                 Token::RParen,
                 Token::RParen,
             ]

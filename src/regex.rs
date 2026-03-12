@@ -13,7 +13,7 @@ pub const CATEGORY: &str = r"(?<category>[a-zA-Z0-9_][a-zA-Z0-9_+.-]*)";
 /// A package name may contain any of the characters [A-Za-z0-9+_-].
 /// It must not begin with a hyphen or a plus sign, and must not end in a hyphen
 /// followed by anything matching the version syntax
-pub const PACKAGE: &str = r"(?<package>[a-zA-Z0-9_][a-zA-Z0-9_+-]*[a-zA-Z0-9_+])";
+pub const PACKAGE: &str = r"(?<package>[a-zA-Z0-9_]([a-zA-Z0-9_+-]*[a-zA-Z0-9_+])?)";
 
 /// PMS 3.1.3 Slot names
 /// A slot name may contain any of the characters [A-Za-z0-9+_.-].

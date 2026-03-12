@@ -26,14 +26,16 @@ impl<T: ExpressionItem> fmt::Display for Expression<T> {
 }
 
 /// Holds a grouped dependency expressions, which can be one of the following:
-/// - `OneOff`: `^^ ( ... )` - exactly one of the items must be satisfied
-/// - `AnyOff`: `|| ( ... )` - at least one of the items must be satisfied
+/// - `OneOff`:       `^^ ( ... )` - exactly one of the items must be satisfied
+/// - `AllOff`:       `   ( ... )` - all items must be satisfied
+/// - `AnyOff`:       `|| ( ... )` - at least one of the items must be satisfied
 /// - `AtMostOneOff`: `?? ( ... )` - at most one of the items can be satisfied
-/// - `Condition`: `foo? ( ... )` - the items are only relevant if the USE flag `foo` is enabled
+/// - `Condition`:    `foo? ( ... )` - the items are only relevant if the USE flag `foo` is enabled
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Debug))]
 pub enum Grouped<T: ExpressionItem> {
     OneOff(Box<[Expression<T>]>),
+    AllOff(Box<[Expression<T>]>),
     AnyOff(Box<[Expression<T>]>),
     AtMostOneOff(Box<[Expression<T>]>),
     Condition(UseFlag, Box<[Expression<T>]>),
@@ -42,9 +44,10 @@ pub enum Grouped<T: ExpressionItem> {
 impl<T: ExpressionItem> fmt::Display for Grouped<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (prefix, items) = match self {
-            Grouped::AnyOff(items) => ("||", items),
-            Grouped::OneOff(items) => ("^^", items),
-            Grouped::AtMostOneOff(items) => ("??", items),
+            Grouped::OneOff(items) => ("^^ ", items),
+            Grouped::AllOff(items) => ("", items),
+            Grouped::AnyOff(items) => ("|| ", items),
+            Grouped::AtMostOneOff(items) => ("?? ", items),
             Grouped::Condition(use_flag, items) => {
                 f.write_str(use_flag)?;
                 f.write_str("? (")?;
@@ -54,7 +57,7 @@ impl<T: ExpressionItem> fmt::Display for Grouped<T> {
                 return f.write_str(" )");
             }
         };
-        write!(f, "{prefix} (")?;
+        write!(f, "{prefix}(")?;
         for item in items {
             write!(f, " {item}")?;
         }
