@@ -66,10 +66,10 @@ impl RepoSet {
         Ok(pkgs)
     }
 
-    /// Force all repositories to write their indexes and caches to disk.
-    pub fn flush(&self) -> Result<()> {
+    /// Write repository indexes and caches to disk.
+    pub fn flush(&self, force: bool) -> Result<()> {
         for repo in self.repos.values() {
-            repo.write_index()?;
+            repo.write_index(force)?;
         }
         Ok(())
     }

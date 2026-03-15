@@ -6,12 +6,12 @@ pub mod version;
 use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
 use metadata::PackageMetadata;
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 
 /// Represents a package within a [`Repository`] with its category, name, version and additional
 /// metadata required to install it.
-#[derive(Serialize, Deserialize)]
+#[derive(Archive, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct Package {
     pub cpv: CPV,

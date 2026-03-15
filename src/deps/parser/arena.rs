@@ -1,6 +1,6 @@
 use crate::deps::UseFlag;
 use crate::deps::expr::ExpressionItem;
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::ops::Range;
 
@@ -8,7 +8,7 @@ use std::ops::Range;
 ///
 /// To support multiple root expressions, `root` is defined as [`Range`] which holds the
 /// index range in the `children` vector.
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct ExpressionArena<T: ExpressionItem> {
     expressions: Vec<Expression<T>>,
@@ -116,7 +116,7 @@ impl<T: ExpressionItem> fmt::Display for ExpressionArena<T> {
 /// other variants defined in PMS 8.2.
 ///
 /// [`Range`] is used to reference the child expressions in the flat [`Vec`].
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Debug))]
 pub enum Expression<T: ExpressionItem> {
     Item(T),
@@ -134,6 +134,6 @@ pub enum Expression<T: ExpressionItem> {
 
 /// This is a basic wrapper around `u16` that distinguishes between expression ids
 /// and children indices.
-#[derive(Serialize, Deserialize, Copy, Clone, Eq, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct ExpressionId(u16);

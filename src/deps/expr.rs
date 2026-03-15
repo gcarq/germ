@@ -1,7 +1,7 @@
 use crate::deps::parser::ExpressionParser;
 use crate::deps::parser::arena::ExpressionArena;
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
@@ -15,7 +15,7 @@ pub trait ExpressionItem: FromStr<Err = anyhow::Error> + fmt::Display {
 
 /// Holds a dependency expression, which can be evaluated to check if all package requirements
 /// are satisfied.
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct DepExpression<T: ExpressionItem> {
     arena: ExpressionArena<T>,

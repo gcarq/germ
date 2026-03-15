@@ -121,7 +121,7 @@ fn run(args: Args) -> Result<()> {
         None => {}
     }
 
-    repo_set.flush()
+    repo_set.flush(false)
 }
 
 /// Prints information about the current portage `conf`.

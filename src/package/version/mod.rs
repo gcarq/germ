@@ -4,7 +4,7 @@ use crate::regex::V_REV;
 use anyhow::{Context, Result, anyhow};
 use number::VersionNumber;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -19,7 +19,7 @@ static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_
 ///
 /// This includes the base version components (e.g., `1.2.3a`), any suffixes
 /// (e.g., `_alpha1`, `_p20240101`), and the revision number (e.g., `-r1`).
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct PackageVersion {
     number: VersionNumber,

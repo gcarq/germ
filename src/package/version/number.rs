@@ -1,12 +1,12 @@
 use anyhow::{Result, anyhow};
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::Write;
 use std::str::FromStr;
 use std::{fmt, hash};
 
 /// Represents the base version number as individual components and an optional letter suffix.
-#[derive(Serialize, Deserialize, Clone, Eq)]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct VersionNumber {
     components: Box<[NumberComponent]>,
@@ -125,7 +125,7 @@ impl fmt::Display for VersionNumber {
 /// E.g., in "1.2.03a", "1" and "2" are Numeric, "03" is Alphabetic, and "a" is handled separately
 /// and not part of this enum.
 /// See PMS 3.2 and 3.3 for more details.
-#[derive(Serialize, Deserialize, Clone, Eq)]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq)]
 #[cfg_attr(test, derive(Debug))]
 enum NumberComponent {
     Numeric(Box<str>),

@@ -3,11 +3,13 @@ use crate::package::Package;
 use crate::package::cpv::CPV;
 use anyhow::{Context, Result, anyhow};
 use log::debug;
-use serde::{Deserialize, Serialize};
+use rkyv::rancor;
+use rkyv::with::Skip;
+use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::path::Path;
 
 /// Holds all available packages in a repository, mapping `category/package` to [`Vec<CPV>`].
@@ -47,14 +49,32 @@ impl Deref for AvailablePackageIndex {
 
 /// Holds all resolved packages in a repository, mapping the fully qualified name
 /// `category/package-version` to a [`Package`].
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Archive, Serialize, Deserialize, Default)]
 #[cfg_attr(test, derive(Debug))]
-pub struct ResolvedPackageIndex(HashMap<String, Package>);
+pub struct ResolvedPackageIndex {
+    index: HashMap<String, Package>,
+    #[rkyv(with = Skip)]
+    modified: bool,
+}
 
 impl ResolvedPackageIndex {
     /// Inserts a package into the index.
     pub fn insert(&mut self, package: Package) {
-        self.0.insert(package.cpv.fqn().into(), package);
+        self.index.insert(package.cpv.fqn().into(), package);
+        self.modified = true;
+    }
+
+    /// Retains only the packages that are present in the given [`AvailablePackageIndex`].
+    pub fn retain(&mut self, available: &AvailablePackageIndex) {
+        let elements = self.index.len();
+        self.index.retain(|_, pkg| available.contains(&pkg.cpv));
+        if self.index.len() != elements {
+            debug!(
+                "Removed {} packages from the resolved index",
+                elements - self.index.len()
+            );
+            self.modified = true;
+        }
     }
 
     /// Loads the index from the given `path`.
@@ -76,8 +96,13 @@ impl ResolvedPackageIndex {
 
     /// Writes the index to the given `path`.
     ///
+    /// If the index hasn't been modified and `force` is not set, this is a no-op.
     /// Returns `Err` if the index cannot be serialized or the file cannot be created.
-    pub fn write_to_path(&self, path: &Path) -> Result<()> {
+    pub fn write_to_path(&self, path: &Path, force: bool) -> Result<()> {
+        if !force && !self.modified {
+            debug!("Index not modified, skipping write",);
+            return Ok(());
+        }
         debug!("Writing to {} ...", path.display());
         let writer = File::create(path)
             .with_context(|| anyhow!("unable to create package index '{}'", path.display()))?;
@@ -87,34 +112,34 @@ impl ResolvedPackageIndex {
     /// Deserializes an index from `reader`.
     ///
     /// Returns `Err` if the index cannot be deserialized.
-    pub fn deserialize<R>(reader: R) -> Result<Self>
+    pub fn deserialize<R>(mut reader: R) -> Result<Self>
     where
         R: io::Read,
     {
-        ciborium::from_reader::<Self, R>(reader).with_context(|| "unable to deserialize")
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf)?;
+        let index = rkyv::from_bytes::<ResolvedPackageIndex, rancor::Error>(&buf)
+            .with_context(|| anyhow!("unable to deserialize"))?;
+        Ok(index)
     }
 
     /// Serializes this index to `writer`.
     ///
     /// Returns `Err` if the index cannot be serialized.
-    pub fn serialize<W>(&self, writer: W) -> Result<()>
+    pub fn serialize<W>(&self, mut writer: W) -> Result<()>
     where
         W: io::Write,
     {
-        ciborium::into_writer(&self, writer).with_context(|| "unable to serialize")
+        let bytes = rkyv::to_bytes::<rancor::Error>(self).with_context(|| "unable to serialize")?;
+        writer.write_all(&bytes)?;
+        Ok(())
     }
 }
 
 impl Deref for ResolvedPackageIndex {
     type Target = HashMap<String, Package>;
     fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for ResolvedPackageIndex {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &self.index
     }
 }
 

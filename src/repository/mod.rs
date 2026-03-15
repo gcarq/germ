@@ -5,6 +5,7 @@ mod index;
 pub mod set;
 mod sync;
 
+use crate::consts::DEFAULT_CACHE_PATH;
 use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
 use crate::linefile::LineBasedFile;
@@ -162,24 +163,23 @@ impl Repository {
     }
 
     /// Writes the resolved package index to disk.
-    fn write_index(&self) -> Result<()> {
-        // TODO: replace hardcoded testing path
-        let path = PathBuf::from(format!("/tmp/package-manager/metadata/{self}"));
-        self.resolved_package_idx.write_to_path(&path)?;
+    fn write_index(&self, force: bool) -> Result<()> {
+        let path = PathBuf::from(DEFAULT_CACHE_PATH)
+            .join("metadata")
+            .join(&self.name);
+        self.resolved_package_idx.write_to_path(&path, force)?;
         Ok(())
     }
 
     /// Loads the resolved package index from disk.
     fn load_index(&mut self) -> Result<()> {
-        // TODO: replace hardcoded testing path
-        let path = PathBuf::from(format!("/tmp/package-manager/metadata/{self}"));
+        let path = PathBuf::from(DEFAULT_CACHE_PATH)
+            .join("metadata")
+            .join(&self.name);
         if let Some(index) = ResolvedPackageIndex::load_from_path(&path)? {
             self.resolved_package_idx = index;
         }
-
-        // Remove all packages that are no longer available
-        self.resolved_package_idx
-            .retain(|_, pkg| self.avail_package_idx.contains(&pkg.cpv));
+        self.resolved_package_idx.retain(&self.avail_package_idx);
 
         Ok(())
     }

@@ -5,14 +5,14 @@ use crate::eapi::Eapi;
 use crate::package::slot::PackageSlot;
 use crate::repository::eclass::Eclass;
 use anyhow::{Result, anyhow};
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 
 /// Holds all metadata of a [`Package`].
 /// TODO: parse eclasses
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct PackageMetadata {
     pub eapi: Eapi,

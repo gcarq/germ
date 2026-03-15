@@ -4,13 +4,13 @@ mod parser;
 
 use anyhow::{Result, anyhow};
 use expr::ExpressionItem;
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
 use std::str::FromStr;
 
 /// Represents a USE flag
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct UseFlag(Box<str>);
 

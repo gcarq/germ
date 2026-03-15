@@ -2,7 +2,8 @@ use crate::utils;
 use anyhow::{Result, anyhow};
 use log::trace;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use rkyv::with::AsString;
+use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::Deref;
@@ -56,10 +57,11 @@ impl Deref for Eclasses {
 
 /// Represents an eclass defined in PMS chapter 10.
 /// TODO: parse documentation
-#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
 #[cfg_attr(test, derive(Debug))]
 pub struct Eclass {
     pub name: String,
+    #[rkyv(with = AsString)]
     pub path: PathBuf,
 }
 

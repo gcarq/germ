@@ -6,7 +6,7 @@ use crate::regex::{CATEGORY, PACKAGE, PV_REV, REPOSITORY, V_REV};
 use anyhow::{Result, anyhow};
 use constcat::concat;
 use regex::{Captures, Regex};
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 use std::str::FromStr;
@@ -50,7 +50,7 @@ static ATOM_WILDCARD_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Specifies the operator of an atom, which determines how packages are matched.
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash)]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(test, derive(Debug))]
 pub enum AtomOperator {
     Less,
@@ -93,7 +93,7 @@ impl fmt::Display for AtomOperator {
 }
 
 /// Specifies the variant of an atom, which determines how packages are matched.
-#[derive(Serialize, Deserialize, Default, Clone, Eq, Hash, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Default, Clone, Eq, Hash, PartialEq)]
 #[cfg_attr(test, derive(Debug))]
 pub enum AtomVariant {
     #[default]
@@ -108,7 +108,7 @@ pub enum AtomVariant {
 /// calculating dependencies between packages.
 /// TODO:
 ///  * implement remaining atom variants (see man 5 ebuild)
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Archive, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct Atom {
     pub operator: Option<AtomOperator>,

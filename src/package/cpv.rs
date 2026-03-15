@@ -8,7 +8,7 @@ use crate::regex::{CATEGORY_RE, PKG_RE};
 use crate::repository::Repository;
 use crate::utils;
 use anyhow::{Context, Result, anyhow};
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
@@ -20,7 +20,7 @@ use std::path::Path;
 ///
 /// TODO: consider adding a `new_unchecked` constructor, that also passes the `fqn` that doesn't
 ///  validate for performance reasons
-#[derive(Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Clone)]
+#[derive(Archive, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Clone)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct CPV {
     category: Box<str>,
