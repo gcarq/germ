@@ -1,12 +1,12 @@
 use crate::deps::atom::Atom;
 use crate::package::Package;
 use crate::package::cpv::CPV;
+use crate::types::FxHashMap;
 use anyhow::{Context, Result, anyhow};
 use log::debug;
 use rkyv::rancor;
 use rkyv::with::Skip;
 use rkyv::{Archive, Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::ops::Deref;
@@ -15,7 +15,7 @@ use std::path::Path;
 /// Holds all available packages in a repository, mapping `category/package` to [`Vec<CPV>`].
 #[derive(Default)]
 #[cfg_attr(test, derive(Debug))]
-pub struct AvailablePackageIndex(HashMap<String, Vec<CPV>>);
+pub struct AvailablePackageIndex(FxHashMap<String, Vec<CPV>>);
 
 impl AvailablePackageIndex {
     /// Inserts the given `cpv` into the index.
@@ -41,7 +41,7 @@ impl AvailablePackageIndex {
 }
 
 impl Deref for AvailablePackageIndex {
-    type Target = HashMap<String, Vec<CPV>>;
+    type Target = FxHashMap<String, Vec<CPV>>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -52,7 +52,7 @@ impl Deref for AvailablePackageIndex {
 #[derive(Archive, Serialize, Deserialize, Default)]
 #[cfg_attr(test, derive(Debug))]
 pub struct ResolvedPackageIndex {
-    index: HashMap<String, Package>,
+    index: FxHashMap<String, Package>,
     #[rkyv(with = Skip)]
     modified: bool,
 }
@@ -137,7 +137,7 @@ impl ResolvedPackageIndex {
 }
 
 impl Deref for ResolvedPackageIndex {
-    type Target = HashMap<String, Package>;
+    type Target = FxHashMap<String, Package>;
     fn deref(&self) -> &Self::Target {
         &self.index
     }

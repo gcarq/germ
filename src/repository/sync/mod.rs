@@ -4,8 +4,8 @@
 mod git;
 
 use crate::repository::sync::git::GitSyncHandler;
+use crate::types::FxHashMap;
 use anyhow::{Context, Result, anyhow};
-use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -34,7 +34,7 @@ struct SyncConfig {
 }
 
 impl SyncConfig {
-    pub fn from_ini(properties: &HashMap<String, String>) -> Result<Self> {
+    pub fn from_ini(properties: &FxHashMap<String, String>) -> Result<Self> {
         let location = properties
             .get("location")
             .map(PathBuf::from)
@@ -65,7 +65,7 @@ impl SyncConfig {
 /// Builds a synchronization handler based on the provided INI `properties`.
 /// The `sync-type` property is used to determine which synchronization mechanism to use.
 pub fn build_sync_handler(
-    properties: &HashMap<String, String>,
+    properties: &FxHashMap<String, String>,
 ) -> Result<Option<Box<dyn SyncHandler>>> {
     let sync_type = properties
         .get("sync-type")
@@ -85,7 +85,7 @@ pub fn build_sync_handler(
 pub trait SyncHandler: fmt::Debug {
     /// Creates a new instance of the `SyncHandler` based on the provided INI `properties`
     /// for this repository coming from `repos.conf`.
-    fn new(properties: &HashMap<String, String>) -> Result<Self>
+    fn new(properties: &FxHashMap<String, String>) -> Result<Self>
     where
         Self: Sized;
 
@@ -113,7 +113,7 @@ mod tests {
     use super::*;
     use ini::Ini;
 
-    fn load_properties(ini_content: &str) -> HashMap<String, String> {
+    fn load_properties(ini_content: &str) -> FxHashMap<String, String> {
         Ini::load_from_str(ini_content)
             .expect("failed to parse INI content")
             .section(Some("gentoo"))

@@ -1,8 +1,8 @@
+use crate::types::FxHashMap;
 use crate::utils;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use regex::Regex;
-use std::collections::HashMap;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
@@ -33,10 +33,10 @@ const INCREMENTAL_VARIABLES: [&str; 14] = [
 
 /// Holds all environment variables defined in a make.conf or make.defaults file.
 #[derive(Default, Clone)]
-pub struct MakeEnv(HashMap<String, EnvValue>);
+pub struct MakeEnv(FxHashMap<String, EnvValue>);
 
 impl Deref for MakeEnv {
-    type Target = HashMap<String, EnvValue>;
+    type Target = FxHashMap<String, EnvValue>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

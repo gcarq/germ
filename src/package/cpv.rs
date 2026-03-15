@@ -6,10 +6,10 @@ use crate::package::metadata::PackageMetadata;
 use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY_RE, PKG_RE};
 use crate::repository::Repository;
+use crate::types::FxHashMap;
 use crate::utils;
 use anyhow::{Context, Result, anyhow};
 use rkyv::{Archive, Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
@@ -73,7 +73,7 @@ impl CPV {
         let data = data
             .iter()
             .filter_map(|d| d.split_once('='))
-            .collect::<HashMap<_, _>>();
+            .collect::<FxHashMap<_, _>>();
 
         let md5sum =
             utils::md5sum(&ebuild.path).with_context(|| anyhow!("failed to calculate md5sum"))?;

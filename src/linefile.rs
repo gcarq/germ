@@ -1,6 +1,6 @@
+use crate::types::FxHashSet;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::Result;
-use std::collections::HashSet;
 
 /// Represents a one-item-per-line file.
 /// EAPI > 6 supports directories, in that case all files in that directory are merged together.
@@ -53,7 +53,7 @@ impl FileFromPath for LineBasedFile {
 impl Inherit for LineBasedFile {
     fn inherit_from(&mut self, parent: &LineBasedFile) {
         let mut parent_lines = parent.lines.clone();
-        let mut seen = parent_lines.iter().cloned().collect::<HashSet<String>>();
+        let mut seen = parent_lines.iter().cloned().collect::<FxHashSet<String>>();
         for line in &self.lines {
             if let Some(negated) = line.strip_prefix('-') {
                 parent_lines.retain(|l| l != negated);

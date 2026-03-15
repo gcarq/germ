@@ -1,5 +1,6 @@
 use crate::consts::GIT_BINARY_PATH;
 use crate::repository::sync::{SyncConfig, SyncHandler};
+use crate::types::FxHashMap;
 use anyhow::{Context, Result, anyhow};
 use log::info;
 use std::collections::HashMap;
@@ -15,7 +16,7 @@ pub struct GitSyncHandler {
 }
 
 impl SyncHandler for GitSyncHandler {
-    fn new(properties: &HashMap<String, String>) -> Result<Self>
+    fn new(properties: &FxHashMap<String, String>) -> Result<Self>
     where
         Self: Sized,
     {

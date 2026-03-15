@@ -25,6 +25,7 @@ pub mod process;
 mod profile;
 mod regex;
 mod repository;
+mod types;
 mod utils;
 mod vdb;
 

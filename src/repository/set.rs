@@ -2,10 +2,10 @@ use crate::deps::atom::Atom;
 use crate::package::Package;
 use crate::repository::Repository;
 use crate::repository::config::{RepoSetConfig, RepositoryConfig};
+use crate::types::FxHashMap;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
 use log::debug;
-use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::{fmt, iter};
@@ -16,14 +16,14 @@ use std::{fmt, iter};
 /// See <https://dev.gentoo.org/~zmedico/portage/doc/man/portage.5.html>
 #[cfg_attr(test, derive(Default))]
 pub struct RepoSet {
-    repos: HashMap<String, Repository>,
+    repos: FxHashMap<String, Repository>,
 }
 
 impl RepoSet {
     /// Builds a [`RepoSet`] from the repos.conf configuration from the given `location`.
     pub fn new(location: &Path) -> Result<Self> {
         let config = RepoSetConfig::load(location)?;
-        let mut repos = HashMap::with_capacity(config.repo_confs.len());
+        let mut repos = FxHashMap::default();
 
         // config::load() already sorts repositories based on their masters,
         // so we can just iterate through them in order and populate their packages and metadata.
@@ -81,7 +81,7 @@ impl RepoSet {
     fn resolve_masters<'a>(
         conf: &'a RepositoryConfig,
         set_conf: &'a RepoSetConfig,
-        repos: &'a HashMap<String, Repository>,
+        repos: &'a FxHashMap<String, Repository>,
     ) -> Box<dyn Iterator<Item = &'a Repository> + 'a> {
         let iter = conf
             .masters
@@ -98,7 +98,7 @@ impl RepoSet {
 }
 
 impl Deref for RepoSet {
-    type Target = HashMap<String, Repository>;
+    type Target = FxHashMap<String, Repository>;
     fn deref(&self) -> &Self::Target {
         &self.repos
     }

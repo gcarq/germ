@@ -1,12 +1,12 @@
 use crate::regex::REPOSITORY;
 use crate::repository::config::layout::Layout;
+use crate::types::FxHashMap;
 use crate::utils;
 use anyhow::{Context, Result, anyhow};
 use ini::Ini;
 use log::{debug, warn};
 use regex::Regex;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -50,7 +50,7 @@ impl RepoSetConfig {
                 _ => None,
             })
             .map(|(name, properties)| {
-                RepositoryConfig::new(&name, properties.into_iter().collect::<HashMap<_, _>>())
+                RepositoryConfig::new(&name, properties.into_iter().collect::<FxHashMap<_, _>>())
                     .with_context(|| format!("unable to build repository config for '{name}'"))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -92,7 +92,7 @@ impl RepoSetConfig {
 /// Represents the configuration of a single repository.
 /// Properties taken from `repos.conf` take precedence over `layout.conf` where applicable.
 #[derive(Clone, Eq)]
-#[cfg_attr(test, derive(Debug))]
+#[cfg_attr(test, derive(Default, Debug))]
 pub struct RepositoryConfig {
     // The path to the repository on the filesystem
     pub location: PathBuf,
@@ -103,7 +103,7 @@ pub struct RepositoryConfig {
     // Defines the repository priority for resolving ebuilds and eclasses
     pub priority: isize,
     // Holds all raw properties from the repository section in repos.conf for potential future use
-    pub raw_properties: HashMap<String, String>,
+    pub raw_properties: FxHashMap<String, String>,
 }
 
 impl RepositoryConfig {
@@ -112,7 +112,7 @@ impl RepositoryConfig {
     ///
     /// Returns `Err` if required properties are missing, if the `layout.conf` file is invalid or if
     /// the repository name doesn't match the name in `layout.conf` or `repo_name` file.
-    fn new(repo_name: &str, properties: HashMap<String, String>) -> Result<RepositoryConfig> {
+    fn new(repo_name: &str, properties: FxHashMap<String, String>) -> Result<RepositoryConfig> {
         for prop in UNSUPPORTED_CONF_PROPERTIES {
             if properties.contains_key(*prop) {
                 warn!("repos.conf: '{prop}' property is not supported and will be ignored");
@@ -161,7 +161,7 @@ impl RepositoryConfig {
             raw_properties: properties
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
-                .collect::<HashMap<_, _>>(),
+                .collect::<FxHashMap<_, _>>(),
         };
         Ok(config)
     }
@@ -218,36 +218,31 @@ mod tests {
             name: "testing".into(),
             location: PathBuf::from("/dev/null"),
             masters: vec!["gentoo".into(), "guru".into()],
-            priority: 0,
-            raw_properties: HashMap::new(),
+            ..Default::default()
         };
         let testing = RepositoryConfig {
             name: "testing".into(),
             location: PathBuf::from("/dev/null"),
             masters: vec!["gentoo".into(), "kde".into()],
-            priority: 0,
-            raw_properties: HashMap::new(),
+            ..Default::default()
         };
         let gentoo = RepositoryConfig {
             name: "gentoo".into(),
             location: PathBuf::from("/dev/null"),
             masters: vec![],
-            priority: 0,
-            raw_properties: HashMap::new(),
+            ..Default::default()
         };
         let guru = RepositoryConfig {
             name: "guru".into(),
             location: PathBuf::from("/dev/null"),
             masters: vec!["gentoo".into()],
-            priority: 0,
-            raw_properties: HashMap::new(),
+            ..Default::default()
         };
         let kde = RepositoryConfig {
             name: "kde".into(),
             location: PathBuf::from("/dev/null"),
             masters: vec!["gentoo".into()],
-            priority: 0,
-            raw_properties: HashMap::new(),
+            ..Default::default()
         };
 
         let mut configs = vec![

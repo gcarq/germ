@@ -4,9 +4,9 @@ use crate::deps::expr::{DepExpression, ExpressionItem};
 use crate::eapi::Eapi;
 use crate::package::slot::PackageSlot;
 use crate::repository::eclass::Eclass;
+use crate::types::FxHashMap;
 use anyhow::{Result, anyhow};
 use rkyv::{Archive, Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 
@@ -40,7 +40,7 @@ impl PackageMetadata {
     /// Takes a `map` with all ebuild properties, also takes the `md5sum` of the ebuild file.
     ///
     /// Returns `None` if any of the required fields are missing or if the EAPI is invalid.
-    pub fn from_map(map: HashMap<&str, &str>, md5sum: String) -> Result<Self> {
+    pub fn from_map(map: FxHashMap<&str, &str>, md5sum: String) -> Result<Self> {
         let metadata = Self {
             eapi: map
                 .get("EAPI")
@@ -74,7 +74,7 @@ impl PackageMetadata {
         Ok(metadata)
     }
 
-    fn parse_expression<T>(key: &str, map: &HashMap<&str, &str>) -> Result<DepExpression<T>>
+    fn parse_expression<T>(key: &str, map: &FxHashMap<&str, &str>) -> Result<DepExpression<T>>
     where
         T: ExpressionItem,
     {
@@ -82,7 +82,7 @@ impl PackageMetadata {
         DepExpression::parse(value)
     }
 
-    fn parse_values(map: &HashMap<&str, &str>, key: &str) -> Result<Vec<String>> {
+    fn parse_values(map: &FxHashMap<&str, &str>, key: &str) -> Result<Vec<String>> {
         let parts = map
             .get(key)
             .ok_or_else(|| anyhow!("{key} is missing"))?
@@ -147,7 +147,7 @@ mod tests {
         ]
         .iter()
         .filter_map(|d| d.split_once('='))
-        .collect::<HashMap<_, _>>();
+        .collect::<FxHashMap<_, _>>();
 
         let metadata = PackageMetadata::from_map(data, String::new());
         assert!(metadata.is_ok(), "metadata should be parsed successfully");

@@ -1,8 +1,8 @@
 use crate::ebuild::Ebuild;
 use crate::ebuild::handler::EbuildPhase;
 use crate::makenv::MakeEnv;
+use crate::types::FxHashMap;
 use log::warn;
-use std::collections::HashMap;
 use std::ops::Deref;
 use std::os::fd::RawFd;
 
@@ -166,7 +166,7 @@ const ENV_INTERNALS: [&str; 51] = [
 /// Holds all environment variables for an ebuild process.
 ///
 /// All variable names listed in `ENV_UNSET` and `make_env["ENV_UNSET"]` will be removed.
-pub struct EbuildEnv(HashMap<String, String>);
+pub struct EbuildEnv(FxHashMap<String, String>);
 
 impl EbuildEnv {
     /// Builds the ebuild environment that can be passed to the ebuild process.
@@ -203,7 +203,7 @@ impl EbuildEnv {
                 ),
                 ("EBUILD_PHASE".to_owned(), phase.to_string()),
             ])
-            .collect::<HashMap<String, String>>();
+            .collect::<FxHashMap<String, String>>();
 
         if let Some(env_unset) = make_env.get("ENV_UNSET") {
             for name in env_unset.deref() {
@@ -235,7 +235,7 @@ impl EbuildEnv {
 }
 
 impl Deref for EbuildEnv {
-    type Target = HashMap<String, String>;
+    type Target = FxHashMap<String, String>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

@@ -3,17 +3,17 @@ use crate::linefile::LineBasedFile;
 use crate::package::Package;
 use crate::profile::Profile;
 use crate::repository::set::RepoSet;
+use crate::types::FxHashMap;
 use crate::utils::Inherit;
 use anyhow::{Context, Result};
 use log::debug;
-use std::collections::HashMap;
 
 /// Holds all package masks and should be used as the single source of truth  when checking
 /// if a package is masked. Masks and unmasks are stored in a `HashMap` that maps the
 /// qualified package name to a vector of [`Atom`].
 pub struct MaskManager {
-    pub mask: HashMap<Box<str>, Vec<Atom>>,
-    pub unmask: HashMap<Box<str>, Vec<Atom>>,
+    pub mask: FxHashMap<Box<str>, Vec<Atom>>,
+    pub unmask: FxHashMap<Box<str>, Vec<Atom>>,
 }
 
 impl MaskManager {
@@ -58,15 +58,15 @@ impl MaskManager {
     }
 
     /// Helper function to check if the given `map` contains a package according to its atoms.
-    fn map_contains_pkg(map: &HashMap<Box<str>, Vec<Atom>>, pkg: &Package) -> bool {
+    fn map_contains_pkg(map: &FxHashMap<Box<str>, Vec<Atom>>, pkg: &Package) -> bool {
         map.get(&*pkg.qualified_name())
             .is_some_and(|atoms| atoms.iter().any(|atom| pkg.matches_atom(atom)))
     }
 
     /// Helper function to build a map from qualified atom names to [`Atom`]
     /// from a [`LineBasedFile`].
-    fn map_from_linefile(linefile: LineBasedFile) -> Result<HashMap<Box<str>, Vec<Atom>>> {
-        let mut map = HashMap::new();
+    fn map_from_linefile(linefile: LineBasedFile) -> Result<FxHashMap<Box<str>, Vec<Atom>>> {
+        let mut map = FxHashMap::default();
         for atom in linefile.into_iter().map(|line| Atom::new(&line)) {
             let atom = atom?;
             map.entry(atom.qualified_name().into())

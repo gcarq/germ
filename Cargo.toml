@@ -8,6 +8,7 @@ anyhow = { version = "1.0.102", default-features = false, features = ["std"] }
 clap = { version = "4.5.60", default-features = false, features = ["color", "error-context", "help", "std", "usage", "derive"] }
 constcat = { version = "0.6.1", default-features = false }
 fern = { version = "0.7.1", default-features = false, features = ["colored"] }
+fxhash = { version = "0.2.1", default-features = false }
 log = { version = "0.4.29", default-features = false }
 md-5 = { version = "0.10.6", default-features = false, features = ["std"] }
 nix = { version = "0.31.2", default-features = false, features = ["process", "signal", "poll", "fs"] }

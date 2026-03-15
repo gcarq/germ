@@ -1,13 +1,13 @@
 pub mod ipc;
 
 use crate::process::ipc::IpcHandler;
+use crate::types::FxHashMap;
 use anyhow::{Context, Result, anyhow};
 use log::trace;
 use nix::spawn::{PosixSpawnAttr, PosixSpawnFileActions, posix_spawn};
 use nix::sys::signal::{Signal, kill};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::Pid;
-use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::fd::RawFd;
 
@@ -22,7 +22,7 @@ impl Process {
     /// Uses `posix_spawn` to create a subprocess with the given `command` and `env`.
     ///
     /// The first element in `command` is expected to be the absolute path to the binary to execute.
-    pub fn new(command: &[String], env: &HashMap<String, String>) -> Result<Self> {
+    pub fn new(command: &[String], env: &FxHashMap<String, String>) -> Result<Self> {
         let actions =
             PosixSpawnFileActions::init().with_context(|| "unable to init posix_spawn actions")?;
         let pid = Self::spawn(command, env, &actions)?;
@@ -37,7 +37,7 @@ impl Process {
     /// The first element in `command` is expected to be the absolute path to the binary to execute.
     pub fn with_ipc(
         command: &[String],
-        env: &HashMap<String, String>,
+        env: &FxHashMap<String, String>,
         child_channel: (RawFd, RawFd),
     ) -> Result<Self> {
         let (ipc, pid) =
@@ -74,7 +74,7 @@ impl Process {
     /// Helper function to spawn a sub process with the given `args` and `env` and `actions`.
     fn spawn(
         command: &[String],
-        env: &HashMap<String, String>,
+        env: &FxHashMap<String, String>,
         actions: &PosixSpawnFileActions,
     ) -> Result<Pid> {
         trace!("Spawning process: '{}' ...", command.join(" "),);
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn test_process_new() {
         let args = vec!["/usr/bin/sleep".into(), "infinity".into()];
-        let mut proc = Process::new(&args, &HashMap::new()).unwrap();
+        let mut proc = Process::new(&args, &FxHashMap::default()).unwrap();
         assert!(proc.is_alive(), "process should be alive");
         proc.stop().unwrap();
         assert!(!proc.is_alive(), "process should be stopped");
@@ -143,7 +143,8 @@ mod tests {
             sleep 30"#
                 .into(),
         ];
-        let env: HashMap<String, String> = HashMap::from_iter([("TEST_ENV".into(), "42".into())]);
+        let env: FxHashMap<String, String> =
+            FxHashMap::from_iter([("TEST_ENV".into(), "42".into())]);
         let mut proc = Process::with_ipc(&args, &env, (10, 11)).unwrap();
         let ipc = proc.ipc.as_mut().unwrap();
 
