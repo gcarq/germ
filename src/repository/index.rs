@@ -66,14 +66,15 @@ impl ResolvedPackageIndex {
 
     /// Retains only the packages that are present in the given [`AvailablePackageIndex`].
     pub fn retain(&mut self, available: &AvailablePackageIndex) {
-        let elements = self.index.len();
+        let len = self.index.len();
         self.index.retain(|_, pkg| available.contains(&pkg.cpv));
-        if self.index.len() != elements {
+        if self.index.len() != len {
+            self.index.shrink_to_fit();
+            self.modified = true;
             debug!(
                 "Removed {} packages from the resolved index",
-                elements - self.index.len()
+                len - self.index.len()
             );
-            self.modified = true;
         }
     }
 
@@ -225,5 +226,39 @@ mod tests {
         cursor.seek(SeekFrom::Start(0)).unwrap();
         let index = ResolvedPackageIndex::deserialize(&mut cursor).unwrap();
         assert!(index.contains_key(cpv.fqn()));
+    }
+
+    #[test]
+    fn test_resolved_package_index_retain() {
+        let mut resolved = ResolvedPackageIndex::default();
+
+        let cpv1 = CPV::new(
+            "dev-lang",
+            "python",
+            PackageVersion::new("3.13.12", None, None).unwrap(),
+        )
+        .unwrap();
+        resolved.insert(Package {
+            cpv: cpv1.clone(),
+            ..Default::default()
+        });
+
+        let cpv2 = CPV::new(
+            "dev-lang",
+            "rust",
+            PackageVersion::new("1.94.0", None, None).unwrap(),
+        )
+        .unwrap();
+        resolved.insert(Package {
+            cpv: cpv2.clone(),
+            ..Default::default()
+        });
+
+        let mut available = AvailablePackageIndex::default();
+        available.insert(cpv1.clone());
+
+        resolved.retain(&available);
+        assert!(resolved.contains_key(cpv1.fqn()));
+        assert!(!resolved.contains_key(cpv2.fqn()));
     }
 }

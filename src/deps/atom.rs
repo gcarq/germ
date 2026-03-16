@@ -552,7 +552,6 @@ mod tests {
                     repo: Some("gentoo".into()),
                     variant: AtomVariant::VersionOperator,
                     use_deps: Some(vec![UseFlag("clippy".into())]),
-                    ..Default::default()
                 },
                 ">=dev-lang/rust-1.70.0_beta_p11-r2:1.70::gentoo[clippy]",
             ),

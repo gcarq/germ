@@ -240,20 +240,11 @@ impl Repository {
             for pkg_path in pkg_paths {
                 let pkg_path = pkg_path?;
                 let package = utils::path_to_filename(&pkg_path)?;
-
                 for ebuild_path in utils::list_files(&pkg_path)? {
                     let ebuild_path = ebuild_path?;
-                    let caps = match EBUILD_RE.captures(utils::path_to_filename(&ebuild_path)?) {
-                        Some(caps) if caps["package"].starts_with(package) => caps,
-                        _ => continue,
+                    if let Some(cpv) = cpv_from_ebuild_path(category, package, &ebuild_path)? {
+                        self.avail_package_idx.insert(cpv);
                     };
-                    let version = PackageVersion::new(
-                        &caps["version"],
-                        Some(&caps["suffixes"]),
-                        caps.name("revision").map(|m| m.as_str()),
-                    )?;
-                    let cpv = CPV::new_unchecked(category, package, version);
-                    self.avail_package_idx.insert(cpv);
                 }
             }
         }
@@ -306,41 +297,133 @@ impl fmt::Display for Repository {
     }
 }
 
+/// Parses a `CPV` from the given ebuild file `path`.
+///
+/// Returns `Ok(None)` if the file is not a valid ebuild.
+/// Returns `Err` if the file is a valid regex, but doesn't belong here.
+fn cpv_from_ebuild_path(category: &str, package: &str, path: &Path) -> Result<Option<CPV>> {
+    let filename = utils::path_to_filename(path)?;
+    let caps = match EBUILD_RE.captures(filename) {
+        Some(caps) if caps["package"].starts_with(package) => caps,
+        Some(_) => Err(anyhow!(
+            "ebuild '{filename}' doesn't belong in '{category}/{package}'"
+        ))?,
+        _ => return Ok(None),
+    };
+    let version = PackageVersion::new(
+        &caps["version"],
+        Some(&caps["suffixes"]),
+        caps.name("revision").map(|m| m.as_str()),
+    )?;
+    Ok(Some(CPV::new_unchecked(category, package, version)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_ebuild_regex_match() {
+    fn cpv_from_ebuild_path_ok() {
+        // (category, package, ebuild path, is_some)
         let valid_ebuilds = [
-            "vim-8.2.3456.ebuild",
-            "vim-8.2.3456-r1.ebuild",
-            "rust-1.65.0_alpha1-r2.ebuild",
-            "curl-7.79.1_beta2_p20220101.ebuild",
+            (
+                "app-editors",
+                "vim",
+                "app-editors/vim/vim-8.2.3456.ebuild",
+                true,
+            ),
+            (
+                "app-editors",
+                "vim",
+                "app-editors/vim/vim-8.2.3456-r1.ebuild",
+                true,
+            ),
+            (
+                "dev-lang",
+                "rust",
+                "dev-lang/rust/rust-1.65.0_alpha1-r2.ebuild",
+                true,
+            ),
+            (
+                "net-misc",
+                "curl",
+                "net-misc/curl/curl-7.79.1_beta2_p20220101.ebuild",
+                true,
+            ),
+            ("net-misc", "curl", "Manifest", false),
         ];
-        for ebuild in valid_ebuilds {
-            assert!(
-                EBUILD_RE.is_match(ebuild),
-                "ebuild name '{ebuild}' should be valid",
+        for (category, package, path, is_some) in valid_ebuilds {
+            let cpv = cpv_from_ebuild_path(category, package, &PathBuf::from(path));
+            assert!(cpv.is_ok(), "CPV from '{path}' should be valid");
+            assert_eq!(
+                cpv.unwrap().is_some(),
+                is_some,
+                "failure for ebuild path '{path}'",
             );
         }
     }
 
     #[test]
-    fn test_ebuild_regex_no_match() {
+    fn cpv_from_ebuild_path_none() {
+        // (category, package, ebuild path)
         let invalid_ebuilds = [
-            "",
-            "vim8.2.3456.ebuild",
-            "app-editors/vim-.ebuild",
-            "dev-lang/rust-1.65.0_alphaX-r2.ebuild",
-            "net-misc/curl-7.79.1--r1.ebuild",
-            "net-misc/curl-7.79.1_beta2_p20220101-rX.ebuild",
+            ("app-editors", "vim", "app-editors/vim/vim8.2.3456.ebuild"),
+            ("app-editors", "vim", "app-editors/vim/vim-.ebuild"),
+            (
+                "dev-lang",
+                "rust",
+                "dev-lang/rust/rust-1.65.0_alphaX-r2.ebuild",
+            ),
+            ("net-misc", "curl", "net-misc/curl/curl-7.79.1--r1.ebuild"),
+            (
+                "net-misc",
+                "curl",
+                "net-misc/curl/curl-7.79.1_beta2_p20220101-rX.ebuild",
+            ),
         ];
-        for ebuild in invalid_ebuilds {
-            assert!(
-                !EBUILD_RE.is_match(ebuild),
-                "ebuild name '{ebuild}' should be invalid",
-            );
+        for (category, package, path) in invalid_ebuilds {
+            let cpv = cpv_from_ebuild_path(category, package, &PathBuf::from(path));
+            assert!(cpv.is_ok(), "result from '{path}' should be ok");
+            assert!(cpv.unwrap().is_none(), "CPV from '{path}' should be None");
         }
+    }
+
+    #[test]
+    fn cpv_from_ebuild_path_err() {
+        let cpv = cpv_from_ebuild_path("dev-lang", "R", &PathBuf::from("python-3.14.2.ebuild"));
+        assert!(cpv.is_err(), "result should be Err");
+        assert_eq!(
+            cpv.err().unwrap().to_string(),
+            "ebuild 'python-3.14.2.ebuild' doesn't belong in 'dev-lang/R'"
+        );
+    }
+
+    #[test]
+    fn test_repository_equality() {
+        let gentoo = Repository {
+            name: "gentoo".into(),
+            ..Default::default()
+        };
+        let guru = Repository {
+            name: "guru".into(),
+            ..Default::default()
+        };
+        assert_ne!(gentoo, guru);
+        assert_eq!(
+            gentoo,
+            Repository {
+                name: "gentoo".into(),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn test_repository_display() {
+        let repo = Repository {
+            name: "gentoo".into(),
+            ..Default::default()
+        };
+        assert_eq!(repo.to_string(), "gentoo");
     }
 }
