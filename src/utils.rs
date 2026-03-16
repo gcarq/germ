@@ -1,9 +1,10 @@
 use anyhow::{Context, Result, anyhow};
 use md5::{Digest, Md5};
-use std::fs::{DirEntry, File};
+use std::fs::File;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
+use walkdir::WalkDir;
 
 /// Trait for inheriting configurations from another instance.
 pub trait Inherit {
@@ -50,14 +51,11 @@ pub trait FileFromPath {
             ));
         }
 
-        let mut paths = list_files(path)?.collect::<Result<Vec<_>>>()?;
-        paths.sort();
-
-        let content = paths
-            .into_iter()
-            .map(|p| {
-                fs::read_to_string(&p)
-                    .with_context(|| anyhow!("unable to read file '{}'", p.display()))
+        let content = list_files(path)
+            .map(|p| match p {
+                Ok(p) => fs::read_to_string(&p)
+                    .with_context(|| anyhow!("unable to read file '{}'", p.display())),
+                Err(err) => Err(anyhow!(err)),
             })
             .collect::<Result<Vec<_>>>()?
             .join("\n");
@@ -90,63 +88,22 @@ pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
         .collect()
 }
 
-/// Extracts the filename from the given path as a `String`.
-pub fn path_to_filename(path: &Path) -> Result<&str> {
-    path.file_name()
-        .ok_or_else(|| anyhow!("path has is not a file: '{}'", path.display()))?
-        .to_str()
-        .ok_or_else(|| anyhow!("filename contains invalid unicode: '{}'", path.display()))
-}
-
-/// Determines whether the given directory `entry` is a file.
-/// If the file type is a symlink or cannot be determined directly,
-/// it falls back to checking the metadata which requires a syscall.
-pub fn is_file(entry: &DirEntry) -> Result<bool> {
-    let file_type = entry.file_type()?;
-    if file_type.is_file() {
-        Ok(true)
-    } else if file_type.is_dir() {
-        Ok(false)
-    } else {
-        Ok(entry.metadata()?.is_file())
-    }
-}
-
 /// Reads all files for the given `path`, ignoring subdirectories and files starting
 /// with `.` or ending with `~`.
-pub fn list_files(path: &Path) -> Result<impl Iterator<Item = Result<PathBuf>>> {
-    let iter = list_dir(path, is_file)?.map(|entry| entry.map(|entry| entry.path()));
-    Ok(iter)
-}
-
-/// Reads all directories for the given `path`, ignoring subdirectories and files starting
-/// with `.` or ending with `~`.
-pub fn list_dirs(path: &Path) -> Result<impl Iterator<Item = Result<PathBuf>>> {
-    let iter =
-        list_dir(path, |p| is_file(p).map(|r| !r))?.map(|entry| entry.map(|entry| entry.path()));
-    Ok(iter)
-}
-
-/// Reads the given directory `path` and returns an iterator over its entries that match the given
-/// closure, ignoring entries starting with `.` or ending with `~`.
-fn list_dir<'a, F>(path: &'a Path, func: F) -> Result<impl Iterator<Item = Result<DirEntry>> + 'a>
-where
-    F: Fn(&DirEntry) -> Result<bool> + 'a,
-{
-    let iter = fs::read_dir(path)
-        .with_context(|| anyhow!("unable to read directory: '{}'", path.display()))?
-        .filter_map(move |entry| match entry {
-            Ok(entry) => match entry.file_name().as_bytes() {
-                [b'.', ..] | [.., b'~'] => None,
-                _ => match func(&entry) {
-                    Ok(true) => Some(Ok(entry)),
-                    Ok(false) => None,
-                    Err(err) => Some(Err(anyhow!(err))),
-                },
-            },
-            Err(err) => Some(Err(anyhow!(err))),
-        });
-    Ok(iter)
+pub fn list_files(path: &Path) -> impl Iterator<Item = Result<PathBuf>> {
+    WalkDir::new(path)
+        .min_depth(1)
+        .max_depth(1)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|e| {
+            let file_name = e.file_name().as_bytes();
+            e.file_type().is_file() && !file_name.starts_with(b".") && !file_name.ends_with(b"~")
+        })
+        .map(|entry| match entry {
+            Ok(entry) => Ok(entry.into_path()),
+            Err(e) => Err(anyhow!("unable to read file '{}': {e}", path.display())),
+        })
 }
 
 #[cfg(test)]

@@ -20,9 +20,15 @@ pub struct AvailablePackageIndex(FxHashMap<String, Vec<CPV>>);
 impl AvailablePackageIndex {
     /// Inserts the given `cpv` into the index.
     pub fn insert(&mut self, cpv: CPV) {
-        let cpvs = self.0.entry(cpv.qualified_name()).or_default();
-        cpvs.push(cpv);
-        cpvs.sort_unstable_by(|a, b| b.cmp(a));
+        let entry = self.0.entry(cpv.qualified_name()).or_default();
+        entry.push(cpv);
+        entry.sort_unstable_by(|a, b| b.cmp(a));
+    }
+
+    pub fn insert_all(&mut self, cpvs: Vec<CPV>) {
+        for cpv in cpvs {
+            self.insert(cpv);
+        }
     }
 
     /// Checks if the index contains the given `cpv`.

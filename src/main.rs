@@ -107,7 +107,6 @@ fn main() {
 /// Main application logic is here.
 fn run(args: Args) -> Result<()> {
     let config_path = Path::new(DEFAULT_USE_PORTAGE_CONF_PATH);
-
     let mut repo_set = RepoSet::new(&config_path.join("repos.conf"))
         .with_context(|| "unable to process repos.conf")?;
     let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH), &repo_set)?;

@@ -1,4 +1,3 @@
-use crate::utils;
 use anyhow::{Result, anyhow};
 use log::trace;
 use regex::Regex;
@@ -9,6 +8,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use walkdir::WalkDir;
 
 /// Regex to validate eclass names according to PMS 3.1.6.
 /// NOTE: look-ahead to exclude "default" is not supported by the regex crate.
@@ -28,11 +28,19 @@ impl Eclasses {
             return Ok(eclasses);
         }
 
-        for file_path in utils::list_files(path)? {
-            let file_path = file_path?;
-            let filename = utils::path_to_filename(&file_path)?;
+        let entries = WalkDir::new(path)
+            .min_depth(1)
+            .max_depth(1)
+            .into_iter()
+            .filter_entry(|e| e.file_type().is_file())
+            .filter_map(Result::ok);
+
+        for entry in entries {
+            let Some(filename) = entry.file_name().to_str() else {
+                continue;
+            };
             if let Some(eclass_name) = filename.strip_suffix(".eclass") {
-                let eclass = Eclass::new(eclass_name.to_owned(), path.join(filename))?;
+                let eclass = Eclass::new(eclass_name.to_owned(), entry.path().to_path_buf())?;
                 eclasses.insert(eclass);
             }
         }

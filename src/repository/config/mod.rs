@@ -76,7 +76,7 @@ impl RepoSetConfig {
         let conf = if location.metadata()?.is_file() {
             fs::read_to_string(location).with_context(|| "failed to load repos.conf")?
         } else {
-            utils::list_files(location)?
+            utils::list_files(location)
                 .map(|p| match p {
                     Ok(path) => fs::read_to_string(&path)
                         .with_context(|| anyhow!("unable to read file '{}'", path.display())),

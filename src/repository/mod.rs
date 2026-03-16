@@ -1,9 +1,11 @@
+use rayon::iter::ParallelIterator;
 mod config;
 mod desc;
 pub mod eclass;
 mod index;
 pub mod set;
 mod sync;
+mod utils;
 
 use crate::consts::DEFAULT_CACHE_PATH;
 use crate::deps::atom::Atom;
@@ -11,17 +13,17 @@ use crate::eapi::Eapi;
 use crate::linefile::LineBasedFile;
 use crate::package::Package;
 use crate::package::cpv::CPV;
-use crate::package::version::PackageVersion;
 use crate::regex::PV_REV;
 use crate::repository::config::RepositoryConfig;
 use crate::repository::desc::ProfileDescription;
 use crate::repository::eclass::Eclasses;
 use crate::repository::index::{AvailablePackageIndex, ResolvedPackageIndex};
 use crate::repository::sync::{SyncHandler, build_sync_handler};
-use crate::utils;
+use crate::repository::utils::resolve_cpv_from_category;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use log::{debug, info};
+use rayon::iter::IntoParallelRefIterator;
 use regex::Regex;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
@@ -231,23 +233,12 @@ impl Repository {
     /// NOTE: The caller must ensure to [`Self::collect_categories`] has been called before,
     /// since only known categories are considered when collecting packages.
     fn collect_cpvs(&mut self) -> Result<()> {
-        for category in &self.categories {
-            let cat_path = self.location.join(category);
-            let Ok(pkg_paths) = utils::list_dirs(&cat_path) else {
-                continue;
-            };
-
-            for pkg_path in pkg_paths {
-                let pkg_path = pkg_path?;
-                let package = utils::path_to_filename(&pkg_path)?;
-                for ebuild_path in utils::list_files(&pkg_path)? {
-                    let ebuild_path = ebuild_path?;
-                    if let Some(cpv) = cpv_from_ebuild_path(category, package, &ebuild_path)? {
-                        self.avail_package_idx.insert(cpv);
-                    };
-                }
-            }
-        }
+        let packages = self
+            .categories
+            .par_iter()
+            .flat_map_iter(|category| resolve_cpv_from_category(&self.location, category))
+            .collect::<Result<Vec<_>>>()?;
+        self.avail_package_idx.insert_all(packages);
         Ok(())
     }
 
@@ -297,106 +288,9 @@ impl fmt::Display for Repository {
     }
 }
 
-/// Parses a `CPV` from the given ebuild file `path`.
-///
-/// Returns `Ok(None)` if the file is not a valid ebuild.
-/// Returns `Err` if the file is a valid regex, but doesn't belong here.
-fn cpv_from_ebuild_path(category: &str, package: &str, path: &Path) -> Result<Option<CPV>> {
-    let filename = utils::path_to_filename(path)?;
-    let caps = match EBUILD_RE.captures(filename) {
-        Some(caps) if caps["package"].starts_with(package) => caps,
-        Some(_) => Err(anyhow!(
-            "ebuild '{filename}' doesn't belong in '{category}/{package}'"
-        ))?,
-        _ => return Ok(None),
-    };
-    let version = PackageVersion::new(
-        &caps["version"],
-        Some(&caps["suffixes"]),
-        caps.name("revision").map(|m| m.as_str()),
-    )?;
-    Ok(Some(CPV::new_unchecked(category, package, version)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cpv_from_ebuild_path_ok() {
-        // (category, package, ebuild path, is_some)
-        let valid_ebuilds = [
-            (
-                "app-editors",
-                "vim",
-                "app-editors/vim/vim-8.2.3456.ebuild",
-                true,
-            ),
-            (
-                "app-editors",
-                "vim",
-                "app-editors/vim/vim-8.2.3456-r1.ebuild",
-                true,
-            ),
-            (
-                "dev-lang",
-                "rust",
-                "dev-lang/rust/rust-1.65.0_alpha1-r2.ebuild",
-                true,
-            ),
-            (
-                "net-misc",
-                "curl",
-                "net-misc/curl/curl-7.79.1_beta2_p20220101.ebuild",
-                true,
-            ),
-            ("net-misc", "curl", "Manifest", false),
-        ];
-        for (category, package, path, is_some) in valid_ebuilds {
-            let cpv = cpv_from_ebuild_path(category, package, &PathBuf::from(path));
-            assert!(cpv.is_ok(), "CPV from '{path}' should be valid");
-            assert_eq!(
-                cpv.unwrap().is_some(),
-                is_some,
-                "failure for ebuild path '{path}'",
-            );
-        }
-    }
-
-    #[test]
-    fn cpv_from_ebuild_path_none() {
-        // (category, package, ebuild path)
-        let invalid_ebuilds = [
-            ("app-editors", "vim", "app-editors/vim/vim8.2.3456.ebuild"),
-            ("app-editors", "vim", "app-editors/vim/vim-.ebuild"),
-            (
-                "dev-lang",
-                "rust",
-                "dev-lang/rust/rust-1.65.0_alphaX-r2.ebuild",
-            ),
-            ("net-misc", "curl", "net-misc/curl/curl-7.79.1--r1.ebuild"),
-            (
-                "net-misc",
-                "curl",
-                "net-misc/curl/curl-7.79.1_beta2_p20220101-rX.ebuild",
-            ),
-        ];
-        for (category, package, path) in invalid_ebuilds {
-            let cpv = cpv_from_ebuild_path(category, package, &PathBuf::from(path));
-            assert!(cpv.is_ok(), "result from '{path}' should be ok");
-            assert!(cpv.unwrap().is_none(), "CPV from '{path}' should be None");
-        }
-    }
-
-    #[test]
-    fn cpv_from_ebuild_path_err() {
-        let cpv = cpv_from_ebuild_path("dev-lang", "R", &PathBuf::from("python-3.14.2.ebuild"));
-        assert!(cpv.is_err(), "result should be Err");
-        assert_eq!(
-            cpv.err().unwrap().to_string(),
-            "ebuild 'python-3.14.2.ebuild' doesn't belong in 'dev-lang/R'"
-        );
-    }
 
     #[test]
     fn test_repository_equality() {
