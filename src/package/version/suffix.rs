@@ -28,7 +28,10 @@ impl FromStr for VersionSuffixes {
 }
 
 impl FromIterator<VersionSuffix> for VersionSuffixes {
-    fn from_iter<T: IntoIterator<Item = VersionSuffix>>(iter: T) -> Self {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = VersionSuffix>,
+    {
         let suffixes = iter.into_iter().collect();
         Self(suffixes)
     }

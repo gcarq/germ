@@ -155,32 +155,46 @@ impl Repository {
         let metadata = cpv
             .generate_metadata(&ebuild_path, self)
             .with_context(|| anyhow!("unable to generate metadata for {cpv}"))?;
-        Ok(Package {
-            cpv: cpv.clone(),
-            repo: self.name.clone(),
-            metadata,
-        })
+        Ok(Package::new(cpv.clone(), self.name.clone(), metadata))
     }
 
     /// Writes the resolved package index to disk.
+    ///
+    /// If `force` is `true`, the index will be written even if it hasn't been modified
+    /// since the last write.
+    ///
+    /// Returns `Err` if the index cannot be serialized or the file cannot be created.
     fn write_index(&self, force: bool) -> Result<()> {
-        let path = PathBuf::from(DEFAULT_CACHE_PATH)
-            .join("metadata")
-            .join(&self.name);
-        self.resolved_package_idx.write_to_path(&path, force)?;
+        let meta_dir = PathBuf::from(DEFAULT_CACHE_PATH).join("metadata");
+        if !fs::exists(&meta_dir)? {
+            fs::create_dir_all(&meta_dir)
+                .with_context(|| anyhow!("unable to create directory: {}", meta_dir.display()))?;
+        }
+        debug!(
+            "Writing package index for '{self}' into {} ...",
+            meta_dir.display()
+        );
+        self.resolved_package_idx
+            .write_to_path(&meta_dir.join(&self.name), force)
+            .with_context(|| anyhow!("failed to write package index for '{self}'"))?;
         Ok(())
     }
 
     /// Loads the resolved package index from disk.
+    ///
+    /// Returns `Err` if the index cannot be deserialized or the file exists but cannot be opened.
     fn load_index(&mut self) -> Result<()> {
         let path = PathBuf::from(DEFAULT_CACHE_PATH)
             .join("metadata")
             .join(&self.name);
+        debug!(
+            "Loading package index for '{self}' from {} ...",
+            path.display()
+        );
         if let Some(index) = ResolvedPackageIndex::load_from_path(&path)? {
             self.resolved_package_idx = index;
+            self.resolved_package_idx.retain(&self.avail_package_idx);
         }
-        self.resolved_package_idx.retain(&self.avail_package_idx);
-
         Ok(())
     }
 
@@ -238,7 +252,7 @@ impl Repository {
                         Some(&caps["suffixes"]),
                         caps.name("revision").map(|m| m.as_str()),
                     )?;
-                    let cpv = CPV::new(category, package, version)?;
+                    let cpv = CPV::new_unchecked(category, package, version);
                     self.avail_package_idx.insert(cpv);
                 }
             }

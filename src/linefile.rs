@@ -30,7 +30,10 @@ impl LineBasedFile {
 impl<'a> FromIterator<&'a str> for LineBasedFile {
     /// Creates a new instance from the given line `iter`.
     /// Lines that are empty or start with `#` are ignored.
-    fn from_iter<T: IntoIterator<Item = &'a str>>(iter: T) -> Self {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = &'a str>,
+    {
         let lines = iter
             .into_iter()
             .map(str::trim)

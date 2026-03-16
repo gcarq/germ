@@ -30,6 +30,7 @@ pub struct CPV {
 }
 
 impl CPV {
+    /// Creates a new [`CPV`] from the given `category`, `package` and `version`.
     pub fn new(category: &str, package: &str, version: PackageVersion) -> Result<Self> {
         if !CATEGORY_RE.is_match(category) {
             return Err(anyhow!("invalid category name: '{category}'"));
@@ -37,12 +38,17 @@ impl CPV {
         if !PKG_RE.is_match(package) {
             return Err(anyhow!("invalid package name: '{package}'"));
         }
-        Ok(Self {
+        Ok(Self::new_unchecked(category, package, version))
+    }
+
+    /// Creates a new [`CPV`] without validating `category` or `package`.
+    pub fn new_unchecked(category: &str, package: &str, version: PackageVersion) -> Self {
+        Self {
             category: category.into(),
             package: package.into(),
             fqn: format!("{category}/{package}-{version}").into(),
             version,
-        })
+        }
     }
 
     /// Checks if the given [`Atom`] matches this CPV.
@@ -153,9 +159,9 @@ mod tests {
     #[test]
     fn test_cpv_new_ok() {
         let cpv = CPV::new(
-            "app-editors",
-            "vim",
-            PackageVersion::new("1.0.0", None, None).unwrap(),
+            "dev-lang",
+            "R",
+            PackageVersion::new("4.5.2", None, None).unwrap(),
         );
         assert!(cpv.is_ok());
     }
@@ -168,6 +174,16 @@ mod tests {
             PackageVersion::new("1.0.0", None, None).unwrap(),
         );
         assert!(cpv.is_err());
+    }
+
+    #[test]
+    fn test_cpv_new_unchecked() {
+        let cpv = CPV::new_unchecked(
+            "app-editors",
+            "vim",
+            PackageVersion::new("9.1.1652", None, Some("2")).unwrap(),
+        );
+        assert_eq!(cpv.to_string(), "app-editors/vim-9.1.1652-r2");
     }
 
     #[test]

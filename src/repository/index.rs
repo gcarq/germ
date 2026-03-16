@@ -82,7 +82,6 @@ impl ResolvedPackageIndex {
     /// Returns `Ok(None)` if the file doesn't exist.
     /// Returns `Err` if the index cannot be deserialized or the file cannot be opened.
     pub fn load_from_path(path: &Path) -> Result<Option<Self>> {
-        debug!("Loading from {} ...", path.display());
         let reader = match File::open(path) {
             Ok(file) => file,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -103,9 +102,8 @@ impl ResolvedPackageIndex {
             debug!("Index not modified, skipping write",);
             return Ok(());
         }
-        debug!("Writing to {} ...", path.display());
         let writer = File::create(path)
-            .with_context(|| anyhow!("unable to create package index '{}'", path.display()))?;
+            .with_context(|| anyhow!("unable to write to '{}'", path.display()))?;
         self.serialize(writer)
     }
 

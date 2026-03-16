@@ -90,7 +90,10 @@ impl IpcHandler {
 
     /// Sends the given [`ParentToChildMsg`] to the child process.
     /// The data sent must not contain a newline character; one will be added automatically.
-    pub fn send<T: ParentToChildMsg>(&mut self, msg: T) -> Result<()> {
+    pub fn send<T>(&mut self, msg: T) -> Result<()>
+    where
+        T: ParentToChildMsg,
+    {
         let Some(writer) = &mut self.writer else {
             return Err(anyhow!("bash writer is closed"));
         };
@@ -103,7 +106,10 @@ impl IpcHandler {
 
     /// Reads raw bytes from the child process until `\4` is encountered.
     /// Returns [`ChildToParentMsg`] or `Ok(None)` if EOF is reached.
-    pub fn recv<T: ChildToParentMsg>(&mut self) -> Result<Option<T>> {
+    pub fn recv<T>(&mut self) -> Result<Option<T>>
+    where
+        T: ChildToParentMsg,
+    {
         self.buffer.clear();
         let num_bytes = self
             .reader
