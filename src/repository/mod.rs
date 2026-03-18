@@ -208,9 +208,7 @@ impl Repository {
             "Loading package index for '{self}' from {} ...",
             path.display()
         );
-        if let Some(index) = ResolvedPackageIndex::load_from_path(&path)
-            .with_context(|| anyhow!("unable to load package index from {}", path.display()))?
-        {
+        if let Some(index) = ResolvedPackageIndex::load_from_path(&path)? {
             self.resolved_package_idx = index;
             self.resolved_package_idx.retain(&self.avail_package_idx);
         }
