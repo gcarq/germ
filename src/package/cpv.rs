@@ -7,7 +7,6 @@ use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY_RE, PKG_RE};
 use crate::repository::Repository;
 use crate::types::FxHashMap;
-use crate::utils;
 use anyhow::{Context, Result, anyhow};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
@@ -78,14 +77,11 @@ impl CPV {
             .with_context(|| "ebuild script execution failed")?;
         let data = data
             .iter()
-            .filter_map(|d| d.split_once('='))
+            .filter_map(|d| d.split_once('=').map(|(k, v)| (k.trim(), v.trim())))
             .collect::<FxHashMap<_, _>>();
 
-        let md5sum =
-            utils::md5sum(&ebuild.path).with_context(|| anyhow!("failed to calculate md5sum"))?;
-        let metadata = PackageMetadata::from_map(data, md5sum)
-            .with_context(|| anyhow!("unable to create metadata from ebuild output"))?;
-        Ok(metadata)
+        PackageMetadata::from_map(data)
+            .with_context(|| anyhow!("unable to create metadata from ebuild output"))
     }
 
     /// Returns the category of the package, e.g.: `dev-lang`.

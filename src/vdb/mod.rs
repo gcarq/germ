@@ -1,4 +1,4 @@
-pub mod package;
+mod package;
 
 use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
@@ -6,6 +6,7 @@ use crate::package::version::PackageVersion;
 use crate::regex::PV_REV;
 use crate::vdb::package::InstalledPackage;
 use anyhow::{Context, Result, anyhow};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -14,7 +15,7 @@ use walkdir::WalkDir;
 /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision` from VDB.
 static VDB_PKG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{PV_REV}$")).unwrap());
 
-/// Represents a portage compatible VDB containing [`InstalledPackage`].
+/// Represents a portage compatible VDB containing [`Package`].
 pub struct Vdb {
     packages: Vec<InstalledPackage>,
 }
@@ -26,6 +27,7 @@ impl Vdb {
         Ok(Self { packages })
     }
 
+    /// Returns all packages matching the given `atom`.
     pub fn find_by_atom(&self, atom: &Atom) -> impl Iterator<Item = &InstalledPackage> {
         self.packages
             .iter()
@@ -45,37 +47,44 @@ impl Vdb {
                     "unable to read category in '{}': {e}",
                     path.display()
                 )),
-            });
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        let mut packages = Vec::new();
-        for pkg_path in paths {
-            let pkg_path = pkg_path?;
-            let pvr = pkg_path
-                .file_name()
-                .and_then(|f| f.to_str())
-                .with_context(|| "path contains invalid unicode")?;
-            let Some(caps) = VDB_PKG_RE.captures(pvr) else {
-                continue;
-            };
-
-            let category = pkg_path
-                .parent()
-                .and_then(|p| p.file_name())
-                .and_then(|f| f.to_str())
-                .with_context(|| "path contains invalid unicode")?;
-            let package = &caps["package"];
-            let version = PackageVersion::new(
-                &caps["version"],
-                Some(&caps["suffixes"]),
-                caps.name("revision").map(|m| m.as_str()),
-            )?;
-            let cpv = CPV::new(category, package, version)?;
-            packages.push(
-                InstalledPackage::new(cpv, pkg_path)
-                    .with_context(|| anyhow!("unable to read package"))?,
-            );
-        }
-
+        let packages = paths
+            .par_iter()
+            .filter_map(|p| Self::package_from_path(p).transpose())
+            .collect::<Result<Vec<_>>>()?;
         Ok(packages)
+    }
+
+    /// Builds a [`Package`] from the given `path`.
+    ///
+    /// Returns `Ok(None)` if the path hasn't the correct syntax,
+    ///   e.g. a package has an incomplete merge, indicated by the `-MERGING-` prefix.
+    /// Returns `Err` if the path or metadata can't be read.
+    fn package_from_path(path: &Path) -> Result<Option<InstalledPackage>> {
+        let pvr = path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .with_context(|| "path contains invalid unicode")?;
+        let Some(caps) = VDB_PKG_RE.captures(pvr) else {
+            return Ok(None);
+        };
+
+        let category = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|f| f.to_str())
+            .with_context(|| "path contains invalid unicode")?;
+        let package = &caps["package"];
+        let version = PackageVersion::new(
+            &caps["version"],
+            Some(&caps["suffixes"]),
+            caps.name("revision").map(|m| m.as_str()),
+        )?;
+        let cpv = CPV::new(category, package, version)?;
+        let pkg = InstalledPackage::new(cpv, path)
+            .with_context(|| anyhow!("failed to collect package from {}", path.display()))?;
+        Ok(Some(pkg))
     }
 }

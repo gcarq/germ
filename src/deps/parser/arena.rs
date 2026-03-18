@@ -9,7 +9,7 @@ use std::ops::Range;
 /// To support multiple root expressions, `root` is defined as [`Range`] which holds the
 /// index range in the `children` vector.
 #[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Default, Debug))]
+#[cfg_attr(test, derive(Debug))]
 pub struct ExpressionArena<T: ExpressionItem> {
     expressions: Vec<Expression<T>>,
     children: Vec<ExpressionId>,
@@ -109,6 +109,16 @@ impl<T: ExpressionItem> ExpressionArena<T> {
 impl<T: ExpressionItem> fmt::Display for ExpressionArena<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_children(self.root.clone(), f)
+    }
+}
+
+impl<T: ExpressionItem> Default for ExpressionArena<T> {
+    fn default() -> Self {
+        Self {
+            expressions: Vec::default(),
+            children: Vec::default(),
+            root: Range::default(),
+        }
     }
 }
 

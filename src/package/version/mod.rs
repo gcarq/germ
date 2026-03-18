@@ -1,3 +1,6 @@
+mod number;
+mod suffix;
+
 use crate::deps::atom::{Atom, AtomOperator, AtomVariant};
 use crate::package::version::suffix::VersionSuffixes;
 use crate::regex::V_REV;
@@ -8,9 +11,6 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::LazyLock;
-
-mod number;
-mod suffix;
 
 /// Regex to validate and parse `version`, `suffixes` and the `revision`.
 static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_REV}$")).unwrap());

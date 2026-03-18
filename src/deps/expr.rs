@@ -15,8 +15,8 @@ pub trait ExpressionItem: FromStr<Err = anyhow::Error> + fmt::Display {
 
 /// Holds a dependency expression, which can be evaluated to check if all package requirements
 /// are satisfied.
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Default, Debug))]
+#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[cfg_attr(test, derive(Debug))]
 pub struct DepExpression<T: ExpressionItem> {
     arena: ExpressionArena<T>,
 }
@@ -32,5 +32,13 @@ impl<T: ExpressionItem> DepExpression<T> {
 impl<T: ExpressionItem + fmt::Display> fmt::Display for DepExpression<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.arena.fmt(f)
+    }
+}
+
+impl<T: ExpressionItem> Default for DepExpression<T> {
+    fn default() -> Self {
+        Self {
+            arena: ExpressionArena::default(),
+        }
     }
 }

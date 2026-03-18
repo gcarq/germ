@@ -1,10 +1,10 @@
+pub mod version;
+
 use crate::ebuild::handler::prot::ParentMessage;
 use crate::repository::Repository;
 use anyhow::{Result, anyhow};
 use log::{debug, error};
 use std::process;
-
-pub mod version;
 
 /// Checks if the given `word` is present anywhere in the list of `args`.
 /// Returns `Err` if `word` contains whitespace or is not present.

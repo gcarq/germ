@@ -1,3 +1,5 @@
+mod layout;
+
 use crate::regex::REPOSITORY;
 use crate::repository::config::layout::Layout;
 use crate::types::FxHashMap;
@@ -10,8 +12,6 @@ use std::cmp::Ordering;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
-
-mod layout;
 
 /// Regex to validate repository names.
 static REPO_RE: LazyLock<Regex> =

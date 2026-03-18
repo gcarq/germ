@@ -70,7 +70,7 @@ impl FromStr for Eapi {
             "7" => Self::Seven,
             "8" => Self::Eight,
             "9" => Self::Nine,
-            x => Err(anyhow!("unsupported EAPI: {x}"))?,
+            x => Err(anyhow!("unsupported EAPI: '{x}'"))?,
         };
         Ok(version)
     }

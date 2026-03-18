@@ -140,6 +140,14 @@ fn info(atom: Option<Atom>, repo_set: &RepoSet, make_env: &MakeEnv) -> Result<()
     println!("\nInstalled packages matching {atom}\n");
     for pkg in packages {
         println!("{pkg}");
+        let use_flags = pkg
+            .use_flags
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" ");
+        println!("USE=\"{use_flags}\"");
+        println!();
     }
 
     Ok(())

@@ -1,3 +1,5 @@
+pub mod handler;
+
 use crate::eapi::Eapi;
 use crate::package::cpv::CPV;
 use crate::repository::Repository;
@@ -10,8 +12,6 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
-
-pub mod handler;
 
 /// Regex to capture EAPI from ebuild files according to PMS 7.3.1.
 /// The regex crate doesn't support backreferences, so we can't enforce matching quotes.
