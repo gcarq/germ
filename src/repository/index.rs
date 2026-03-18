@@ -70,6 +70,16 @@ impl ResolvedPackageIndex {
         self.modified = true;
     }
 
+    /// Extends the index with the given packages.
+    pub fn extend(&mut self, packages: Vec<Package>) {
+        let len = self.index.len();
+        self.index
+            .extend(packages.into_iter().map(|pkg| (pkg.cpv.fqn().into(), pkg)));
+        if self.index.len() != len {
+            self.modified = true;
+        }
+    }
+
     /// Retains only the packages that are present in the given [`AvailablePackageIndex`].
     pub fn retain(&mut self, available: &AvailablePackageIndex) {
         let len = self.index.len();
@@ -123,8 +133,11 @@ impl ResolvedPackageIndex {
     {
         let mut buf = Vec::new();
         reader.read_to_end(&mut buf)?;
-        let index = rkyv::from_bytes::<ResolvedPackageIndex, rancor::Error>(&buf)
-            .with_context(|| anyhow!("unable to deserialize"))?;
+
+        // SAFETY: We trust the data was written by `serialize` which guarantees its integrity.
+        let index =
+            unsafe { rkyv::from_bytes_unchecked::<ResolvedPackageIndex, rancor::Error>(&buf) }
+                .with_context(|| anyhow!("unable to deserialize"))?;
         Ok(index)
     }
 

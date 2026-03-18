@@ -82,7 +82,7 @@ pub fn build_sync_handler(
 
 /// Trait for handling repository synchronization.
 /// This trait can be implemented for different synchronization mechanisms such as git, rsync, etc.
-pub trait SyncHandler: fmt::Debug {
+pub trait SyncHandler: fmt::Debug + Send + Sync {
     /// Creates a new instance of the `SyncHandler` based on the provided INI `properties`
     /// for this repository coming from `repos.conf`.
     fn new(properties: &FxHashMap<String, String>) -> Result<Self>

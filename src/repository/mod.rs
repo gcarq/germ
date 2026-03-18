@@ -1,4 +1,3 @@
-use rayon::iter::ParallelIterator;
 mod config;
 mod desc;
 pub mod eclass;
@@ -23,7 +22,7 @@ use crate::repository::utils::resolve_cpv_from_category;
 use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use log::{debug, info};
-use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
@@ -103,13 +102,10 @@ impl Repository {
         };
 
         // Resolve all packages first to avoid borrowing conflicts when collecting references later
-        for cpv in cpvs.iter() {
-            if !self.resolved_package_idx.contains_key(cpv.fqn()) {
-                self.resolved_package_idx.insert(self.resolve_package(cpv)?);
-            }
-        }
+        let packages = self.par_resolve_packages(cpvs.iter().copied())?;
+        self.resolved_package_idx.extend(packages);
 
-        cpvs.iter()
+        cpvs.into_iter()
             .map(|cpv| -> Result<&Package> {
                 self.resolved_package_idx
                     .get(cpv.fqn())
@@ -120,11 +116,9 @@ impl Repository {
 
     /// Builds the resolved package index for all packages.
     pub fn build_package_index(&mut self) -> Result<()> {
-        for cpv in self.avail_package_idx.values().flatten() {
-            if !self.resolved_package_idx.contains_key(cpv.fqn()) {
-                self.resolved_package_idx.insert(self.resolve_package(cpv)?);
-            }
-        }
+        let cpvs = self.avail_package_idx.values().flatten();
+        let resolved = self.par_resolve_packages(cpvs)?;
+        self.resolved_package_idx.extend(resolved);
         Ok(())
     }
 
@@ -145,6 +139,27 @@ impl Repository {
             sync_handler.sync()?;
         }
         Ok(())
+    }
+
+    /// Resolves the given `cpvs` in parallel using `rayon`.
+    ///
+    /// Only unresolved packages will be resolved.
+    fn par_resolve_packages<'a>(
+        &self,
+        cpvs: impl Iterator<Item = &'a CPV>,
+    ) -> Result<Vec<Package>> {
+        let filtered = cpvs
+            .filter(|cpv| !self.resolved_package_idx.contains_key(cpv.fqn()))
+            .collect::<Vec<_>>();
+        if filtered.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        filtered
+            .into_par_iter()
+            .map(|cpv| self.resolve_package(cpv))
+            .collect::<Result<Vec<_>>>()
+            .with_context(|| "unable to resolve packages")
     }
 
     /// Resolves the given `cpv` into a [`Package`] with its metadata.
@@ -193,7 +208,9 @@ impl Repository {
             "Loading package index for '{self}' from {} ...",
             path.display()
         );
-        if let Some(index) = ResolvedPackageIndex::load_from_path(&path)? {
+        if let Some(index) = ResolvedPackageIndex::load_from_path(&path)
+            .with_context(|| anyhow!("unable to load package index from {}", path.display()))?
+        {
             self.resolved_package_idx = index;
             self.resolved_package_idx.retain(&self.avail_package_idx);
         }

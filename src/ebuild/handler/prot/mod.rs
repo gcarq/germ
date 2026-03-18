@@ -1,9 +1,29 @@
 //! This module defines the protocol for the IPC between this and the ebuild process.
+//!
+//! The protocol is text-based and messages are terminated by `\4`.
+//! There are two types of messages:
+//!     * function call requests (prefixed with `FN`)
+//!     * data messages (prefixed with `DATA`)
+//!
+//! Parameters for function calls are separated by `\0`, while data messages contain arbitrary text
+//! and are not further parsed by the protocol.
+//!
+//! # Examples
+//!
+//! Function call request for `ver_test`:
+//! ```
+//! FN\0ver_test\06.0\0-gt\05.0\4
+//! ```
+//!
+//! Data message from for `IUSE` variable:
+//! ```
+//! "DATA\0IUSE=static-libs tcpd usbip"
+//! ```
 
 pub mod func;
 
+use crate::ebuild::handler::ipc::{ChildToParentMsg, ParentToChildMsg};
 use crate::ebuild::handler::prot::func::FuncCall;
-use crate::process::ipc::{ChildToParentMsg, ParentToChildMsg};
 use anyhow::{Context, Result, anyhow};
 use std::fmt;
 

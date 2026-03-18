@@ -25,11 +25,11 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
             expression: ExpressionArena::new(),
         };
 
-        let mut children = Vec::new();
+        let mut buffer = Vec::with_capacity(64);
         while let Some(token) = parser.lexer.next() {
-            children.push(parser.parse_expression(token)?);
+            buffer.push(parser.parse_expression(token)?);
         }
-        let root = parser.expression.push_children(children);
+        let root = parser.expression.push_children(&buffer);
         parser.expression.set_root(root);
         Ok(parser.expression)
     }
@@ -79,12 +79,12 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     /// This function expects that the [`Token::LParen`] has already been consumed.
     /// Returns a [`Range`] that can be used for slicing `expression.children`.
     fn parse_group(&mut self) -> Result<Range<u16>> {
-        let mut children = Vec::new();
+        let mut buffer = Vec::with_capacity(16);
         while let Some(token) = self.lexer.next() {
             if token == Token::RParen {
-                return Ok(self.expression.push_children(children));
+                return Ok(self.expression.push_children(&buffer));
             }
-            children.push(self.parse_expression(token)?);
+            buffer.push(self.parse_expression(token)?);
         }
         Err(anyhow!("unexpected EOF while parsing group"))
     }

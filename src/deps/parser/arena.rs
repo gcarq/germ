@@ -19,8 +19,8 @@ pub struct ExpressionArena<T: ExpressionItem> {
 impl<T: ExpressionItem> ExpressionArena<T> {
     pub fn new() -> Self {
         Self {
-            expressions: Vec::default(),
-            children: Vec::default(),
+            expressions: Vec::with_capacity(64),
+            children: Vec::with_capacity(64),
             root: Range::default(),
         }
     }
@@ -28,7 +28,7 @@ impl<T: ExpressionItem> ExpressionArena<T> {
     /// Consumes the given `ids` and pushes them as children.
     ///
     /// Returns a [`Range`] for future referencing in `self.children`.
-    pub fn push_children(&mut self, ids: Vec<ExpressionId>) -> Range<u16> {
+    pub fn push_children(&mut self, ids: &[ExpressionId]) -> Range<u16> {
         let start = self.children.len() as u16;
         self.children.extend(ids);
         let end = self.children.len() as u16;

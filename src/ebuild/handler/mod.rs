@@ -1,5 +1,6 @@
 mod env;
 mod functions;
+mod ipc;
 mod prot;
 
 use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
@@ -10,10 +11,9 @@ use crate::ebuild::handler::functions::{contains_word, debug_print, die, resolve
 use crate::ebuild::handler::prot::func::{FuncCall, FuncType};
 use crate::ebuild::handler::prot::{ChildMessage, ParentMessage};
 use crate::makenv::MakeEnv;
-use crate::process::Process;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
+use ipc::IpcHandler;
 use log::{debug, trace};
-use nix::sys::wait::WaitStatus;
 use std::fmt;
 use std::ops::Deref;
 
@@ -39,7 +39,6 @@ impl fmt::Display for EbuildPhase {
 pub struct EbuildPhaseHandler<'a> {
     ebuild: &'a Ebuild<'a>,
     phase: EbuildPhase,
-    args: Vec<String>,
     env: EbuildEnv,
 }
 
@@ -47,7 +46,6 @@ impl<'a> EbuildPhaseHandler<'a> {
     /// Create a new ebuild phase handler for the given `ebuild` and `phase`.
     pub fn new(ebuild: &'a Ebuild, phase: EbuildPhase, make_env: &MakeEnv) -> Self {
         Self {
-            args: Self::build_args(),
             env: EbuildEnv::new(ebuild, &phase, make_env),
             ebuild,
             phase,
@@ -64,28 +62,21 @@ impl<'a> EbuildPhaseHandler<'a> {
         );
 
         let mut received_data = Vec::new();
-        // TODO: create constants
-        let child_channel = (10, 11);
 
-        self.env.add_ipc_channel(child_channel);
-        let mut process = Process::with_ipc(&self.args, &self.env, child_channel)
-            .with_context(|| "unable to spawn ebuild process")?;
-        let Some(ipc) = &mut process.ipc else {
-            return Err(anyhow!("IPC handler not available"));
-        };
-
+        let args = Self::build_args();
+        let (mut ipc, mut process) = IpcHandler::spawn(SANDBOX_BINARY_PATH, &args, &self.env)?;
         loop {
             let Some(request) = ipc.recv::<ChildMessage>()? else {
                 // Got EOF, at this point the ebuild process closed its IPC channel.
                 // Wait for the process to exit and check its status.
-                match process.wait()? {
-                    WaitStatus::Exited(_, 0) => {
-                        trace!("ebuild process (PID: {}) exited successfully", process.pid);
-                        break;
-                    }
-                    WaitStatus::Exited(_, code) => Err(anyhow!("ebuild process exited: {code}"))?,
-                    _ => Err(anyhow!("ebuild process terminated abnormally"))?,
+                let status = process.wait()?;
+                if status.success() {
+                    trace!("ebuild process (PID: {}) exited successfully", process.id());
+                    break;
                 }
+                return Err(anyhow!(
+                    "ebuild process exited with non-zero status: {status}"
+                ));
             };
 
             match request {
@@ -183,7 +174,6 @@ impl<'a> EbuildPhaseHandler<'a> {
         // https://bugs.gentoo.org/946193
         // https://bugs.gentoo.org/946179
         let mut args = vec![
-            SANDBOX_BINARY_PATH,
             BASH_BINARY_PATH,
             "+O",
             "patsub_replacement",

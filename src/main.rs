@@ -21,7 +21,6 @@ pub mod ebuild;
 mod linefile;
 pub mod makenv;
 pub mod package;
-pub mod process;
 mod profile;
 mod regex;
 mod repository;
@@ -68,6 +67,7 @@ enum Command {
 
     /// Generate metadata cache for ebuild repositories
     Gencache {
+        /// Only generate cache for the given repository (defaults to all)
         #[arg(value_name = "repo")]
         repo: Option<String>,
     },
@@ -166,6 +166,7 @@ fn gencache(repo_name: Option<String>, repo_set: &mut RepoSet) -> Result<()> {
             .ok_or_else(|| anyhow!("repository '{repo}' doesn't exist"))?;
         repo.build_package_index()
             .with_context(|| anyhow!("unable to build package index for {repo}"))?;
+        return Ok(());
     }
 
     for repo in repo_set.values_mut() {
