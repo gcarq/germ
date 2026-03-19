@@ -22,6 +22,25 @@ pub enum Eapi {
 }
 
 impl Eapi {
+    /// Creates a new instance from the given EAPI `version`.
+    /// Returns an `Err` if the version is unsupported.
+    fn new(version: &str) -> Result<Self> {
+        let version = match version {
+            "0" => Self::Zero,
+            "1" => Self::One,
+            "2" => Self::Two,
+            "3" => Self::Three,
+            "4" => Self::Four,
+            "5" => Self::Five,
+            "6" => Self::Six,
+            "7" => Self::Seven,
+            "8" => Self::Eight,
+            "9" => Self::Nine,
+            x => Err(anyhow!("unsupported EAPI: '{x}'"))?,
+        };
+        Ok(version)
+    }
+
     /// Returns `true` if this EAPI is supported for ebuilds.
     pub const fn is_supported_for_ebuilds(&self) -> bool {
         matches!(self, Self::Seven | Self::Eight | Self::Nine)
@@ -56,23 +75,8 @@ impl Eapi {
 impl FromStr for Eapi {
     type Err = anyhow::Error;
 
-    /// Creates a new instance from the given EAPI `version`.
-    /// Returns an `Err` if the version is unsupported.
     fn from_str(version: &str) -> Result<Self> {
-        let version = match version {
-            "0" => Self::Zero,
-            "1" => Self::One,
-            "2" => Self::Two,
-            "3" => Self::Three,
-            "4" => Self::Four,
-            "5" => Self::Five,
-            "6" => Self::Six,
-            "7" => Self::Seven,
-            "8" => Self::Eight,
-            "9" => Self::Nine,
-            x => Err(anyhow!("unsupported EAPI: '{x}'"))?,
-        };
-        Ok(version)
+        Self::new(version)
     }
 }
 

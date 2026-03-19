@@ -35,11 +35,9 @@ pub enum PackageSlot {
     EqSubSlot(Box<str>, Box<str>),
 }
 
-impl FromStr for PackageSlot {
-    type Err = anyhow::Error;
-
+impl PackageSlot {
     /// Creates a new [`Slot`] from the given `slot` string.
-    fn from_str(slot_str: &str) -> Result<Self> {
+    fn new(slot_str: &str) -> Result<Self> {
         match slot_str {
             "*" => return Ok(Self::Any),
             "=" => return Ok(Self::AnyRebuild),
@@ -64,6 +62,14 @@ impl FromStr for PackageSlot {
         };
 
         Ok(slot)
+    }
+}
+
+impl FromStr for PackageSlot {
+    type Err = anyhow::Error;
+
+    fn from_str(slot_str: &str) -> Result<Self> {
+        Self::new(slot_str)
     }
 }
 

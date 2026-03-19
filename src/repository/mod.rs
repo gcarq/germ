@@ -26,7 +26,6 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use regex::Regex;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::LazyLock;
 use std::{fmt, fs};
 
@@ -265,12 +264,11 @@ impl Repository {
         if !fs::exists(&eapi_file)? {
             return Ok(Eapi::default());
         }
-        Eapi::from_str(
-            fs::read_to_string(&eapi_file)?
-                .lines()
-                .next()
-                .ok_or_else(|| anyhow!("Empty eapi file"))?,
-        )
+        fs::read_to_string(&eapi_file)?
+            .lines()
+            .next()
+            .ok_or_else(|| anyhow!("Empty eapi file"))?
+            .parse()
     }
 }
 

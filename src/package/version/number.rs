@@ -14,25 +14,12 @@ pub struct VersionNumber {
 }
 
 impl VersionNumber {
-    /// Returns an iterator over the string representations of each component
-    /// including the optional letter suffix as the last element.
-    pub fn iter(&self) -> impl Iterator<Item = String> {
-        self.components
-            .iter()
-            .map(ToString::to_string)
-            .chain(self.letter.map(|c| c.to_string()))
-    }
-}
-
-impl FromStr for VersionNumber {
-    type Err = anyhow::Error;
-
     /// Creates a [`VersionNumber`] by splitting the version into its numeric components
     /// and an optional letter suffix.
     ///
     /// For example, `"1.2.3a"` becomes `(["1", "2", "3", "a"], Some('a'))` while
     /// `"2.0.1"` becomes `(["2", "0", "1"], None)`.
-    fn from_str(version: &str) -> Result<Self> {
+    fn new(version: &str) -> Result<Self> {
         let (version, letter) = match version
             .chars()
             .last()
@@ -51,6 +38,23 @@ impl FromStr for VersionNumber {
             .map(|(idx, comp)| NumberComponent::new(comp, idx))
             .collect::<Result<_>>()?;
         Ok(Self { components, letter })
+    }
+
+    /// Returns an iterator over the string representations of each component
+    /// including the optional letter suffix as the last element.
+    pub fn iter(&self) -> impl Iterator<Item = String> {
+        self.components
+            .iter()
+            .map(ToString::to_string)
+            .chain(self.letter.map(|c| c.to_string()))
+    }
+}
+
+impl FromStr for VersionNumber {
+    type Err = anyhow::Error;
+
+    fn from_str(version: &str) -> Result<Self> {
+        Self::new(version)
     }
 }
 
@@ -290,11 +294,11 @@ mod tests {
 
     #[test]
     fn test_version_number_display() {
-        let test_cases = vec![
-            (VersionNumber::from_str("1.2.3a").unwrap(), "1.2.3a"),
-            (VersionNumber::from_str("2.0.1").unwrap(), "2.0.1"),
-            (VersionNumber::from_str("1.2.03").unwrap(), "1.2.03"),
-            (VersionNumber::from_str("20251122").unwrap(), "20251122"),
+        let test_cases: Vec<(VersionNumber, &str)> = vec![
+            ("1.2.3a".parse().unwrap(), "1.2.3a"),
+            ("2.0.1".parse().unwrap(), "2.0.1"),
+            ("1.2.03".parse().unwrap(), "1.2.03"),
+            ("20251122".parse().unwrap(), "20251122"),
         ];
         for (version, expected) in test_cases {
             assert_eq!(version.to_string(), expected);

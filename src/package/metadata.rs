@@ -1,6 +1,6 @@
-use crate::deps::UseFlag;
 use crate::deps::atom::Atom;
 use crate::deps::expr::DepExpression;
+use crate::deps::{PrefixedUseFlag, UseFlag};
 use crate::eapi::Eapi;
 use crate::package::slot::PackageSlot;
 use crate::repository::eclass::Eclass;
@@ -25,7 +25,7 @@ pub struct PackageMetadata {
     pub inherit: Vec<String>,
     pub restrict: DepExpression<UseFlag>,
     pub defined_phases: Vec<String>,
-    pub iuse: Vec<UseFlag>,
+    pub iuse: Vec<PrefixedUseFlag>,
     pub required_use: DepExpression<UseFlag>,
     pub slot: PackageSlot,
     pub depend: DepExpression<Atom>,
@@ -148,7 +148,7 @@ impl PackageMetadata {
     pub fn iuse(mut self, value: &str) -> Result<Self> {
         self.iuse = value
             .split_whitespace()
-            .map(UseFlag::from_str)
+            .map(PrefixedUseFlag::from_str)
             .collect::<Result<_>>()?;
         Ok(self)
     }
@@ -159,7 +159,7 @@ impl PackageMetadata {
     }
 
     pub fn slot(mut self, value: &str) -> Result<Self> {
-        self.slot = PackageSlot::from_str(value)?;
+        self.slot = value.parse()?;
         Ok(self)
     }
 
@@ -243,7 +243,7 @@ mod tests {
             "DESCRIPTION=Example python package",
             "KEYWORDS=amd64 x86",
             "INHERITED= toolchain-funcs bash-completion-r1 eapi9-ver edo linux-info systemd",
-            "IUSE=examples ipv6",
+            "IUSE=examples +ipv6",
             "REQUIRED_USE=^^ ( python_single_target_python3_11 )",
             "PDEPEND=",
             "BDEPEND= \tpython_single_target_python3_11? ( \t dev-python/setuptools \t )",
@@ -284,10 +284,7 @@ mod tests {
         assert_eq!(metadata.defined_phases.len(), 0);
         assert_eq!(
             metadata.iuse,
-            vec![
-                UseFlag::from_str("examples").unwrap(),
-                UseFlag::from_str("ipv6").unwrap()
-            ]
+            vec!["examples".parse().unwrap(), "+ipv6".parse().unwrap()]
         );
         assert_eq!(
             metadata.required_use.to_string(),

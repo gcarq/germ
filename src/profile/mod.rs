@@ -9,7 +9,6 @@ use crate::utils::{FileFromPath, Inherit};
 use anyhow::{Context, Result, anyhow};
 use log::{debug, warn};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::{fmt, fs};
 
 /// Represents a profile outlined in PMS section 5.
@@ -171,13 +170,12 @@ impl Profile {
         if !path.exists() {
             return Ok(Eapi::default());
         }
-        Eapi::from_str(
-            fs::read_to_string(path)
-                .with_context(|| "unable to read eapi file")?
-                .lines()
-                .next()
-                .ok_or_else(|| anyhow!("empty eapi file"))?,
-        )
+        fs::read_to_string(path)
+            .with_context(|| "unable to read eapi file")?
+            .lines()
+            .next()
+            .ok_or_else(|| anyhow!("empty eapi file"))?
+            .parse()
     }
 }
 

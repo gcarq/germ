@@ -12,18 +12,24 @@ const SUFFIX_PREFIXES: [&str; 5] = ["alpha", "beta", "pre", "rc", "p"];
 #[cfg_attr(test, derive(Debug))]
 pub struct VersionSuffixes(Box<[VersionSuffix]>);
 
-impl FromStr for VersionSuffixes {
-    type Err = anyhow::Error;
-
+impl VersionSuffixes {
     /// Parses a string of version suffixes separated by underscores into a [`VersionSuffixes`] instance.
     /// `'_'` prefixes are ignored For example, `"_beta_p20230101"` is still valid.
-    fn from_str(suffixes: &str) -> Result<Self> {
+    fn new(suffixes: &str) -> Result<Self> {
         let suffixes = suffixes
             .split('_')
             .filter(|s| !s.is_empty())
             .map(VersionSuffix::new)
             .collect::<Result<_>>()?;
         Ok(Self(suffixes))
+    }
+}
+
+impl FromStr for VersionSuffixes {
+    type Err = anyhow::Error;
+
+    fn from_str(suffixes: &str) -> Result<Self> {
+        Self::new(suffixes)
     }
 }
 
@@ -146,7 +152,7 @@ impl VersionSuffix {
     }
 
     /// Returns the order of the suffix type for comparison purposes.
-    const fn suffix_order(&self) -> usize {
+    const fn ordinal(&self) -> usize {
         match self {
             VersionSuffix::Alpha(_) => 0,
             VersionSuffix::Beta(_) => 1,
@@ -160,8 +166,8 @@ impl VersionSuffix {
 impl Ord for VersionSuffix {
     /// Compares two package versions according to PMS section 3.3.
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.suffix_order().cmp(&other.suffix_order()) {
-            Ordering::Equal => {}
+        match self.ordinal().cmp(&other.ordinal()) {
+            Ordering::Equal => (),
             non_equal => return non_equal,
         }
 
@@ -199,7 +205,7 @@ impl PartialEq<Self> for VersionSuffix {
 
 impl hash::Hash for VersionSuffix {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.suffix_order().hash(state);
+        self.ordinal().hash(state);
         let num = match self {
             VersionSuffix::Alpha(n)
             | VersionSuffix::Beta(n)
@@ -250,7 +256,7 @@ mod tests {
             ),
         ];
         for (input, expected) in test_cases {
-            let suffixes = VersionSuffixes::from_str(input).unwrap();
+            let suffixes = input.parse::<VersionSuffixes>().unwrap();
             assert_eq!(suffixes.0, expected);
         }
     }

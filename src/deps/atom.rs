@@ -61,10 +61,8 @@ pub enum AtomOperator {
     Approximate,
 }
 
-impl FromStr for AtomOperator {
-    type Err = anyhow::Error;
-
-    fn from_str(operator: &str) -> Result<Self> {
+impl AtomOperator {
+    pub fn new(operator: &str) -> Result<Self> {
         let op = match operator {
             "<" => AtomOperator::Less,
             "<=" => AtomOperator::LessEqual,
@@ -75,6 +73,14 @@ impl FromStr for AtomOperator {
             _ => return Err(anyhow!("invalid operator: {operator}")),
         };
         Ok(op)
+    }
+}
+
+impl FromStr for AtomOperator {
+    type Err = anyhow::Error;
+
+    fn from_str(operator: &str) -> Result<Self> {
+        Self::new(operator)
     }
 }
 
@@ -130,7 +136,7 @@ impl Atom {
             return Ok(
                 Self::from_regex_capture(&caps, AtomVariant::VersionOperator)?.with_operator(
                     match caps.name("operator") {
-                        Some(m) => Some(AtomOperator::from_str(m.as_str())?),
+                        Some(m) => Some(m.as_str().parse()?),
                         None => None,
                     },
                 ),
@@ -182,7 +188,7 @@ impl Atom {
             version,
             slot: captures
                 .name("slot")
-                .map(|m| PackageSlot::from_str(m.as_str()))
+                .map(|m| m.as_str().parse())
                 .transpose()?,
             repo: captures.name("repo").map(|m| m.as_str().to_owned()),
             use_deps: captures

@@ -1,4 +1,4 @@
-mod package;
+pub mod package;
 
 use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;

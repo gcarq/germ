@@ -9,7 +9,6 @@ use number::VersionNumber;
 use regex::Regex;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
-use std::str::FromStr;
 use std::sync::LazyLock;
 
 /// Regex to validate and parse `version`, `suffixes` and the `revision`.
@@ -33,9 +32,9 @@ impl PackageVersion {
     /// For example: `PackageVersion::new("1.2.3a", Some("_alpha1_p20240101"), "1")`
     pub fn new(version: &str, suffixes: Option<&str>, revision: Option<&str>) -> Result<Self> {
         Ok(Self {
-            number: VersionNumber::from_str(version)?,
+            number: version.parse()?,
             suffixes: match suffixes {
-                Some(s) => VersionSuffixes::from_str(s)?,
+                Some(s) => s.parse()?,
                 None => VersionSuffixes::default(),
             },
             revision: match revision {
