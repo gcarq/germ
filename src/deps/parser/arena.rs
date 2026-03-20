@@ -1,5 +1,5 @@
-use crate::deps::UseFlag;
-use crate::deps::expr::ExpressionItem;
+use crate::deps::ExpressionItem;
+use crate::deps::useflag::UseFlag;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::ops::Range;

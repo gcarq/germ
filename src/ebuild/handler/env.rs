@@ -8,7 +8,7 @@ use std::ops::Deref;
 /// Unset selected variables so that they don't needlessly propagate down into the ebuild
 /// environment.
 ///
-/// Exclude anything that is not allowed (like `BZIP`) or that can beextremely long (like `SRC_URI`)
+/// Exclude anything that is not allowed (like `BZIP`) or extremely long (like `SRC_URI`)
 /// since that could cause `execve()` calls to fail with E2BIG errors.
 const ENV_UNSET: [&str; 88] = [
     // Must be unset to avoid breaking the ebuild process
@@ -205,7 +205,7 @@ impl EbuildEnv {
             .collect::<FxHashMap<String, String>>();
 
         if let Some(env_unset) = make_env.get("ENV_UNSET") {
-            for name in env_unset.deref() {
+            for name in env_unset.inner() {
                 env.remove(name);
             }
         }

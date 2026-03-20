@@ -1,10 +1,10 @@
 pub mod arena;
 mod lexer;
 
-use crate::deps::UseFlag;
-use crate::deps::expr::ExpressionItem;
+use crate::deps::ExpressionItem;
 use crate::deps::parser::arena::{Expression, ExpressionArena, ExpressionId};
 use crate::deps::parser::lexer::{Lexer, Token};
+use crate::deps::useflag::UseFlag;
 use anyhow::{Result, anyhow};
 use std::ops::Range;
 

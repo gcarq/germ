@@ -13,7 +13,6 @@ use std::path::Path;
 
 /// Holds the portage configuration that usually resides in `/etc/portage`.
 pub struct PortageConf {
-    profile: Profile,
     pub make_env: MakeEnv,
     pub mask_manager: MaskManager,
 }
@@ -44,7 +43,6 @@ impl PortageConf {
         .with_context(|| "unable to build MaskManager")?;
 
         Ok(PortageConf {
-            profile,
             make_env,
             mask_manager,
         })
@@ -59,11 +57,11 @@ impl PortageConf {
         let make_conf = MakeEnv::from_path(&path.join("make.conf"), true, false)
             .with_context(|| "unable to process make.conf")?;
 
-        let mut make_env = MakeEnv::default();
-        make_env.inherit_from(&make_globals);
-        make_env.inherit_from(&profile.make_defaults);
-        make_env.inherit_from(&make_conf);
-        Ok(make_env)
+        let env = MakeEnv::default()
+            .inherit(&make_globals)
+            .inherit(&profile.make_defaults)
+            .inherit(&make_conf);
+        Ok(env)
     }
 
     /// Sanity check to ensure the given `ARCH` is supported by at least one repository.

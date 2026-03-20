@@ -1,5 +1,5 @@
-use crate::deps::UseFlag;
-use crate::deps::expr::ExpressionItem;
+use crate::deps::ExpressionItem;
+use crate::deps::useflag::UseFlag;
 use crate::package::slot::PackageSlot;
 use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY, PACKAGE, PV_REV, REPOSITORY, V_REV};
@@ -324,7 +324,7 @@ mod tests {
                 Atom {
                     category: "sys-libs".into(),
                     package: "glibc".into(),
-                    use_deps: Some(vec![UseFlag("audit".into()), UseFlag("caps(-)".into())]),
+                    use_deps: Some(vec!["audit".parse().unwrap(), "caps(-)".parse().unwrap()]),
                     ..Default::default()
                 },
             ),
@@ -419,7 +419,7 @@ mod tests {
                     slot: Some(PackageSlot::Eq("2.2".into())),
                     repo: Some("gentoo".into()),
                     variant: AtomVariant::VersionOperator,
-                    use_deps: Some(vec![UseFlag("cet".into()), UseFlag("clang".into())]),
+                    use_deps: Some(vec!["cet".parse().unwrap(), "clang".parse().unwrap()]),
                 },
             ),
         ];
@@ -478,7 +478,7 @@ mod tests {
                     package: "7zip".into(),
                     version: PackageVersion::new("26", None, None).ok(),
                     variant: AtomVariant::VersionWildcard,
-                    use_deps: Some(vec![UseFlag("rar".into())]),
+                    use_deps: Some(vec!["rar".parse().unwrap()]),
                     ..Default::default()
                 },
             ),
@@ -557,7 +557,7 @@ mod tests {
                     slot: Some(PackageSlot::Eq("1.70".into())),
                     repo: Some("gentoo".into()),
                     variant: AtomVariant::VersionOperator,
-                    use_deps: Some(vec![UseFlag("clippy".into())]),
+                    use_deps: Some(vec!["clippy".parse().unwrap()]),
                 },
                 ">=dev-lang/rust-1.70.0_beta_p11-r2:1.70::gentoo[clippy]",
             ),

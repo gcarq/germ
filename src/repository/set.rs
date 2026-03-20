@@ -6,9 +6,9 @@ use crate::types::FxHashMap;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
 use log::debug;
+use std::iter;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
-use std::{fmt, iter};
 
 /// Resolves and handles all available [`Repository`] instances.
 ///
@@ -107,14 +107,5 @@ impl Deref for RepoSet {
 impl DerefMut for RepoSet {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.repos
-    }
-}
-
-impl fmt::Display for RepoSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (name, repo) in &self.repos {
-            writeln!(f, "{name}\n    location: {}\n", repo.location.display())?;
-        }
-        Ok(())
     }
 }

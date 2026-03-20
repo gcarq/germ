@@ -1,4 +1,4 @@
-use crate::deps::UseFlag;
+use crate::deps::useflag::UseFlag;
 use crate::package::Package;
 use crate::package::cpv::CPV;
 use crate::package::metadata::PackageMetadata;

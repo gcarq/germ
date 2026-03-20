@@ -1,6 +1,6 @@
+use crate::deps::DepExpression;
 use crate::deps::atom::Atom;
-use crate::deps::expr::DepExpression;
-use crate::deps::{PrefixedUseFlag, UseFlag};
+use crate::deps::useflag::{PrefixedUseFlag, UseFlag};
 use crate::eapi::Eapi;
 use crate::package::slot::PackageSlot;
 use crate::repository::eclass::Eclass;
