@@ -114,7 +114,7 @@ pub enum AtomVariant {
 /// calculating dependencies between packages.
 /// TODO:
 ///  * implement remaining atom variants (see man 5 ebuild)
-#[derive(Archive, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Archive, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct Atom {
     pub operator: Option<AtomOperator>,
@@ -223,8 +223,6 @@ impl Atom {
         Ok(Some(PackageVersion::new(version, suffixes, revision)?))
     }
 }
-
-impl ExpressionItem for Atom {}
 
 impl FromStr for Atom {
     type Err = anyhow::Error;

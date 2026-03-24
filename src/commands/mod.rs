@@ -1,3 +1,4 @@
+//! This module contains all CLI subcommands that are available to the user.
 mod gencache;
 mod info;
 mod install;
@@ -41,7 +42,7 @@ pub enum Command {
 
 pub fn execute(command: &Command, repo_set: &mut RepoSet, conf: &PortageConf) -> Result<()> {
     match command {
-        Command::Info { atom } => info(atom, repo_set, &conf.make_env)?,
+        Command::Info { atom } => info(atom, repo_set, conf)?,
         Command::Install { atom } => install(atom, repo_set)?,
         Command::Gencache { repo } => gencache(repo, repo_set)?,
         Command::Sync => sync(repo_set),

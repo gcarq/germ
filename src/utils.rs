@@ -1,9 +1,9 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use md5::{Digest, Md5};
 use std::fs::File;
+use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::{fs, io};
 use walkdir::WalkDir;
 
 /// Trait for inheriting configurations from another instance.
@@ -21,51 +21,6 @@ pub trait Inherit {
         child.inherit_from(parent);
         child
     }
-}
-
-/// Trait for types that can be constructed from file(s) at a given path.
-pub trait FileFromPath {
-    /// Creates an instance from the file(s) at the given `path`.
-    /// The `path` can point to a single file or a directory containing multiple files.
-    /// If the `path` is a directory and `recursive` is true, all files in the directory
-    /// are concatenated together in order of their filename.
-    /// If `optional` is true, the absence of the [`Path`] does not result in an `Err`.
-    fn from_path(path: &Path, recursive: bool, optional: bool) -> Result<Self>
-    where
-        Self: Sized + Default,
-    {
-        let metadata = match path.metadata() {
-            Ok(metadata) => metadata,
-            Err(_) if optional => return Ok(Self::default()),
-            Err(e) => return Err(anyhow!("unable to access {}: {e}", path.display())),
-        };
-        if metadata.is_file() {
-            let content = fs::read_to_string(path)?;
-            return Self::from_string(content);
-        }
-
-        if !recursive {
-            return Err(anyhow!(
-                "{} is a directory, but should be a file",
-                path.display()
-            ));
-        }
-
-        let content = list_files(path)
-            .map(|p| match p {
-                Ok(p) => fs::read_to_string(&p)
-                    .with_context(|| anyhow!("unable to read file '{}'", p.display())),
-                Err(err) => Err(anyhow!(err)),
-            })
-            .collect::<Result<Vec<_>>>()?
-            .join("\n");
-        Self::from_string(content)
-    }
-
-    /// Creates an instance from the `content`.
-    fn from_string(content: String) -> Result<Self>
-    where
-        Self: Sized;
 }
 
 /// Calculates and returns the MD5 hash of the given `file` as a hexadecimal `String`.

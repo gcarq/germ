@@ -1,8 +1,9 @@
 mod value;
 
+use crate::files::FileFromPath;
 use crate::types::FxHashMap;
 use crate::utils;
-use crate::utils::{FileFromPath, Inherit};
+use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
 use std::ops::Deref;
 use value::EnvValue;

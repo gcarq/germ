@@ -1,34 +1,35 @@
+pub mod useflag;
+
 use crate::deps::atom::Atom;
-use crate::linefile::LineBasedFile;
+use crate::files::PackageEntries;
 use crate::package::Package;
 use crate::profile::Profile;
 use crate::repository::set::RepoSet;
 use crate::types::FxHashMap;
 use crate::utils::Inherit;
-use anyhow::{Context, Result};
 use log::debug;
 
 /// Holds all package masks and should be used as the single source of truth  when checking
 /// if a package is masked. Masks and unmasks are stored in a `HashMap` that maps the
 /// qualified package name to a vector of [`Atom`].
-pub struct MaskManager {
+pub struct PackageMasks {
     pub mask: FxHashMap<Box<str>, Vec<Atom>>,
     pub unmask: FxHashMap<Box<str>, Vec<Atom>>,
 }
 
-impl MaskManager {
-    /// Builds a [`MaskManager`] by aggregating package masks and unmasks in the following order:
+impl PackageMasks {
+    /// Builds a [`PackageMasks`] by aggregating package masks and unmasks in the following order:
     /// 1. Repository
     /// 2. Profile
     /// 3. User defined
     pub fn new(
         repo_set: &RepoSet,
         profile: &Profile,
-        user_mask: LineBasedFile,
-        user_unmask: LineBasedFile,
-    ) -> Result<Self> {
-        let mut mask = LineBasedFile::default().inherit(&profile.package_mask);
-        let mut unmask = LineBasedFile::default().inherit(&profile.package_unmask);
+        user_mask: PackageEntries,
+        user_unmask: PackageEntries,
+    ) -> Self {
+        let mut mask = PackageEntries::default().inherit(&profile.package_mask);
+        let mut unmask = PackageEntries::default().inherit(&profile.package_unmask);
         for repo in repo_set.values() {
             mask.inherit_from(&repo.package_mask);
             unmask.inherit_from(&repo.package_unmask);
@@ -36,17 +37,15 @@ impl MaskManager {
         mask.inherit_from(&user_mask);
         unmask.inherit_from(&user_unmask);
 
-        let mask =
-            Self::map_from_linefile(mask).with_context(|| "unable to collect package masks")?;
-        let unmask =
-            Self::map_from_linefile(unmask).with_context(|| "unable to collect package unmasks")?;
+        let mask = Self::map_from_entries(mask);
+        let unmask = Self::map_from_entries(unmask);
         let manager = Self { mask, unmask };
         debug!(
             "Initialized MaskManager with {} masks and {} unmasks",
             manager.mask.len(),
             manager.unmask.len()
         );
-        Ok(manager)
+        manager
     }
 
     /// Checks if the given `package` is masked according to the current masks.
@@ -64,32 +63,34 @@ impl MaskManager {
     }
 
     /// Helper function to build a map from qualified atom names to [`Atom`]
-    /// from a [`LineBasedFile`].
-    fn map_from_linefile(linefile: LineBasedFile) -> Result<FxHashMap<Box<str>, Vec<Atom>>> {
+    /// from a [`PackageEntries`].
+    fn map_from_entries(entries: PackageEntries) -> FxHashMap<Box<str>, Vec<Atom>> {
         let mut map = FxHashMap::default();
-        for atom in linefile.into_iter().map(|line| Atom::new(&line)) {
-            let atom = atom?;
-            map.entry(atom.qualified_name().into())
-                .or_insert_with(|| Vec::with_capacity(1))
-                .push(atom);
+        for atom in entries.into_iter() {
+            if let Some(atom) = atom.into_value() {
+                map.entry(atom.qualified_name().into())
+                    .or_insert_with(|| Vec::with_capacity(1))
+                    .push(atom);
+            }
         }
-        Ok(map)
+        map
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::files::FileFromPath;
     use crate::package::cpv::CPV;
     use crate::package::version::PackageVersion;
 
     #[test]
     fn test_is_masked() {
-        let mask_lines = LineBasedFile::from_iter(["dev-lang/rust", "app-editors/vim"]);
-        let unmask_lines = LineBasedFile::from_iter(["=dev-lang/rust-1.50*"]);
+        let mask_lines =
+            PackageEntries::from_string("dev-lang/rust\napp-editors/vim".into()).unwrap();
+        let unmask_lines = PackageEntries::from_string("=dev-lang/rust-1.50*".into()).unwrap();
         let repo_set = RepoSet::default();
-        let manager =
-            MaskManager::new(&repo_set, &Profile::default(), mask_lines, unmask_lines).unwrap();
+        let manager = PackageMasks::new(&repo_set, &Profile::default(), mask_lines, unmask_lines);
 
         let pkg1 = Package {
             cpv: CPV::new(

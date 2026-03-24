@@ -2,6 +2,7 @@ mod config;
 mod desc;
 pub mod eclass;
 mod index;
+mod misc;
 pub mod set;
 mod sync;
 mod utils;
@@ -9,17 +10,18 @@ mod utils;
 use crate::consts::DEFAULT_CACHE_PATH;
 use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
-use crate::linefile::LineBasedFile;
+use crate::files::{FileFromPath, PackageEntries};
 use crate::package::Package;
 use crate::package::cpv::CPV;
 use crate::regex::PV_REV;
 use crate::repository::config::RepositoryConfig;
-use crate::repository::desc::ProfileDescription;
+use crate::repository::desc::ProfileDescriptions;
 use crate::repository::eclass::Eclasses;
 use crate::repository::index::{AvailablePackageIndex, ResolvedPackageIndex};
+use crate::repository::misc::ArchList;
 use crate::repository::sync::{SyncHandler, build_sync_handler};
 use crate::repository::utils::resolve_cpv_from_category;
-use crate::utils::{FileFromPath, Inherit};
+use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
 use log::{debug, info};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -40,13 +42,12 @@ static EBUILD_RE: LazyLock<Regex> =
 pub struct Repository {
     pub location: PathBuf,
     pub name: String,
-    eapi: Eapi,
     categories: Vec<String>,
-    pub package_mask: LineBasedFile,
-    pub package_unmask: LineBasedFile,
+    pub package_mask: PackageEntries,
+    pub package_unmask: PackageEntries,
     pub eclasses: Eclasses,
-    pub arch_list: LineBasedFile,
-    pub profiles_desc: Box<[ProfileDescription]>,
+    pub arch_list: ArchList,
+    pub profiles_desc: ProfileDescriptions,
     avail_package_idx: AvailablePackageIndex,
     resolved_package_idx: ResolvedPackageIndex,
 
@@ -66,29 +67,28 @@ impl Repository {
         let profiles = location.join("profiles");
         let repository = Self {
             categories: Vec::default(),
-            package_mask: LineBasedFile::from_path(
+            package_mask: PackageEntries::from_path(
                 &profiles.join("package.mask"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            package_unmask: LineBasedFile::from_path(
+            package_unmask: PackageEntries::from_path(
                 &profiles.join("package.unmask"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
             eclasses: Eclasses::default(),
-            arch_list: LineBasedFile::from_path(&profiles.join("arch.list"), false, true)?,
-            profiles_desc: LineBasedFile::from_path(&profiles.join("profiles.desc"), false, true)?
-                .into_iter()
-                .map(|line| ProfileDescription::from_line(&line))
-                .collect::<Result<_>>()?,
+            arch_list: ArchList::from_path(&profiles.join("arch.list"), false, true)?,
+            profiles_desc: ProfileDescriptions::from_path(
+                &profiles.join("profiles.desc"),
+                false,
+                true,
+            )?,
             name: config.name.clone(),
             avail_package_idx: AvailablePackageIndex::default(),
             resolved_package_idx: ResolvedPackageIndex::default(),
             sync_handler: build_sync_handler(&config.raw_properties)?,
             location,
-
-            eapi,
         };
         Ok(repository)
     }

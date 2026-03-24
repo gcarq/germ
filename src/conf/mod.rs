@@ -1,20 +1,23 @@
-mod manager;
+mod masks;
 
+use crate::conf::masks::useflag::UseMasks;
 use crate::consts::DEFAULT_PORTAGE_CONF_PATH;
-use crate::linefile::LineBasedFile;
+use crate::files::pkguse::PackageUseEntries;
+use crate::files::{FileFromPath, PackageEntries, UseEntries};
 use crate::makenv::MakeEnv;
 use crate::profile::Profile;
 use crate::repository::set::RepoSet;
-use crate::utils::{FileFromPath, Inherit};
+use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
 use log::debug;
-use manager::MaskManager;
+use masks::PackageMasks;
 use std::path::Path;
 
 /// Holds the portage configuration that usually resides in `/etc/portage`.
 pub struct PortageConf {
     pub make_env: MakeEnv,
-    pub mask_manager: MaskManager,
+    pub package_masks: PackageMasks,
+    pub use_masks: UseMasks,
 }
 
 impl PortageConf {
@@ -34,17 +37,29 @@ impl PortageConf {
         Self::validate_arch(&arch, repo_set)?;
         Self::validate_profile(&profile, &arch, repo_set)?;
 
-        let mask_manager = MaskManager::new(
+        let package_masks = PackageMasks::new(
             repo_set,
             &profile,
-            LineBasedFile::from_path(&path.join("package.mask"), true, true)?,
-            LineBasedFile::from_path(&path.join("package.unmask"), true, true)?,
-        )
-        .with_context(|| "unable to build MaskManager")?;
+            PackageEntries::from_path(&path.join("package.mask"), true, true)?,
+            PackageEntries::from_path(&path.join("package.unmask"), true, true)?,
+        );
+
+        let use_masks = UseMasks::new(
+            &profile,
+            //PackageUseEntries::from_path(&path.join("package.use"), true, true)?,
+            PackageUseEntries::default(),
+            UseEntries::from_path(&path.join("profile").join("use.mask"), true, true)?,
+            PackageUseEntries::from_path(
+                &path.join("profile").join("package.use.mask"),
+                true,
+                true,
+            )?,
+        );
 
         Ok(PortageConf {
             make_env,
-            mask_manager,
+            package_masks,
+            use_masks,
         })
     }
 
@@ -66,7 +81,7 @@ impl PortageConf {
 
     /// Sanity check to ensure the given `ARCH` is supported by at least one repository.
     fn validate_arch(arch: &str, repo_set: &RepoSet) -> Result<()> {
-        match repo_set.values().any(|repo| repo.arch_list.contains(arch)) {
+        match repo_set.values().any(|repo| repo.arch_list.supports(arch)) {
             true => Ok(()),
             false => Err(anyhow!(
                 "ARCH value '{arch}' is not supported by any configured repository"

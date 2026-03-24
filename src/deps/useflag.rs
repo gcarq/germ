@@ -1,4 +1,3 @@
-use crate::deps::ExpressionItem;
 use anyhow::{Result, anyhow};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
@@ -70,9 +69,9 @@ impl fmt::Display for PrefixedUseFlag {
 }
 
 /// Represents a USE flag
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd)]
-#[cfg_attr(test, derive(Default, Debug))]
-pub struct UseFlag(Box<str>);
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Debug)]
+#[cfg_attr(test, derive(Default))]
+pub struct UseFlag(String);
 
 impl UseFlag {
     // TODO: implement name validation
@@ -80,11 +79,9 @@ impl UseFlag {
         if flag.is_empty() {
             return Err(anyhow!("use flag cannot be empty"));
         }
-        Ok(UseFlag(flag.into()))
+        Ok(UseFlag(flag))
     }
 }
-
-impl ExpressionItem for UseFlag {}
 
 impl FromStr for UseFlag {
     type Err = anyhow::Error;
@@ -101,7 +98,7 @@ impl fmt::Display for UseFlag {
 }
 
 impl Deref for UseFlag {
-    type Target = Box<str>;
+    type Target = String;
 
     fn deref(&self) -> &Self::Target {
         &self.0

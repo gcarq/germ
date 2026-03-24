@@ -2,8 +2,10 @@ pub mod atom;
 mod parser;
 pub mod useflag;
 
+use crate::deps::atom::Atom;
 use crate::deps::parser::ExpressionParser;
 use crate::deps::parser::arena::ExpressionArena;
+use crate::deps::useflag::UseFlag;
 use anyhow::Result;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
@@ -16,6 +18,9 @@ pub trait ExpressionItem: FromStr<Err = anyhow::Error> + fmt::Display {
         Self::from_str(input)
     }
 }
+
+impl ExpressionItem for Atom {}
+impl ExpressionItem for UseFlag {}
 
 /// Holds a dependency expression, which can be evaluated to check if all package requirements
 /// are satisfied.

@@ -4,7 +4,7 @@ mod consts;
 pub mod deps;
 mod eapi;
 pub mod ebuild;
-mod linefile;
+mod files;
 pub mod makenv;
 pub mod package;
 mod profile;

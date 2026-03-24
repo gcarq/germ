@@ -1,11 +1,12 @@
 mod deprecation;
 
 use crate::eapi::Eapi;
-use crate::linefile::LineBasedFile;
+use crate::files::pkguse::PackageUseEntries;
+use crate::files::{FileFromPath, PackageEntries, SysPackageEntries, UseEntries};
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
 use crate::repository::set::RepoSet;
-use crate::utils::{FileFromPath, Inherit};
+use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
 use log::{debug, warn};
 use std::path::{Path, PathBuf};
@@ -21,29 +22,29 @@ pub struct Profile {
     pub make_defaults: MakeEnv,
 
     // Defines a system set for this profile
-    packages: LineBasedFile,
+    packages: SysPackageEntries,
     // Prevents packages from being installed in this profile
-    pub package_mask: LineBasedFile,
+    pub package_mask: PackageEntries,
     // Allows packages to be installed that would otherwise be masked
-    pub package_unmask: LineBasedFile,
+    pub package_unmask: PackageEntries,
+
     // Override the default USE flags specified by make.defaults on a per-package basis
-    package_use: LineBasedFile,
+    pub package_use: PackageUseEntries,
+    // USE flags that must never be enabled on a per-package or per-version basis
+    pub package_use_mask: PackageUseEntries,
+    // USE flags that must always be enabled on a per-package or per-version basis
+    pub package_use_force: PackageUseEntries,
+    // Same as above but for merged packages due to a stable keyword
+    pub package_use_stable_mask: PackageUseEntries,
+    pub package_use_stable_force: PackageUseEntries,
 
     // USE flags that must never be enabled in this profile
-    use_mask: LineBasedFile,
+    pub use_mask: UseEntries,
     // USE flags that must always be enabled in this profile
-    use_force: LineBasedFile,
+    pub use_force: UseEntries,
     // Same as above but for merged packages due to a stable keyword
-    use_stable_mask: LineBasedFile,
-    use_stable_force: LineBasedFile,
-
-    // USE flags that must never be enabled on a per-package or per-version basis
-    package_use_mask: LineBasedFile,
-    // USE flags that must always be enabled on a per-package or per-version basis
-    package_use_force: LineBasedFile,
-    // Same as above but for merged packages due to a stable keyword
-    package_use_stable_mask: LineBasedFile,
-    package_use_stable_force: LineBasedFile,
+    pub use_stable_mask: UseEntries,
+    pub use_stable_force: UseEntries,
 }
 
 impl Profile {
@@ -54,62 +55,62 @@ impl Profile {
         let mut profile = Self {
             make_defaults: MakeEnv::from_path(&location.join("make.defaults"), false, true)?,
             deprecated: DeprecationInfo::from_path(&location.join("deprecated"))?,
-            packages: LineBasedFile::from_path(
+            packages: SysPackageEntries::from_path(
                 &location.join("packages"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            package_mask: LineBasedFile::from_path(
+            package_mask: PackageEntries::from_path(
                 &location.join("package.mask"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            package_unmask: LineBasedFile::from_path(
+            package_unmask: PackageEntries::from_path(
                 &location.join("package.unmask"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            package_use: LineBasedFile::from_path(
+            package_use: PackageUseEntries::from_path(
                 &location.join("package.use"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            use_mask: LineBasedFile::from_path(
+            use_mask: UseEntries::from_path(
                 &location.join("use.mask"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            use_force: LineBasedFile::from_path(
+            use_force: UseEntries::from_path(
                 &location.join("use.force"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            use_stable_mask: LineBasedFile::from_path(
+            use_stable_mask: UseEntries::from_path(
                 &location.join("use.stable.mask"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            use_stable_force: LineBasedFile::from_path(
+            use_stable_force: UseEntries::from_path(
                 &location.join("use.stable.force"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            package_use_mask: LineBasedFile::from_path(
+            package_use_mask: PackageUseEntries::from_path(
                 &location.join("package.use.mask"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            package_use_force: LineBasedFile::from_path(
+            package_use_force: PackageUseEntries::from_path(
                 &location.join("package.use.force"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            package_use_stable_mask: LineBasedFile::from_path(
+            package_use_stable_mask: PackageUseEntries::from_path(
                 &location.join("package.use.stable.mask"),
                 eapi.supports_profile_file_dirs(),
                 true,
             )?,
-            package_use_stable_force: LineBasedFile::from_path(
+            package_use_stable_force: PackageUseEntries::from_path(
                 &location.join("package.use.stable.force"),
                 eapi.supports_profile_file_dirs(),
                 true,
@@ -216,14 +217,14 @@ mod tests {
     fn test_profile_inherit_from() {
         let parent = Profile {
             make_defaults: MakeEnv::from_string("USE=\"foo\"".into()).unwrap(),
-            use_mask: LineBasedFile::from_string("bar".into()).unwrap(),
+            use_mask: UseEntries::from_string("bar".into()).unwrap(),
             ..Default::default()
         };
 
         let mut child = Profile {
             make_defaults: MakeEnv::from_string("USE=\"bar\"".into()).unwrap(),
-            use_mask: LineBasedFile::from_string("-bar baz".into()).unwrap(),
-            package_use_mask: LineBasedFile::from_string("dev-lang/rust baz".into()).unwrap(),
+            use_mask: UseEntries::from_string("-bar baz".into()).unwrap(),
+            package_use_mask: PackageUseEntries::from_string("dev-lang/rust baz".into()).unwrap(),
             ..Default::default()
         };
 
@@ -232,10 +233,15 @@ mod tests {
             child.make_defaults.get("USE").unwrap().to_string(),
             "foo bar"
         );
-        assert_eq!(child.use_mask.into_inner(), vec!["bar".to_owned()]);
+        assert_eq!(child.use_mask.finalize(), vec!["bar".parse().unwrap()]);
         assert_eq!(
-            child.package_use_mask.into_inner(),
-            vec!["dev-lang/rust baz".to_owned()]
+            child.package_use_mask.finalize(),
+            [(
+                "dev-lang/rust".parse().unwrap(),
+                vec!["baz".parse().unwrap()].into_iter().collect()
+            )]
+            .into_iter()
+            .collect()
         );
     }
 }
