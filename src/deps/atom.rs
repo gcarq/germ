@@ -2,7 +2,7 @@ use crate::deps::ExpressionItem;
 use crate::deps::useflag::UseFlag;
 use crate::package::slot::PackageSlot;
 use crate::package::version::PackageVersion;
-use crate::regex::{CATEGORY, PACKAGE, PV_REV, REPOSITORY, V_REV};
+use crate::regex::{CATEGORY, PV_REV, REPOSITORY, V_REV};
 use anyhow::{Result, anyhow};
 use constcat::concat;
 use regex::{Captures, Regex};
@@ -12,10 +12,15 @@ use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+/// Matches a category name or `*` to indicate a wildcard.
+const ATOM_WC_CAT: &str = r"(?<category>([a-zA-Z0-9_][a-zA-Z0-9_+.-]*)|\*)";
+/// Matches a package name or `*` to indicate a wildcard.
+const ATOM_WC_PKG: &str = r"(?<package>([a-zA-Z0-9_]([a-zA-Z0-9_+-]*[a-zA-Z0-9_+])?)|\*)";
+/// Captures a wildcard category and wildcard package with optional version and revision.
+const ATOM_WC_CP: &str = concat!(ATOM_WC_CAT, "/", ATOM_WC_PKG, "(?:-", V_REV, ")?");
+
 /// Captures atom operators.
 const ATOM_OPERATOR: &str = r"(?<operator>[=~]|[><]=?)";
-/// Captures category and package with optional version and revision.
-const ATOM_CP: &str = concat!(CATEGORY, "/", PACKAGE, "(?:-", V_REV, ")?");
 /// Captures category, package, version and revision.
 const ATOM_CPV_REV: &str = concat!(CATEGORY, "/", PV_REV);
 /// Captures optional slot information in atoms.
@@ -24,14 +29,17 @@ const ATOM_SLOT_LOOSE: &str = r"(?:\:(?P<slot>([a-zA-Z0-9_+./*=-]+)))?";
 const ATOM_REPOSITORY: &str = concat!(r"(?:\:\:", REPOSITORY, ")?");
 /// Captures optional use flag in atoms, e.g. `=dev-lang/rust-1.70.0[clippy]`.
 const ATOM_USEDEP_LOOSE: &str = r"(\[(?P<use_deps>.*)\])?";
+
 /// Regex to capture simple atoms with category and package,
 /// optionally version, slot and repository e.g.: `dev-lang/rust-1.70.0`.
+/// This syntax also allows wildcards for `category` and/or `package`, e.g.: `dev-lang/*`.
 static ATOM_SIMPLE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
-        r"^{ATOM_CP}{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}{ATOM_USEDEP_LOOSE}$"
+        r"^{ATOM_WC_CP}{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}{ATOM_USEDEP_LOOSE}$"
     ))
     .unwrap()
 });
+
 /// Regex to capture atoms with operator, category, package,
 /// version, ... e.g.: `>=dev-lang/rust-1.70`
 static ATOM_OPERATOR_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -40,6 +48,7 @@ static ATOM_OPERATOR_RE: LazyLock<Regex> = LazyLock::new(|| {
     ))
     .unwrap()
 });
+
 /// Regex to capture atoms with an equal operator, category, package and a version wildcard, ...
 /// e.g.: `=dev-lang/rust-1.70*`
 static ATOM_WILDCARD_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -108,6 +117,37 @@ pub enum AtomVariant {
     VersionWildcard,
 }
 
+/// This enum defines two variants to express identifier matching for e.g. `category` and `package`.
+///
+/// [`Self::Exact`] should only match an exact name and [`Self::Any`] should match all values.
+#[derive(Archive, Serialize, Deserialize, Default, Clone, Eq, Hash, PartialEq)]
+#[cfg_attr(test, derive(Debug))]
+pub enum AtomIdent {
+    Exact(String),
+    #[default]
+    Any,
+}
+
+impl FromStr for AtomIdent {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "*" => Ok(Self::Any),
+            _ => Ok(Self::Exact(value.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for AtomIdent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AtomIdent::Exact(inner) => f.write_str(inner),
+            AtomIdent::Any => f.write_char('*'),
+        }
+    }
+}
+
 /// Represents a portage package atom.
 ///
 /// An atom can match one or more [`Package`] and is used for
@@ -118,8 +158,8 @@ pub enum AtomVariant {
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct Atom {
     pub operator: Option<AtomOperator>,
-    pub category: String,
-    pub package: String,
+    pub category: AtomIdent,
+    pub package: AtomIdent,
     pub version: Option<PackageVersion>,
     pub slot: Option<PackageSlot>,
     pub repo: Option<String>,
@@ -179,12 +219,12 @@ impl Atom {
                 .name("category")
                 .ok_or_else(|| anyhow!("atom missing <category>"))?
                 .as_str()
-                .to_owned(),
+                .parse()?,
             package: captures
                 .name("package")
                 .ok_or_else(|| anyhow!("atom missing <package>"))?
                 .as_str()
-                .to_owned(),
+                .parse()?,
             version,
             slot: captures
                 .name("slot")
@@ -237,9 +277,7 @@ impl fmt::Display for Atom {
         if let Some(op) = &self.operator {
             write!(f, "{op}")?;
         }
-        f.write_str(&self.category)?;
-        f.write_char('/')?;
-        f.write_str(&self.package)?;
+        write!(f, "{}/{}", self.category, self.package)?;
         if let Some(version) = &self.version {
             f.write_char('-')?;
             if self.variant == AtomVariant::VersionWildcard {
@@ -273,6 +311,7 @@ impl fmt::Display for Atom {
 
 #[cfg(test)]
 mod tests {
+    use crate::deps::atom::AtomIdent::{Any, Exact};
     use crate::deps::atom::{Atom, AtomOperator, AtomVariant};
     use crate::deps::*;
     use crate::package::slot::PackageSlot;
@@ -284,25 +323,59 @@ mod tests {
             (
                 "dev-lang/rust",
                 Atom {
-                    category: "dev-lang".into(),
-                    package: "rust".into(),
+                    category: Exact("dev-lang".into()),
+                    package: Exact("rust".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "*/*",
+                Atom {
+                    category: Any,
+                    package: Any,
+                    ..Default::default()
+                },
+            ),
+            (
+                "*/rust",
+                Atom {
+                    category: Any,
+                    package: Exact("rust".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "dev-lang/*",
+                Atom {
+                    category: Exact("dev-lang".into()),
+                    package: Any,
                     ..Default::default()
                 },
             ),
             (
                 "dev-lang/rust:1.92.0",
                 Atom {
-                    category: "dev-lang".into(),
-                    package: "rust".into(),
+                    category: Exact("dev-lang".into()),
+                    package: Exact("rust".into()),
                     slot: Some(PackageSlot::Eq("1.92.0".into())),
+                    ..Default::default()
+                },
+            ),
+            (
+                "net-misc/*:*::gentoo",
+                Atom {
+                    category: Exact("net-misc".into()),
+                    package: Any,
+                    slot: Some(PackageSlot::Any),
+                    repo: Some("gentoo".into()),
                     ..Default::default()
                 },
             ),
             (
                 "net-misc/dhcp:*::gentoo",
                 Atom {
-                    category: "net-misc".into(),
-                    package: "dhcp".into(),
+                    category: Exact("net-misc".into()),
+                    package: Exact("dhcp".into()),
                     slot: Some(PackageSlot::Any),
                     repo: Some("gentoo".into()),
                     ..Default::default()
@@ -311,8 +384,8 @@ mod tests {
             (
                 "x11-drivers/nvidia-drivers:0/390",
                 Atom {
-                    category: "x11-drivers".into(),
-                    package: "nvidia-drivers".into(),
+                    category: Exact("x11-drivers".into()),
+                    package: Exact("nvidia-drivers".into()),
                     slot: Some(PackageSlot::EqSubSlot("0".into(), "390".into())),
                     ..Default::default()
                 },
@@ -320,8 +393,8 @@ mod tests {
             (
                 "sys-libs/glibc[audit,caps(-)]",
                 Atom {
-                    category: "sys-libs".into(),
-                    package: "glibc".into(),
+                    category: Exact("sys-libs".into()),
+                    package: Exact("glibc".into()),
                     use_deps: Some(vec!["audit".parse().unwrap(), "caps(-)".parse().unwrap()]),
                     ..Default::default()
                 },
@@ -342,8 +415,8 @@ mod tests {
                 "=sys-apps/memtest86+-7.2.0",
                 Atom {
                     operator: Some(AtomOperator::Equal),
-                    category: "sys-apps".into(),
-                    package: "memtest86+".into(),
+                    category: Exact("sys-apps".into()),
+                    package: Exact("memtest86+".into()),
                     version: PackageVersion::new("7.2.0", None, None).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
@@ -353,8 +426,8 @@ mod tests {
                 ">=sys-apps/sed-4.8",
                 Atom {
                     operator: Some(AtomOperator::GreaterEqual),
-                    category: "sys-apps".into(),
-                    package: "sed".into(),
+                    category: Exact("sys-apps".into()),
+                    package: Exact("sed".into()),
                     version: PackageVersion::new("4.8", None, None).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
@@ -364,8 +437,8 @@ mod tests {
                 "<net-misc/dhcp-3",
                 Atom {
                     operator: Some(AtomOperator::Less),
-                    category: "net-misc".into(),
-                    package: "dhcp".into(),
+                    category: Exact("net-misc".into()),
+                    package: Exact("dhcp".into()),
                     version: PackageVersion::new("3", None, None).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
@@ -375,8 +448,8 @@ mod tests {
                 "<=net-misc/dhcp-3.0_p2",
                 Atom {
                     operator: Some(AtomOperator::LessEqual),
-                    category: "net-misc".into(),
-                    package: "dhcp".into(),
+                    category: Exact("net-misc".into()),
+                    package: Exact("dhcp".into()),
                     version: PackageVersion::new("3.0", Some("p2"), None).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
@@ -386,8 +459,8 @@ mod tests {
                 ">dev-lang/python-3.14.3_beta-r2:3.14",
                 Atom {
                     operator: Some(AtomOperator::Greater),
-                    category: "dev-lang".into(),
-                    package: "python".into(),
+                    category: Exact("dev-lang".into()),
+                    package: Exact("python".into()),
                     version: PackageVersion::new("3.14.3", Some("beta"), Some("2")).ok(),
                     slot: Some(PackageSlot::Eq("3.14".into())),
                     variant: AtomVariant::VersionOperator,
@@ -398,8 +471,8 @@ mod tests {
                 "~dev-lang/rust-1.70.0:1.70.0/1::gentoo",
                 Atom {
                     operator: Some(AtomOperator::Approximate),
-                    category: "dev-lang".into(),
-                    package: "rust".into(),
+                    category: Exact("dev-lang".into()),
+                    package: Exact("rust".into()),
                     version: PackageVersion::new("1.70.0", None, None).ok(),
                     slot: Some(PackageSlot::EqSubSlot("1.70.0".into(), "1".into())),
                     repo: Some("gentoo".into()),
@@ -411,8 +484,8 @@ mod tests {
                 ">=sys-libs/glibc-2.41-r10:2.2::gentoo[cet,clang]",
                 Atom {
                     operator: Some(AtomOperator::GreaterEqual),
-                    category: "sys-libs".into(),
-                    package: "glibc".into(),
+                    category: Exact("sys-libs".into()),
+                    package: Exact("glibc".into()),
                     version: PackageVersion::new("2.41", None, Some("10")).ok(),
                     slot: Some(PackageSlot::Eq("2.2".into())),
                     repo: Some("gentoo".into()),
@@ -436,8 +509,8 @@ mod tests {
                 "=dev-libs/glib-2*",
                 Atom {
                     operator: Some(AtomOperator::Equal),
-                    category: "dev-libs".into(),
-                    package: "glib".into(),
+                    category: Exact("dev-libs".into()),
+                    package: Exact("glib".into()),
                     version: PackageVersion::new("2", None, None).ok(),
                     variant: AtomVariant::VersionWildcard,
                     ..Default::default()
@@ -447,8 +520,8 @@ mod tests {
                 "=dev-lang/rust-1.70*:1.70.0",
                 Atom {
                     operator: Some(AtomOperator::Equal),
-                    category: "dev-lang".into(),
-                    package: "rust".into(),
+                    category: Exact("dev-lang".into()),
+                    package: Exact("rust".into()),
                     version: PackageVersion::new("1.70", None, None).ok(),
                     variant: AtomVariant::VersionWildcard,
                     slot: Some(PackageSlot::Eq("1.70.0".into())),
@@ -459,8 +532,8 @@ mod tests {
                 "=kde-frameworks/kwindowsystem-6*:6/6.23::gentoo",
                 Atom {
                     operator: Some(AtomOperator::Equal),
-                    category: "kde-frameworks".into(),
-                    package: "kwindowsystem".into(),
+                    category: Exact("kde-frameworks".into()),
+                    package: Exact("kwindowsystem".into()),
                     version: PackageVersion::new("6", None, None).ok(),
                     variant: AtomVariant::VersionWildcard,
                     slot: Some(PackageSlot::EqSubSlot("6".into(), "6.23".into())),
@@ -472,8 +545,8 @@ mod tests {
                 "=app-arch/7zip-26*[rar]",
                 Atom {
                     operator: Some(AtomOperator::Equal),
-                    category: "app-arch".into(),
-                    package: "7zip".into(),
+                    category: Exact("app-arch".into()),
+                    package: Exact("7zip".into()),
                     version: PackageVersion::new("26", None, None).ok(),
                     variant: AtomVariant::VersionWildcard,
                     use_deps: Some(vec!["rar".parse().unwrap()]),
@@ -496,6 +569,7 @@ mod tests {
             "dev-lang/",
             "/rust",
             "x11-drivers/nvidia-drivers:0/",
+            "<=net-misc/*-3.0_p2",
             ">=dev-lang/rust-",
             "dev-lang/rust-1.70.0",
             "=dev-lang/rust-1.70.0_extra",
@@ -505,6 +579,7 @@ mod tests {
             "=dev-lang/rust-1.*",
             "dev-lang/rust[]",
             "dev-lang/rust[,]",
+            "=kde-frameworks/*-6*::gentoo",
         ];
 
         for atom_str in invalid_atoms {
@@ -514,12 +589,31 @@ mod tests {
 
     #[test]
     fn test_atom_qualified_name() {
-        let atom = Atom {
-            category: "dev-lang".into(),
-            package: "rust".into(),
-            ..Default::default()
-        };
-        assert_eq!(atom.qualified_name(), "dev-lang/rust");
+        assert_eq!(
+            Atom {
+                category: Exact("dev-lang".into()),
+                package: Exact("rust".into()),
+                ..Default::default()
+            }
+            .qualified_name(),
+            "dev-lang/rust"
+        );
+        assert_eq!(
+            Atom {
+                ..Default::default()
+            }
+            .qualified_name(),
+            "*/*"
+        );
+        assert_eq!(
+            Atom {
+                category: Exact("dev-lang".into()),
+                package: Any,
+                ..Default::default()
+            }
+            .qualified_name(),
+            "dev-lang/*"
+        );
     }
 
     #[test]
@@ -527,8 +621,8 @@ mod tests {
         let test_data = [
             (
                 Atom {
-                    category: "dev-lang".into(),
-                    package: "python".into(),
+                    category: Exact("dev-lang".into()),
+                    package: Exact("python".into()),
                     variant: AtomVariant::Simple,
                     repo: Some("gentoo".into()),
                     ..Default::default()
@@ -538,8 +632,8 @@ mod tests {
             (
                 Atom {
                     operator: Some(AtomOperator::Equal),
-                    category: "sys-apps".into(),
-                    package: "attr".into(),
+                    category: Exact("sys-apps".into()),
+                    package: Exact("attr".into()),
                     version: PackageVersion::new("2.5.2", None, Some("1")).ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
@@ -549,8 +643,8 @@ mod tests {
             (
                 Atom {
                     operator: Some(AtomOperator::GreaterEqual),
-                    category: "dev-lang".into(),
-                    package: "rust".into(),
+                    category: Exact("dev-lang".into()),
+                    package: Exact("rust".into()),
                     version: PackageVersion::new("1.70.0", Some("beta_p11"), Some("2")).ok(),
                     slot: Some(PackageSlot::Eq("1.70".into())),
                     repo: Some("gentoo".into()),
@@ -562,8 +656,8 @@ mod tests {
             (
                 Atom {
                     operator: Some(AtomOperator::Equal),
-                    category: "dev-libs".into(),
-                    package: "libffi".into(),
+                    category: Exact("dev-libs".into()),
+                    package: Exact("libffi".into()),
                     version: PackageVersion::new("3.5", None, None).ok(),
                     slot: Some(PackageSlot::EqSubSlot("0".into(), "8".into())),
                     variant: AtomVariant::VersionWildcard,
@@ -613,5 +707,11 @@ mod tests {
         assert_eq!(AtomOperator::Greater.to_string(), ">");
         assert_eq!(AtomOperator::GreaterEqual.to_string(), ">=");
         assert_eq!(AtomOperator::Approximate.to_string(), "~");
+    }
+
+    #[test]
+    fn test_name_match_fmt() {
+        assert_eq!(Exact("sys-libs".into()).to_string(), "sys-libs");
+        assert_eq!(Any.to_string(), "*");
     }
 }

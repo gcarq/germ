@@ -1,4 +1,4 @@
-use crate::deps::atom::Atom;
+use crate::deps::atom::{Atom, AtomIdent};
 use crate::ebuild::Ebuild;
 use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
 use crate::makenv::MakeEnv;
@@ -52,7 +52,14 @@ impl CPV {
 
     /// Checks if the given [`Atom`] matches this CPV.
     pub fn matches_atom(&self, atom: &Atom) -> bool {
-        if *self.category != atom.category || *self.package != atom.package {
+        if let AtomIdent::Exact(category) = &atom.category
+            && *self.category != *category
+        {
+            return false;
+        }
+        if let AtomIdent::Exact(package) = &atom.package
+            && *self.package != *package
+        {
             return false;
         }
         self.version.matches_atom(atom)

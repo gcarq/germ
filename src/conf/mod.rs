@@ -46,8 +46,7 @@ impl PortageConf {
 
         let use_masks = UseMasks::new(
             &profile,
-            //PackageUseEntries::from_path(&path.join("package.use"), true, true)?,
-            PackageUseEntries::default(),
+            PackageUseEntries::from_path(&path.join("package.use"), true, true)?,
             UseEntries::from_path(&path.join("profile").join("use.mask"), true, true)?,
             PackageUseEntries::from_path(
                 &path.join("profile").join("package.use.mask"),

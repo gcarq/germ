@@ -30,7 +30,10 @@ pub fn info(atom: &Option<Atom>, repo_set: &RepoSet, conf: &PortageConf) -> Resu
     let vdb =
         Vdb::from_path(PathBuf::from_str("/var/db/pkg")?).with_context(|| "unable to build VDB")?;
     let packages = vdb.find_by_atom(atom);
-    println!("\nInstalled packages matching {atom}\n");
+    println!(
+        "\nInstalled packages matching {}:\n",
+        atom.to_string().bold()
+    );
     for pkg in packages {
         println!("{}", pkg.to_string().green().bold());
         print_use_flags(pkg, conf);
@@ -56,25 +59,24 @@ fn print_use_flags(package: &InstalledPackage, conf: &PortageConf) {
     enabled.sort();
     disabled.sort();
 
-    let enabled = enabled
-        .iter()
-        .map(
+    let enabled =
+        enabled.iter().map(
             |flag| match conf.use_masks.is_masked_for_pkg(package, flag) {
                 true => format!("({})", flag.to_string().red().bold()),
                 false => format!("{}", flag.to_string().red().bold()),
             },
-        )
-        .collect::<Vec<_>>();
+        );
 
-    let disabled = disabled
-        .iter()
-        .map(
+    let disabled =
+        disabled.iter().map(
             |flag| match conf.use_masks.is_masked_for_pkg(package, flag) {
                 true => format!("({})", format!("-{flag}").blue().bold()),
                 false => format!("{}", format!("-{flag}").blue().bold()),
             },
-        )
-        .collect::<Vec<_>>();
+        );
 
-    println!("USE=\"{} {}\"", enabled.join(" "), disabled.join(" "));
+    println!(
+        "USE=\"{}\"",
+        enabled.chain(disabled).collect::<Vec<_>>().join(" ")
+    );
 }
