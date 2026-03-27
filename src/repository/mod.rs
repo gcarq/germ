@@ -26,7 +26,7 @@ use anyhow::{Context, Result, anyhow};
 use log::{debug, info};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::{fmt, fs};
@@ -290,7 +290,7 @@ impl PartialEq for Repository {
 }
 
 impl Hash for Repository {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         self.name.hash(state);
     }
 }

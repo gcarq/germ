@@ -2,7 +2,7 @@ use crate::repository::set::RepoSet;
 use anyhow::{Context, Result, anyhow};
 
 /// Generates metadata cache for repositories.
-pub fn gencache(repo_name: &Option<String>, repo_set: &mut RepoSet) -> Result<()> {
+pub fn gencache(repo_name: Option<&String>, repo_set: &mut RepoSet) -> Result<()> {
     if let Some(repo) = repo_name {
         let repo = repo_set
             .get_mut(repo)

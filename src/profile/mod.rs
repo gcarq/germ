@@ -8,11 +8,14 @@ use crate::profile::deprecation::DeprecationInfo;
 use crate::repository::set::RepoSet;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
-use log::{debug, warn};
+use log::warn;
 use std::path::{Path, PathBuf};
 use std::{fmt, fs};
 
 /// Represents a profile outlined in PMS section 5.
+///
+/// A profile shouldn't be used to check whether a package or USE flag is masked,
+/// it is only temporary to resolve the final configuration.
 #[derive(Default)]
 pub struct Profile {
     pub location: PathBuf,
@@ -48,80 +51,89 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Builds a profile from the given `location` and all available repositories from `repo_set`.
-    /// An error is returned if the `path` doesn't exist or the profile directory is invalid.
-    pub fn new(location: &Path, repo_set: &RepoSet) -> Result<Self> {
+    /// Resolves a profile from the given `location` and takes care of inheriting all parents.
+    /// `repo_set` is used to resolve profiles in different repositories.
+    ///
+    /// Returns `Err` if `location` doesn't exist or the profile directory is invalid.
+    pub fn resolve(location: &Path, repo_set: &RepoSet) -> Result<Self> {
+        let mut profile = Self::new(location)?;
+
+        let parents = Self::resolve_parents(location, repo_set)
+            .with_context(|| anyhow!("unable to resolve parents for {}", location.display()))?;
+
+        if let Some((base, parents)) = parents.split_first() {
+            let mut prev = Self::new(base)
+                .with_context(|| anyhow!("unable to build profile from {}", base.display()))?;
+            for next in parents {
+                let next = Self::new(next)
+                    .with_context(|| anyhow!("unable to build profile from {}", next.display()))?;
+                prev = next.inherit(&prev);
+            }
+            profile.inherit_from(&prev);
+        }
+        Ok(profile)
+    }
+
+    /// Builds a profile from the given `location`.
+    ///
+    /// Returns `Err` if `location` doesn't exist or the profile directory is invalid.
+    fn new(location: &Path) -> Result<Self> {
         let eapi = Self::read_eapi(&location.join("eapi"))?;
-        let mut profile = Self {
+        let dir_support = eapi.supports_profile_file_dirs();
+        let profile = Self {
             make_defaults: MakeEnv::from_path(&location.join("make.defaults"), false, true)?,
             deprecated: DeprecationInfo::from_path(&location.join("deprecated"))?,
-            packages: SysPackageEntries::from_path(
-                &location.join("packages"),
-                eapi.supports_profile_file_dirs(),
-                true,
-            )?,
+            packages: SysPackageEntries::from_path(&location.join("packages"), dir_support, true)?,
             package_mask: PackageEntries::from_path(
                 &location.join("package.mask"),
-                eapi.supports_profile_file_dirs(),
+                dir_support,
                 true,
             )?,
             package_unmask: PackageEntries::from_path(
                 &location.join("package.unmask"),
-                eapi.supports_profile_file_dirs(),
+                dir_support,
                 true,
             )?,
             package_use: PackageUseEntries::from_path(
                 &location.join("package.use"),
-                eapi.supports_profile_file_dirs(),
+                dir_support,
                 true,
             )?,
-            use_mask: UseEntries::from_path(
-                &location.join("use.mask"),
-                eapi.supports_profile_file_dirs(),
-                true,
-            )?,
-            use_force: UseEntries::from_path(
-                &location.join("use.force"),
-                eapi.supports_profile_file_dirs(),
-                true,
-            )?,
+            use_mask: UseEntries::from_path(&location.join("use.mask"), dir_support, true)?,
+            use_force: UseEntries::from_path(&location.join("use.force"), dir_support, true)?,
             use_stable_mask: UseEntries::from_path(
                 &location.join("use.stable.mask"),
-                eapi.supports_profile_file_dirs(),
+                dir_support,
                 true,
             )?,
             use_stable_force: UseEntries::from_path(
                 &location.join("use.stable.force"),
-                eapi.supports_profile_file_dirs(),
+                dir_support,
                 true,
             )?,
             package_use_mask: PackageUseEntries::from_path(
                 &location.join("package.use.mask"),
-                eapi.supports_profile_file_dirs(),
+                dir_support,
                 true,
             )?,
             package_use_force: PackageUseEntries::from_path(
                 &location.join("package.use.force"),
-                eapi.supports_profile_file_dirs(),
+                dir_support,
                 true,
             )?,
             package_use_stable_mask: PackageUseEntries::from_path(
                 &location.join("package.use.stable.mask"),
-                eapi.supports_profile_file_dirs(),
+                dir_support,
                 true,
             )?,
             package_use_stable_force: PackageUseEntries::from_path(
                 &location.join("package.use.stable.force"),
-                eapi.supports_profile_file_dirs(),
+                dir_support,
                 true,
             )?,
             eapi,
             location: location.canonicalize()?,
         };
-        for parent in Self::resolve_parents(location, repo_set)? {
-            profile.inherit_from(&parent);
-        }
-
         if let Some(deprecation) = &profile.deprecated {
             warn!(
                 "This profile is deprecated. The recommended profile to upgrade to is {}\n\n{}",
@@ -131,10 +143,9 @@ impl Profile {
         Ok(profile)
     }
 
-    /// Takes a `path` to a profile directory and resolves all profiles listed in the parent file.
-    /// Also takes a `repo_set` to resolve profiles that reference a specific repository.
-    /// Parents are returned in the order they are listed or an empty vec if there are none.
-    fn resolve_parents(path: &Path, repo_set: &RepoSet) -> Result<Vec<Self>> {
+    /// Takes a `path` to a profile directory and resolves all profile paths it inherits from.
+    /// `repo_set` is used to resolve profiles in different repositories.
+    fn resolve_parents(path: &Path, repo_set: &RepoSet) -> Result<Vec<PathBuf>> {
         let parent = path.join("parent");
         if !parent.exists() {
             return Ok(Vec::new());
@@ -146,12 +157,13 @@ impl Profile {
             .map(str::trim)
             .filter(|line| !line.is_empty() && !line.starts_with('#'));
 
-        let mut profiles = Vec::new();
+        let mut paths = Vec::new();
         for profile in parent_profiles {
             // If a profiles references a specific repository, resolve it first.
             // This is not specified in PMS but is implemented in portage
             // see https://bugs.gentoo.org/515666
             // TODO: this behavior is controlled via profile-formats in <repo>/metadata/layout.conf
+            //  see https://wiki.gentoo.org/wiki/Portage/Profiles/Custom_profiles
             let path = match profile.split_once(':') {
                 Some((repo_name, profile_path)) => {
                     let repo = repo_set.get(repo_name).ok_or_else(|| {
@@ -161,9 +173,10 @@ impl Profile {
                 }
                 None => path.join(profile),
             };
-            profiles.push(Profile::new(&path, repo_set)?);
+            paths.extend(Self::resolve_parents(&path, repo_set)?);
+            paths.push(path.canonicalize()?);
         }
-        Ok(profiles)
+        Ok(paths)
     }
 
     /// Reads the EAPI version from the given file `path`.
@@ -183,7 +196,6 @@ impl Profile {
 impl Inherit for Profile {
     /// Inherits relevant configurations from the given parent profile.
     fn inherit_from(&mut self, parent: &Profile) {
-        debug!("Inheriting from {} ...", self.location.display());
         self.make_defaults.inherit_from(&parent.make_defaults);
         self.packages.inherit_from(&parent.packages);
         self.package_mask.inherit_from(&parent.package_mask);
@@ -214,17 +226,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_profile_inherit_from() {
+    fn test_profile_inherit_from() -> Result<()> {
         let parent = Profile {
-            make_defaults: MakeEnv::from_string("USE=\"foo\"".into()).unwrap(),
-            use_mask: UseEntries::from_string("bar".into()).unwrap(),
+            make_defaults: MakeEnv::from_string("USE=\"foo\"".into())?,
+            package_use_mask: PackageUseEntries::from_string(
+                "sys-libs/glibc cet stack-realign".into(),
+            )?,
+            use_mask: UseEntries::from_string("bar".into())?,
             ..Default::default()
         };
 
         let mut child = Profile {
-            make_defaults: MakeEnv::from_string("USE=\"bar\"".into()).unwrap(),
-            use_mask: UseEntries::from_string("-bar baz".into()).unwrap(),
-            package_use_mask: PackageUseEntries::from_string("dev-lang/rust baz".into()).unwrap(),
+            make_defaults: MakeEnv::from_string("USE=\"bar\"".into())?,
+            use_mask: UseEntries::from_string("-bar baz".into())?,
+            package_use_mask: PackageUseEntries::from_string(
+                "sys-libs/glibc -stack-realign\ndev-lang/rust baz".into(),
+            )?,
             ..Default::default()
         };
 
@@ -233,15 +250,22 @@ mod tests {
             child.make_defaults.get("USE").unwrap().to_string(),
             "foo bar"
         );
-        assert_eq!(child.use_mask.finalize(), vec!["bar".parse().unwrap()]);
+        assert_eq!(child.use_mask.finalize(), vec!["bar".parse()?]);
         assert_eq!(
             child.package_use_mask.finalize(),
-            [(
-                "dev-lang/rust".parse().unwrap(),
-                vec!["baz".parse().unwrap()].into_iter().collect()
-            )]
+            [
+                (
+                    "sys-libs/glibc".parse()?,
+                    vec!["cet".parse()?].into_iter().collect()
+                ),
+                (
+                    "dev-lang/rust".parse()?,
+                    vec!["baz".parse()?].into_iter().collect()
+                )
+            ]
             .into_iter()
             .collect()
         );
+        Ok(())
     }
 }

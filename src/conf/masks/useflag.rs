@@ -7,15 +7,26 @@ use crate::profile::Profile;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::utils::Inherit;
 
+/// This struct is the only truth whether a USE flag is masked or forced.
+/// TODO:
+///   * improve data structure
+///   * is_masked/is_forced returns on the first result
 pub struct UseMasks {
+    // Masked USE flags
     use_mask: FxHashSet<UseFlag>,
+    // Forced USE flags
     use_force: FxHashSet<UseFlag>,
+    // Same as above but for merged packages due to a stable keyword
     use_stable_mask: FxHashSet<UseFlag>,
     use_stable_force: FxHashSet<UseFlag>,
 
+    // Enabled USE flags on a per-package basis
     package_use: FxHashMap<Atom, FxHashSet<UseFlag>>,
+    // Masked USE flags on a per-package basis
     package_use_mask: FxHashMap<Atom, FxHashSet<UseFlag>>,
+    // Forced USE flags on a per-package basis
     package_use_force: FxHashMap<Atom, FxHashSet<UseFlag>>,
+    // Same as above but for merged packages due to a stable keyword
     package_use_stable_mask: FxHashMap<Atom, FxHashSet<UseFlag>>,
     package_use_stable_force: FxHashMap<Atom, FxHashSet<UseFlag>>,
 }
@@ -87,6 +98,30 @@ impl UseMasks {
             }
         }
         for (atom, flags) in &self.package_use_stable_mask {
+            if pkg.matches_atom(atom) && flags.contains(flag) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Checks if the given [`UseFlag`] is forced.
+    pub fn is_forced(&self, flag: &UseFlag) -> bool {
+        self.use_force.contains(flag) || self.use_stable_force.contains(flag)
+    }
+
+    /// Checks if the given [`UseFlag`] is forced for the given [`Package`].
+    pub fn is_forced_for_pkg(&self, pkg: &Package, flag: &UseFlag) -> bool {
+        if self.is_forced(flag) {
+            return true;
+        }
+
+        for (atom, flags) in &self.package_use_force {
+            if pkg.matches_atom(atom) && flags.contains(flag) {
+                return true;
+            }
+        }
+        for (atom, flags) in &self.package_use_stable_force {
             if pkg.matches_atom(atom) && flags.contains(flag) {
                 return true;
             }

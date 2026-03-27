@@ -42,9 +42,9 @@ pub enum Command {
 
 pub fn execute(command: &Command, repo_set: &mut RepoSet, conf: &PortageConf) -> Result<()> {
     match command {
-        Command::Info { atom } => info(atom, repo_set, conf)?,
+        Command::Info { atom } => info(atom.as_ref(), repo_set, conf)?,
         Command::Install { atom } => install(atom, repo_set)?,
-        Command::Gencache { repo } => gencache(repo, repo_set)?,
+        Command::Gencache { repo } => gencache(repo.as_ref(), repo_set)?,
         Command::Sync => sync(repo_set),
     }
     Ok(())

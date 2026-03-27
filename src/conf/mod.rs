@@ -24,9 +24,12 @@ impl PortageConf {
     /// Builds a [`PortageConf`] from the given portage configuration `path` and `repo_set`.
     pub fn new(path: &Path, repo_set: &RepoSet) -> Result<Self> {
         let profile_path = path.join("make.profile");
-        debug!("Active profile {}", profile_path.canonicalize()?.display());
-        let profile = Profile::new(&profile_path, repo_set)
-            .with_context(|| "unable to build profile from make.profile")?;
+        debug!(
+            "Configured profile {}",
+            profile_path.canonicalize()?.display()
+        );
+        let profile = Profile::resolve(&profile_path, repo_set)
+            .with_context(|| anyhow!("unable to build profile from {}", profile_path.display()))?;
 
         let make_env = Self::init_make_env(path, &profile)?;
 

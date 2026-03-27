@@ -4,7 +4,7 @@ use regex::Regex;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::sync::LazyLock;
 
@@ -92,7 +92,7 @@ impl PartialEq<Self> for PackageSlot {
 }
 
 impl Hash for PackageSlot {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             Self::Any | Self::AnyRebuild => {
                 state.write_u8(0);

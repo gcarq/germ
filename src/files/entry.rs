@@ -1,7 +1,7 @@
 use crate::deps::atom::Atom;
 use crate::deps::useflag::UseFlag;
 use anyhow::{Result, anyhow};
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 /// This trait abstracts a single item in a line-based file, such as `package.mask` or `use.mask`.
@@ -15,9 +15,7 @@ impl FileEntry for UseFlag {}
 ///
 /// Values prefixed with a hyphen are considered [`Self::Unset`] and clear all previous entries
 /// with the same inner value.
-///
-/// [`PartialEq`] for this type considers only the inner value.
-#[derive(Eq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub enum Prefixed<T: FileEntry> {
     Set(T),
     Unset(T),
@@ -44,14 +42,8 @@ impl<T: FileEntry> Prefixed<T> {
     }
 }
 
-impl<T: FileEntry> PartialEq for Prefixed<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner() == other.inner()
-    }
-}
-
 impl<T: FileEntry> Hash for Prefixed<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         self.inner().hash(state);
     }
 }
@@ -82,22 +74,5 @@ impl FromStr for SysAtom {
             Some(atom) => Ok(Self(atom.parse()?)),
             None => Err(anyhow!("invalid system package syntax: {value}")),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::deps::useflag::UseFlag;
-
-    #[test]
-    fn test_prefixed_eq() {
-        let a = Prefixed::<UseFlag>::Set("foo".parse().unwrap());
-        let b = Prefixed::<UseFlag>::Unset("foo".parse().unwrap());
-        let c = Prefixed::<UseFlag>::Set("bar".parse().unwrap());
-
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-        assert_ne!(b, c);
     }
 }

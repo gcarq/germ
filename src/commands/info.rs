@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 /// Prints system- and package information for all packages matching the given `Atom`.
-pub fn info(atom: &Option<Atom>, repo_set: &RepoSet, conf: &PortageConf) -> Result<()> {
+pub fn info(atom: Option<&Atom>, repo_set: &RepoSet, conf: &PortageConf) -> Result<()> {
     println!("Repositories:");
     for repo in repo_set.values() {
         println!(" * {repo} -> {}", repo.location.display());
@@ -61,7 +61,7 @@ fn print_use_flags(package: &InstalledPackage, conf: &PortageConf) {
 
     let enabled =
         enabled.iter().map(
-            |flag| match conf.use_masks.is_masked_for_pkg(package, flag) {
+            |flag| match conf.use_masks.is_forced_for_pkg(package, flag) {
                 true => format!("({})", flag.to_string().red().bold()),
                 false => format!("{}", flag.to_string().red().bold()),
             },

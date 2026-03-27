@@ -62,25 +62,24 @@ impl<T: FileEntry> Default for LineBasedFile<T> {
 impl<T: FileEntry> Inherit for LineBasedFile<T> {
     fn inherit_from(&mut self, parent: &LineBasedFile<T>) {
         let mut seen = FxHashSet::default();
-
         let mut result = Vec::new();
         for item in self.0.iter().rev().chain(parent.0.iter().rev()) {
-            if seen.insert(item.clone()) && item.is_set() {
+            if seen.insert(item.inner().clone()) {
                 result.push(item.clone());
             }
         }
-
         self.0 = result;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::files::*;
-    use crate::utils::Inherit;
+    use super::*;
+    use crate::files::PackageEntries;
+    use crate::files::entry::Prefixed::{Set, Unset};
 
     #[test]
-    fn test_from_string() {
+    fn test_from_string() -> Result<()> {
         let content = "
             dev-libs/libffi
 
@@ -90,29 +89,40 @@ mod tests {
             -app-arch/rpm
         ";
 
-        let file = PackageEntries::from_string(content.into()).unwrap();
+        let file = PackageEntries::from_string(content.into())?;
         assert_eq!(
             file.0,
             vec![
-                "dev-libs/libffi".parse().unwrap(),
-                "app-arch/xz-utils".parse().unwrap(),
-                "app-arch/zstd".parse().unwrap(),
-                "-app-arch/rpm".parse().unwrap(),
+                "dev-libs/libffi".parse()?,
+                "app-arch/xz-utils".parse()?,
+                "app-arch/zstd".parse()?,
+                "-app-arch/rpm".parse()?,
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn test_inherit_from() {
-        let parent = PackageEntries::from_string(
+    fn test_inherit_from() -> Result<()> {
+        let grand_parent = PackageEntries::from_string(
             "
             dev-libs/libffi
             app-arch/xz-utils
             app-arch/zstd
+            app-arch/rpm
+        "
+            .into(),
+        )?;
+
+        let parent = PackageEntries::from_string(
+            "
+            dev-libs/libffi
+            -app-arch/rpm
+            -sys-libs/glibc
             "
             .into(),
-        )
-        .unwrap();
+        )?;
+
         let mut child = PackageEntries::from_string(
             "
             -app-arch/xz-utils
@@ -121,15 +131,20 @@ mod tests {
             -app-arch/rpm
             "
             .into(),
-        )
-        .unwrap();
-        child.inherit_from(&parent);
+        )?;
+
+        child.inherit_from(&parent.inherit(&grand_parent));
+
         assert_eq!(
             child.0,
             vec![
-                "app-arch/zstd".parse().unwrap(),
-                "dev-libs/libffi".parse().unwrap(),
+                Unset("app-arch/rpm".parse()?),
+                Set("app-arch/zstd".parse()?),
+                Unset("app-arch/xz-utils".parse()?),
+                Set("dev-libs/libffi".parse()?),
+                Unset("sys-libs/glibc".parse()?),
             ]
         );
+        Ok(())
     }
 }
