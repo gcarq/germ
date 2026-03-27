@@ -1,6 +1,6 @@
-use crate::deps::atom::Atom;
-use crate::repository::set::RepoSet;
 use anyhow::{Result, anyhow};
+use lib::deps::atom::Atom;
+use lib::repository::set::RepoSet;
 
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.

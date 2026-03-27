@@ -1,4 +1,4 @@
-use crate::repository::set::RepoSet;
+use lib::repository::set::RepoSet;
 use log::error;
 
 /// Syncs all repositories.

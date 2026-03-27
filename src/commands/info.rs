@@ -1,10 +1,10 @@
-use crate::conf::PortageConf;
-use crate::deps::atom::Atom;
-use crate::repository::set::RepoSet;
-use crate::vdb::Vdb;
-use crate::vdb::package::InstalledPackage;
 use anyhow::{Context, Result};
 use colored::Colorize;
+use lib::conf::PortageConf;
+use lib::deps::atom::Atom;
+use lib::repository::set::RepoSet;
+use lib::vdb::Vdb;
+use lib::vdb::package::InstalledPackage;
 use std::path::PathBuf;
 use std::str::FromStr;
 

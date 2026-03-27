@@ -11,14 +11,10 @@
 //! # Examples
 //!
 //! Function call request for `ver_test`:
-//! ```
-//! FN\0ver_test\06.0\0-gt\05.0\4
-//! ```
+//! `FN\0ver_test\06.0\0-gt\05.0\4`
 //!
 //! Data message from for `IUSE` variable:
-//! ```
-//! "DATA\0IUSE=static-libs tcpd usbip"
-//! ```
+//! `"DATA\0IUSE=static-libs tcpd usbip"`
 
 pub mod func;
 

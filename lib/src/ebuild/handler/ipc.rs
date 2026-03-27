@@ -24,9 +24,8 @@ pub trait ChildToParentMsg: Sized {
 /// sent to the child process before closing.
 ///
 /// **Example message from child to parent process:**
-/// ```
-/// FN\0__resolve_eclass\0toolchain-funcs\4
-/// ```
+///
+/// `FN\0__resolve_eclass\0toolchain-funcs\4`
 pub struct IpcHandler {
     reader: BufReader<File>,
     writer: File,

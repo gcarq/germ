@@ -8,11 +8,11 @@ use crate::commands::gencache::gencache;
 use crate::commands::info::info;
 use crate::commands::install::install;
 use crate::commands::sync::sync;
-use crate::conf::PortageConf;
-use crate::deps::atom::Atom;
-use crate::repository::set::RepoSet;
 use anyhow::Result;
 use clap::Subcommand;
+use lib::conf::PortageConf;
+use lib::deps::atom::Atom;
+use lib::repository::set::RepoSet;
 
 #[derive(Subcommand)]
 pub enum Command {
