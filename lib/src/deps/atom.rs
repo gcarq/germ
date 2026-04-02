@@ -59,7 +59,7 @@ static ATOM_WILDCARD_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Specifies the operator of an atom, which determines how packages are matched.
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Hash)]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(test, derive(Debug))]
 pub enum AtomOperator {
     Less,
@@ -108,7 +108,7 @@ impl fmt::Display for AtomOperator {
 }
 
 /// Specifies the variant of an atom, which determines how packages are matched.
-#[derive(Archive, Serialize, Deserialize, Default, Clone, Eq, Hash, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 #[cfg_attr(test, derive(Debug))]
 pub enum AtomVariant {
     #[default]
@@ -120,7 +120,7 @@ pub enum AtomVariant {
 /// This enum defines two variants to express identifier matching for e.g. `category` and `package`.
 ///
 /// [`Self::Exact`] should only match an exact name and [`Self::Any`] should match all values.
-#[derive(Archive, Serialize, Deserialize, Default, Clone, Eq, Hash, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Default, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(test, derive(Debug))]
 pub enum AtomIdent {
     Exact(String),
@@ -154,7 +154,7 @@ impl fmt::Display for AtomIdent {
 /// calculating dependencies between packages.
 /// TODO:
 ///  * implement remaining atom variants (see man 5 ebuild)
-#[derive(Archive, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Archive, Serialize, Deserialize, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct Atom {
     pub operator: Option<AtomOperator>,

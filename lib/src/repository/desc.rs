@@ -1,19 +1,16 @@
-use crate::files::FileFromPath;
+use crate::files::content_from_path;
 use anyhow::{Result, anyhow};
 use std::ops::Deref;
+use std::path::Path;
 
 /// Holds all profile descriptions as found in `profiles/profiles.desc`.
 #[derive(Default)]
 #[cfg_attr(test, derive(Debug))]
 pub struct ProfileDescriptions(Vec<ProfileDescription>);
 
-impl FileFromPath for ProfileDescriptions {
-    /// Creates a new instance from the given `content`.
-    /// Lines that are empty or start with `#` are ignored.
-    fn from_string(content: String) -> Result<Self>
-    where
-        Self: Sized,
-    {
+impl ProfileDescriptions {
+    pub fn from_path(path: &Path) -> Result<Self> {
+        let content = content_from_path(path, false, true)?;
         let descriptions = content
             .lines()
             .map(str::trim)

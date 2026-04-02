@@ -1,11 +1,12 @@
 mod value;
 
-use crate::files::FileFromPath;
+use crate::files::content_from_path;
 use crate::types::FxHashMap;
 use crate::utils;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
 use std::ops::Deref;
+use std::path::Path;
 use value::EnvValue;
 
 /// List of variables that are incremental as per PMS section 5.3 and
@@ -38,18 +39,13 @@ fn is_incremental_var(var: &str) -> bool {
 pub struct MakeEnv(FxHashMap<String, EnvValue>);
 
 impl MakeEnv {
-    /// Consumes self and returns the inner map.
-    pub fn into_inner(self) -> FxHashMap<String, EnvValue> {
-        self.0
+    pub fn from_path(path: &Path, recursive: bool, optional: bool) -> Result<Self> {
+        let content = content_from_path(path, recursive, optional)?;
+        Self::from_string(content)
     }
-}
 
-impl FileFromPath for MakeEnv {
     /// Builds a [`MakeEnv`] from the given content of a make.conf or make.defaults file.
-    fn from_string(content: String) -> Result<Self>
-    where
-        Self: Sized,
-    {
+    pub fn from_string(content: String) -> Result<Self> {
         let mut vars = utils::shlex_split(content)?
             .into_iter()
             .map(|(key, value)| {
@@ -72,6 +68,11 @@ impl FileFromPath for MakeEnv {
         }
 
         Ok(Self(vars.into_iter().collect()))
+    }
+
+    /// Consumes self and returns the inner map.
+    pub fn into_inner(self) -> FxHashMap<String, EnvValue> {
+        self.0
     }
 }
 

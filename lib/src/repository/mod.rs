@@ -10,7 +10,8 @@ mod utils;
 use crate::consts::DEFAULT_CACHE_PATH;
 use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
-use crate::files::{FileFromPath, PackageEntries};
+use crate::files::PackageEntries;
+use crate::files::entry::Precedence;
 use crate::package::Package;
 use crate::package::cpv::CPV;
 use crate::regex::PV_REV;
@@ -62,28 +63,24 @@ impl Repository {
     /// This allows deferring package collection until it's actually needed.
     pub fn new(config: &RepositoryConfig) -> Result<Self> {
         let location = config.location.canonicalize()?;
-
-        let eapi = Self::read_eapi(&location)?;
         let profiles = location.join("profiles");
+        let dir_support = Self::read_eapi(&location)?.supports_profile_file_dirs();
+
         let repository = Self {
             categories: Vec::default(),
             package_mask: PackageEntries::from_path(
                 &profiles.join("package.mask"),
-                eapi.supports_profile_file_dirs(),
-                true,
+                Precedence::Repository,
+                dir_support,
             )?,
             package_unmask: PackageEntries::from_path(
                 &profiles.join("package.unmask"),
-                eapi.supports_profile_file_dirs(),
-                true,
+                Precedence::Repository,
+                dir_support,
             )?,
             eclasses: Eclasses::default(),
-            arch_list: ArchList::from_path(&profiles.join("arch.list"), false, true)?,
-            profiles_desc: ProfileDescriptions::from_path(
-                &profiles.join("profiles.desc"),
-                false,
-                true,
-            )?,
+            arch_list: ArchList::from_path(&profiles.join("arch.list"))?,
+            profiles_desc: ProfileDescriptions::from_path(&profiles.join("profiles.desc"))?,
             name: config.name.clone(),
             avail_package_idx: AvailablePackageIndex::default(),
             resolved_package_idx: ResolvedPackageIndex::default(),

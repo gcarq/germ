@@ -1,17 +1,16 @@
-use crate::files::FileFromPath;
+use crate::files::content_from_path;
 use anyhow::Result;
 use std::ops::Deref;
+use std::path::Path;
 
 /// Holds all supported architectures from `profiles/arch.list`.
 #[derive(Default)]
 #[cfg_attr(test, derive(Debug))]
 pub struct ArchList(Vec<String>);
 
-impl FileFromPath for ArchList {
-    fn from_string(content: String) -> Result<Self>
-    where
-        Self: Sized,
-    {
+impl ArchList {
+    pub fn from_path(path: &Path) -> Result<Self> {
+        let content = content_from_path(path, false, true)?;
         let archs = content
             .lines()
             .map(str::trim)
@@ -20,9 +19,7 @@ impl FileFromPath for ArchList {
             .collect();
         Ok(Self(archs))
     }
-}
 
-impl ArchList {
     /// Checks if the given `arch` is supported.
     pub fn supports(&self, arch: &str) -> bool {
         self.0.iter().any(|a| a == arch)

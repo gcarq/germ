@@ -1,46 +1,23 @@
 use crate::deps::atom::Atom;
 use crate::deps::useflag::UseFlag;
-use crate::files::FileFromPath;
-use crate::files::entry::Prefixed;
+use crate::files::content_from_path;
+use crate::files::entry::{Entry, Precedence};
 use crate::types::{FxHashMap, FxHashSet};
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
-use std::str::FromStr;
+use std::path::Path;
 
 #[derive(Clone, Default)]
 #[cfg_attr(test, derive(Debug))]
-pub struct PackageUseEntries(FxHashMap<Atom, PrefixedUseFlags>);
+pub struct PackageUseEntries(FxHashMap<Atom, EntryUseFlags>);
 
 impl PackageUseEntries {
-    pub fn finalize(self) -> FxHashMap<Atom, FxHashSet<UseFlag>> {
-        self.0
-            .into_iter()
-            .filter_map(|(atom, flags)| {
-                let flags = flags.into_values().collect::<FxHashSet<_>>();
-                if flags.is_empty() {
-                    None
-                } else {
-                    Some((atom, flags))
-                }
-            })
-            .collect()
+    pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> Result<Self> {
+        let content = content_from_path(path, recursive, true)?;
+        Self::from_string(content, order)
     }
 
-    fn parse_line(line: &str) -> Result<(Atom, PrefixedUseFlags)> {
-        match line.split_once(char::is_whitespace) {
-            Some((atom, flags)) => Ok((atom.parse()?, flags.parse()?)),
-            None => Err(anyhow!("invalid package.use definition: {line}")),
-        }
-    }
-}
-
-impl FileFromPath for PackageUseEntries {
-    /// Creates a new instance from the given `content`.
-    /// Lines that are empty or start with `#` are ignored.
-    fn from_string(content: String) -> Result<Self>
-    where
-        Self: Sized,
-    {
+    pub fn from_string(content: String, order: Precedence) -> Result<Self> {
         let mut map = FxHashMap::default();
 
         for (lineno, line) in content.lines().enumerate() {
@@ -48,13 +25,24 @@ impl FileFromPath for PackageUseEntries {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let (atom, flags) = Self::parse_line(line)
+            let (atom, flags) = Self::parse_line(line, order)
                 .with_context(|| format!("failed to parse line {}: {line}", lineno + 1))?;
 
-            let entry: &mut PrefixedUseFlags = map.entry(atom).or_default();
+            let entry: &mut EntryUseFlags = map.entry(atom).or_default();
             entry.update_from(&flags);
         }
         Ok(Self(map))
+    }
+
+    pub fn into_inner(self) -> FxHashMap<Atom, EntryUseFlags> {
+        self.0
+    }
+
+    fn parse_line(line: &str, order: Precedence) -> Result<(Atom, EntryUseFlags)> {
+        match line.split_once(char::is_whitespace) {
+            Some((atom, flags)) => Ok((atom.parse()?, EntryUseFlags::from_str(flags, order)?)),
+            None => Err(anyhow!("invalid package.use definition: {line}")),
+        }
     }
 }
 
@@ -71,13 +59,35 @@ impl Inherit for PackageUseEntries {
 }
 
 /// Helper struct to manage unique USE flags with their prefixes for a single package.
-#[derive(Eq, PartialEq, Clone, Default)]
+#[derive(Eq, PartialEq, Hash, Clone, Default)]
 #[cfg_attr(test, derive(Debug))]
-struct PrefixedUseFlags(Vec<Prefixed<UseFlag>>);
+pub struct EntryUseFlags(Vec<Entry<UseFlag>>);
 
-impl PrefixedUseFlags {
+impl EntryUseFlags {
+    pub fn from_str(value: &str, order: Precedence) -> Result<Self> {
+        let mut flags = EntryUseFlags::default();
+        for flag in value.split_whitespace().map(|f| Entry::from_str(f, order)) {
+            flags.update(&flag?);
+        }
+        Ok(flags)
+    }
+
+    pub const fn from_raw(raw: Vec<Entry<UseFlag>>) -> Self {
+        Self(raw)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Entry<UseFlag>> {
+        self.0.iter()
+    }
+
+    pub fn get_match(&self, flag: &UseFlag) -> Option<&Entry<UseFlag>> {
+        self.iter()
+            .filter(|f| f.inner() == flag)
+            .max_by_key(|f| f.prec)
+    }
+
     /// Updates the flags with the given `flag`, replacing any existing flag with the same name.
-    pub fn update(&mut self, flag: &Prefixed<UseFlag>) {
+    pub fn update(&mut self, flag: &Entry<UseFlag>) {
         self.0.retain(|f| f != flag);
         self.0.push(flag.clone());
     }
@@ -89,44 +99,27 @@ impl PrefixedUseFlags {
             self.update(flag);
         }
     }
-
-    pub fn into_values(self) -> impl Iterator<Item = UseFlag> {
-        self.0.into_iter().filter_map(Prefixed::into_value)
-    }
 }
 
-impl Inherit for PrefixedUseFlags {
+impl Inherit for EntryUseFlags {
     /// Inherits flags from the given `parent`, replacing any existing flags with the same name.
     /// Flags that are unset in the child will not be inherited from the parent.
     fn inherit_from(&mut self, parent: &Self) {
         let mut seen = FxHashSet::default();
         let mut result = Vec::new();
         for flag in self.0.iter().rev().chain(parent.0.iter().rev()) {
-            if seen.insert(flag.inner().clone()) {
+            if seen.insert(flag.inner()) {
                 result.push(flag.clone());
             }
         }
+        result.reverse();
         self.0 = result;
-    }
-}
-
-impl FromStr for PrefixedUseFlags {
-    type Err = anyhow::Error;
-
-    fn from_str(string: &str) -> Result<Self, Self::Err> {
-        let mut flags = PrefixedUseFlags::default();
-        for flag in string.split_whitespace().map(str::parse) {
-            flags.update(&flag?);
-        }
-        Ok(flags)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::entry::Prefixed::{Set, Unset};
-    use std::str::FromStr;
 
     #[test]
     fn test_pkg_use_entries_from_string() -> Result<()> {
@@ -138,18 +131,18 @@ mod tests {
             app-admin/sudo foo
         ";
 
-        let file = PackageUseEntries::from_string(content.into())?;
+        let file = PackageUseEntries::from_string(content.into(), Precedence::User)?;
         let expected = vec![
             (
                 Atom::new("sys-apps/systemd")?,
-                PrefixedUseFlags(vec![Set(UseFlag::from_str("sysv-utils")?)]),
+                EntryUseFlags(vec![Entry::from_str("sysv-utils", Precedence::User)?]),
             ),
             (
                 Atom::new("app-admin/sudo")?,
-                PrefixedUseFlags(vec![
-                    Unset(UseFlag::from_str("bar")?),
-                    Set(UseFlag::from_str("baz")?),
-                    Set(UseFlag::from_str("foo")?),
+                EntryUseFlags(vec![
+                    Entry::from_str("-bar", Precedence::User)?,
+                    Entry::from_str("baz", Precedence::User)?,
+                    Entry::from_str("foo", Precedence::User)?,
                 ]),
             ),
         ]
@@ -170,6 +163,7 @@ mod tests {
             dev-libs/libffi foobar
             "
             .into(),
+            Precedence::Profile(0),
         )?;
 
         let parent = PackageUseEntries::from_string(
@@ -179,6 +173,7 @@ mod tests {
             app-arch/rpm -foo
             "
             .into(),
+            Precedence::Profile(1),
         )?;
 
         let mut child = PackageUseEntries::from_string(
@@ -189,77 +184,62 @@ mod tests {
             dev-libs/libffi -foobar
             "
             .into(),
+            Precedence::User,
         )?;
         child.inherit_from(&parent.inherit(&grand_parent));
 
         assert_eq!(child.0.len(), 5);
         assert_eq!(
             child.0.get(&Atom::new("dev-libs/libffi")?).unwrap(),
-            &PrefixedUseFlags(vec![
-                Unset(UseFlag::from_str("foobar")?),
-                Set(UseFlag::from_str("foo")?),
-                Unset(UseFlag::from_str("bar")?),
-                Set(UseFlag::from_str("baz")?),
+            &EntryUseFlags(vec![
+                Entry::from_str("foo", Precedence::Profile(0))?,
+                Entry::from_str("-bar", Precedence::Profile(0))?,
+                Entry::from_str("baz", Precedence::Profile(0))?,
+                Entry::from_str("-foobar", Precedence::User)?,
             ])
         );
         assert_eq!(
             child.0.get(&Atom::new("app-arch/zstd")?).unwrap(),
-            &PrefixedUseFlags(vec![
-                Set(UseFlag::from_str("foo")?),
-                Set(UseFlag::from_str("baz")?),
+            &EntryUseFlags(vec![
+                Entry::from_str("baz", Precedence::Profile(0))?,
+                Entry::from_str("foo", Precedence::User)?,
             ])
         );
         assert_eq!(
             child.0.get(&Atom::new("app-arch/rpm")?).unwrap(),
-            &PrefixedUseFlags(vec![Set(UseFlag::from_str("foo")?)])
+            &EntryUseFlags(vec![Entry::from_str("foo", Precedence::User)?])
         );
         assert_eq!(
             child.0.get(&Atom::new("app-arch/xz-utils")?).unwrap(),
-            &PrefixedUseFlags(vec![
-                Set(UseFlag::from_str("baz")?),
-                Unset(UseFlag::from_str("bar")?),
-                Unset(UseFlag::from_str("foo")?),
-                Set(UseFlag::from_str("test")?),
+            &EntryUseFlags(vec![
+                Entry::from_str("test", Precedence::Profile(1))?,
+                Entry::from_str("-foo", Precedence::User)?,
+                Entry::from_str("-bar", Precedence::User)?,
+                Entry::from_str("baz", Precedence::User)?,
             ])
         );
-        Ok(())
-    }
-
-    #[test]
-    fn test_pkg_use_entries_finalize() -> Result<()> {
-        let entries = PackageUseEntries::from_string("dev-libs/libffi foo -bar baz".into())?;
-        let finalized = entries.finalize();
-        let expected = vec![(
-            Atom::new("dev-libs/libffi")?,
-            vec![UseFlag::from_str("foo")?, UseFlag::from_str("baz")?]
-                .into_iter()
-                .collect(),
-        )]
-        .into_iter()
-        .collect();
-        assert_eq!(finalized, expected);
         Ok(())
     }
 
     #[test]
     fn test_prefixed_use_flags_inherit_from() -> Result<()> {
-        let parent = PrefixedUseFlags(vec![
-            Set(UseFlag::from_str("foo")?),
-            Unset(UseFlag::from_str("qux")?),
-            Set(UseFlag::from_str("baz")?),
+        let parent = EntryUseFlags(vec![
+            Entry::from_str("foo", Precedence::Profile(0))?,
+            Entry::from_str("-qux", Precedence::Profile(0))?,
+            Entry::from_str("baz", Precedence::Profile(0))?,
         ]);
 
-        let mut child = PrefixedUseFlags(vec![
-            Unset(UseFlag::from_str("foo")?),
-            Set(UseFlag::from_str("qux")?),
+        let mut child = EntryUseFlags(vec![
+            Entry::from_str("-foo", Precedence::Profile(1))?,
+            Entry::from_str("qux", Precedence::Profile(1))?,
         ]);
 
         child.inherit_from(&parent);
 
-        let expected = PrefixedUseFlags(vec![
-            Set(UseFlag::from_str("qux")?),
-            Unset(UseFlag::from_str("foo")?),
-            Set(UseFlag::from_str("baz")?),
+        let expected = EntryUseFlags(vec![
+            Entry::from_str("baz", Precedence::Profile(0))?,
+            Entry::from_str("-foo", Precedence::Profile(1))?,
+            Entry::from_str("qux", Precedence::Profile(1))?,
         ]);
         assert_eq!(child, expected);
         Ok(())

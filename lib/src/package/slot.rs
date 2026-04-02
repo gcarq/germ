@@ -2,6 +2,7 @@ use crate::regex::SLOT;
 use anyhow::{Result, anyhow};
 use regex::Regex;
 use rkyv::{Archive, Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::Write;
 use std::hash::{Hash, Hasher};
@@ -76,18 +77,32 @@ impl FromStr for PackageSlot {
 
 impl PartialEq<Self> for PackageSlot {
     fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Ord for PackageSlot {
+    fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (Self::Any | Self::AnyRebuild, _) | (_, Self::Any | Self::AnyRebuild) => true,
+            (Self::Any | Self::AnyRebuild, _) | (_, Self::Any | Self::AnyRebuild) => {
+                Ordering::Equal
+            }
             (
                 Self::Eq(s1) | Self::EqRebuild(s1) | Self::EqSubSlotRebuild(s1, _),
                 Self::Eq(s2) | Self::EqRebuild(s2) | Self::EqSubSlotRebuild(s2, _),
-            ) => s1 == s2,
+            ) => s1.cmp(s2),
             (
                 Self::EqSubSlot(s1, ss1) | Self::EqSubSlotRebuild(s1, ss1),
                 Self::EqSubSlot(s2, ss2) | Self::EqSubSlotRebuild(s2, ss2),
-            ) => s1 == s2 && ss1 == ss2,
-            _ => false,
+            ) => s1.cmp(s2).then(ss1.cmp(ss2)),
+            _ => Ordering::Less,
         }
+    }
+}
+
+impl PartialOrd for PackageSlot {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 

@@ -2,8 +2,9 @@ mod masks;
 
 use crate::conf::masks::useflag::UseMasks;
 use crate::consts::DEFAULT_PORTAGE_CONF_PATH;
+use crate::files::entry::Precedence;
 use crate::files::pkguse::PackageUseEntries;
-use crate::files::{FileFromPath, PackageEntries, UseEntries};
+use crate::files::{PackageEntries, UseEntries};
 use crate::makenv::MakeEnv;
 use crate::profile::Profile;
 use crate::repository::set::RepoSet;
@@ -43,17 +44,21 @@ impl PortageConf {
         let package_masks = PackageMasks::new(
             repo_set,
             &profile,
-            PackageEntries::from_path(&path.join("package.mask"), true, true)?,
-            PackageEntries::from_path(&path.join("package.unmask"), true, true)?,
+            PackageEntries::from_path(&path.join("package.mask"), Precedence::User, true)?,
+            PackageEntries::from_path(&path.join("package.unmask"), Precedence::User, true)?,
         );
 
         let use_masks = UseMasks::new(
             &profile,
-            PackageUseEntries::from_path(&path.join("package.use"), true, true)?,
-            UseEntries::from_path(&path.join("profile").join("use.mask"), true, true)?,
+            PackageUseEntries::from_path(&path.join("package.use"), Precedence::User, true)?,
+            UseEntries::from_path(
+                &path.join("profile").join("use.mask"),
+                Precedence::User,
+                true,
+            )?,
             PackageUseEntries::from_path(
                 &path.join("profile").join("package.use.mask"),
-                true,
+                Precedence::User,
                 true,
             )?,
         );

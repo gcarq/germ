@@ -1,8 +1,9 @@
 mod deprecation;
 
 use crate::eapi::Eapi;
+use crate::files::entry::Precedence;
 use crate::files::pkguse::PackageUseEntries;
-use crate::files::{FileFromPath, PackageEntries, SysPackageEntries, UseEntries};
+use crate::files::{PackageEntries, SysPackageEntries, UseEntries};
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
 use crate::repository::set::RepoSet;
@@ -19,7 +20,6 @@ use std::{fmt, fs};
 #[derive(Default)]
 pub struct Profile {
     pub location: PathBuf,
-    eapi: Eapi,
     deprecated: Option<DeprecationInfo>,
 
     pub make_defaults: MakeEnv,
@@ -56,82 +56,90 @@ impl Profile {
     ///
     /// Returns `Err` if `location` doesn't exist or the profile directory is invalid.
     pub fn resolve(location: &Path, repo_set: &RepoSet) -> Result<Self> {
-        let mut profile = Self::new(location)?;
-
         let parents = Self::resolve_parents(location, repo_set)
             .with_context(|| anyhow!("unable to resolve parents for {}", location.display()))?;
 
-        if let Some((base, parents)) = parents.split_first() {
-            let mut prev = Self::new(base)
-                .with_context(|| anyhow!("unable to build profile from {}", base.display()))?;
-            for next in parents {
-                let next = Self::new(next)
-                    .with_context(|| anyhow!("unable to build profile from {}", next.display()))?;
-                prev = next.inherit(&prev);
-            }
-            profile.inherit_from(&prev);
+        let mut parents = parents
+            .into_iter()
+            .enumerate()
+            .map(|(i, path)| {
+                Self::new(&path, Precedence::Profile(i))
+                    .with_context(|| anyhow!("unable to build profile from {}", path.display()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let profile = Self::new(location, Precedence::Profile(parents.len()))?;
+        if parents.is_empty() {
+            return Ok(profile);
         }
-        Ok(profile)
+
+        let mut prev = parents.remove(0);
+        for next in parents {
+            prev = next.inherit(&prev);
+        }
+
+        Ok(profile.inherit(&prev))
     }
 
     /// Builds a profile from the given `location`.
+    /// The passed `order` must be the order in the inheritance chain.
     ///
     /// Returns `Err` if `location` doesn't exist or the profile directory is invalid.
-    fn new(location: &Path) -> Result<Self> {
+    fn new(location: &Path, order: Precedence) -> Result<Self> {
         let eapi = Self::read_eapi(&location.join("eapi"))?;
         let dir_support = eapi.supports_profile_file_dirs();
+
         let profile = Self {
             make_defaults: MakeEnv::from_path(&location.join("make.defaults"), false, true)?,
             deprecated: DeprecationInfo::from_path(&location.join("deprecated"))?,
-            packages: SysPackageEntries::from_path(&location.join("packages"), dir_support, true)?,
+            packages: SysPackageEntries::from_path(&location.join("packages"), order, dir_support)?,
             package_mask: PackageEntries::from_path(
                 &location.join("package.mask"),
+                order,
                 dir_support,
-                true,
             )?,
             package_unmask: PackageEntries::from_path(
                 &location.join("package.unmask"),
+                order,
                 dir_support,
-                true,
             )?,
             package_use: PackageUseEntries::from_path(
                 &location.join("package.use"),
+                order,
                 dir_support,
-                true,
             )?,
-            use_mask: UseEntries::from_path(&location.join("use.mask"), dir_support, true)?,
-            use_force: UseEntries::from_path(&location.join("use.force"), dir_support, true)?,
+            use_mask: UseEntries::from_path(&location.join("use.mask"), order, dir_support)?,
+            use_force: UseEntries::from_path(&location.join("use.force"), order, dir_support)?,
             use_stable_mask: UseEntries::from_path(
                 &location.join("use.stable.mask"),
+                order,
                 dir_support,
-                true,
             )?,
             use_stable_force: UseEntries::from_path(
                 &location.join("use.stable.force"),
+                order,
                 dir_support,
-                true,
             )?,
             package_use_mask: PackageUseEntries::from_path(
                 &location.join("package.use.mask"),
+                order,
                 dir_support,
-                true,
             )?,
             package_use_force: PackageUseEntries::from_path(
                 &location.join("package.use.force"),
+                order,
                 dir_support,
-                true,
             )?,
             package_use_stable_mask: PackageUseEntries::from_path(
                 &location.join("package.use.stable.mask"),
+                order,
                 dir_support,
-                true,
             )?,
             package_use_stable_force: PackageUseEntries::from_path(
                 &location.join("package.use.stable.force"),
+                order,
                 dir_support,
-                true,
             )?,
-            eapi,
             location: location.canonicalize()?,
         };
         if let Some(deprecation) = &profile.deprecated {
@@ -224,6 +232,8 @@ impl fmt::Display for Profile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::files::entry::Entry;
+    use crate::files::pkguse::EntryUseFlags;
 
     #[test]
     fn test_profile_inherit_from() -> Result<()> {
@@ -231,16 +241,18 @@ mod tests {
             make_defaults: MakeEnv::from_string("USE=\"foo\"".into())?,
             package_use_mask: PackageUseEntries::from_string(
                 "sys-libs/glibc cet stack-realign".into(),
+                Precedence::Profile(0),
             )?,
-            use_mask: UseEntries::from_string("bar".into())?,
+            use_mask: UseEntries::from_string("foo\nbar".into(), Precedence::Profile(0))?,
             ..Default::default()
         };
 
         let mut child = Profile {
             make_defaults: MakeEnv::from_string("USE=\"bar\"".into())?,
-            use_mask: UseEntries::from_string("-bar baz".into())?,
+            use_mask: UseEntries::from_string("-bar\nbaz".into(), Precedence::Profile(1))?,
             package_use_mask: PackageUseEntries::from_string(
                 "sys-libs/glibc -stack-realign\ndev-lang/rust baz".into(),
+                Precedence::Profile(1),
             )?,
             ..Default::default()
         };
@@ -250,17 +262,27 @@ mod tests {
             child.make_defaults.get("USE").unwrap().to_string(),
             "foo bar"
         );
-        assert_eq!(child.use_mask.finalize(), vec!["bar".parse()?]);
         assert_eq!(
-            child.package_use_mask.finalize(),
+            child.use_mask.into_iter().collect::<Vec<_>>(),
+            vec![
+                Entry::from_str("foo", Precedence::Profile(0))?,
+                Entry::from_str("-bar", Precedence::Profile(1))?,
+                Entry::from_str("baz", Precedence::Profile(1))?,
+            ]
+        );
+        assert_eq!(
+            child.package_use_mask.into_inner(),
             [
                 (
                     "sys-libs/glibc".parse()?,
-                    vec!["cet".parse()?].into_iter().collect()
+                    EntryUseFlags::from_raw(vec![
+                        Entry::from_str("cet", Precedence::Profile(0))?,
+                        Entry::from_str("-stack-realign", Precedence::Profile(1))?,
+                    ])
                 ),
                 (
                     "dev-lang/rust".parse()?,
-                    vec!["baz".parse()?].into_iter().collect()
+                    EntryUseFlags::from_raw(vec![Entry::from_str("baz", Precedence::Profile(1))?])
                 )
             ]
             .into_iter()

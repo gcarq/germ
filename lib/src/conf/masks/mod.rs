@@ -2,19 +2,21 @@ pub mod useflag;
 
 use crate::deps::atom::Atom;
 use crate::files::PackageEntries;
+use crate::files::entry::Entry;
 use crate::package::Package;
 use crate::profile::Profile;
 use crate::repository::set::RepoSet;
 use crate::types::FxHashMap;
 use crate::utils::Inherit;
 use log::debug;
+use std::cmp::Ordering;
 
 /// Holds all package masks and should be used as the single source of truth  when checking
 /// if a package is masked. Masks and unmasks are stored in a `HashMap` that maps the
 /// qualified package name to a vector of [`Atom`].
 pub struct PackageMasks {
-    pub mask: FxHashMap<Box<str>, Vec<Atom>>,
-    pub unmask: FxHashMap<Box<str>, Vec<Atom>>,
+    pub mask: FxHashMap<Box<str>, Vec<Entry<Atom>>>,
+    pub unmask: FxHashMap<Box<str>, Vec<Entry<Atom>>>,
 }
 
 impl PackageMasks {
@@ -48,30 +50,37 @@ impl PackageMasks {
         manager
     }
 
-    /// Checks if the given `package` is masked according to the current masks.
+    /// Checks if the given `package` is masked.
     pub fn is_masked(&self, pkg: &Package) -> bool {
-        match Self::map_contains_pkg(&self.mask, pkg) {
-            true => !Self::map_contains_pkg(&self.unmask, pkg),
-            false => false,
+        match Self::find_match(pkg, &self.mask) {
+            Some(mask) => match Self::find_match(pkg, &self.unmask) {
+                Some(unmask) => match mask.prec.cmp(&unmask.prec) {
+                    Ordering::Less | Ordering::Equal => !unmask.op.as_bool(),
+                    Ordering::Greater => mask.op.as_bool(),
+                },
+                None => true,
+            },
+            None => false,
         }
     }
 
-    /// Helper function to check if the given `map` contains a package according to its atoms.
-    fn map_contains_pkg(map: &FxHashMap<Box<str>, Vec<Atom>>, pkg: &Package) -> bool {
-        map.get(&*pkg.qualified_name())
-            .is_some_and(|atoms| atoms.iter().any(|atom| pkg.matches_atom(atom)))
+    /// Returns the match with the highest precedence from the given `map`.
+    fn find_match<'a>(
+        pkg: &Package,
+        map: &'a FxHashMap<Box<str>, Vec<Entry<Atom>>>,
+    ) -> Option<&'a Entry<Atom>> {
+        let atoms = map.get(&*pkg.qualified_name())?;
+        atoms.iter().filter(|atom| pkg.matches_atom(atom)).max()
     }
 
     /// Helper function to build a map from qualified atom names to [`Atom`]
     /// from a [`PackageEntries`].
-    fn map_from_entries(entries: PackageEntries) -> FxHashMap<Box<str>, Vec<Atom>> {
+    fn map_from_entries(entries: PackageEntries) -> FxHashMap<Box<str>, Vec<Entry<Atom>>> {
         let mut map = FxHashMap::default();
         for atom in entries.into_iter() {
-            if let Some(atom) = atom.into_value() {
-                map.entry(atom.qualified_name().into())
-                    .or_insert_with(|| Vec::with_capacity(1))
-                    .push(atom);
-            }
+            map.entry(atom.qualified_name().into())
+                .or_insert_with(|| Vec::with_capacity(1))
+                .push(atom);
         }
         map
     }
@@ -80,15 +89,17 @@ impl PackageMasks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::FileFromPath;
+    use crate::files::entry::Precedence;
     use crate::package::cpv::CPV;
     use crate::package::version::PackageVersion;
 
     #[test]
     fn test_is_masked() {
         let mask_lines =
-            PackageEntries::from_string("dev-lang/rust\napp-editors/vim".into()).unwrap();
-        let unmask_lines = PackageEntries::from_string("=dev-lang/rust-1.50*".into()).unwrap();
+            PackageEntries::from_string("dev-lang/rust\napp-editors/vim".into(), Precedence::User)
+                .unwrap();
+        let unmask_lines =
+            PackageEntries::from_string("=dev-lang/rust-1.50*".into(), Precedence::User).unwrap();
         let repo_set = RepoSet::default();
         let manager = PackageMasks::new(&repo_set, &Profile::default(), mask_lines, unmask_lines);
 

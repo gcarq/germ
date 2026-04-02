@@ -1,8 +1,9 @@
-use crate::files::FileFromPath;
-use crate::files::entry::{FileEntry, Prefixed};
+use crate::files::content_from_path;
+use crate::files::entry::{Entry, FileEntry, Precedence};
 use crate::types::FxHashSet;
 use crate::utils::Inherit;
 use anyhow::{Context, Result};
+use std::path::Path;
 
 /// Represents a one-item-per-line file.
 ///
@@ -12,44 +13,34 @@ use anyhow::{Context, Result};
 /// TODO: consider saving relevant file path and line numbers for better error messages.
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
-pub struct LineBasedFile<T: FileEntry>(Vec<Prefixed<T>>);
+pub struct LineBasedFile<T: FileEntry>(Vec<Entry<T>>);
 
 impl<T: FileEntry> LineBasedFile<T> {
-    pub fn iter(&self) -> impl Iterator<Item = &Prefixed<T>> {
-        self.0.iter()
+    pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> Result<Self> {
+        let content = content_from_path(path, recursive, true)?;
+        Self::from_string(content, order)
     }
 
-    pub fn into_iter(self) -> impl Iterator<Item = Prefixed<T>> {
-        self.0.into_iter()
-    }
-
-    /// Consumes `self` and returns a vector of all entries that should be set.
-    pub fn finalize(self) -> Vec<T> {
-        self.0
-            .into_iter()
-            .filter_map(Prefixed::into_value)
-            .collect()
-    }
-}
-
-impl<T: FileEntry> FileFromPath for LineBasedFile<T> {
-    /// Creates a new instance from the given `content`.
-    /// Lines that are empty or start with `#` are ignored.
-    fn from_string(content: String) -> Result<Self>
-    where
-        Self: Sized,
-    {
+    pub fn from_string(content: String, order: Precedence) -> Result<Self> {
         let lines = content
             .lines()
             .enumerate()
             .map(|(lineno, line)| (lineno, line.trim()))
             .filter(|(_, line)| !line.is_empty() && !line.starts_with('#'))
             .map(|(lineno, line)| {
-                line.parse()
+                Entry::from_str(line, order)
                     .with_context(|| format!("failed to parse line {}: {line}", lineno + 1))
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Self(lines))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Entry<T>> {
+        self.0.iter()
+    }
+
+    pub fn into_iter(self) -> impl Iterator<Item = Entry<T>> {
+        self.0.into_iter()
     }
 }
 
@@ -64,10 +55,11 @@ impl<T: FileEntry> Inherit for LineBasedFile<T> {
         let mut seen = FxHashSet::default();
         let mut result = Vec::new();
         for item in self.0.iter().rev().chain(parent.0.iter().rev()) {
-            if seen.insert(item.inner().clone()) {
+            if seen.insert(item.inner()) {
                 result.push(item.clone());
             }
         }
+        result.reverse();
         self.0 = result;
     }
 }
@@ -76,7 +68,6 @@ impl<T: FileEntry> Inherit for LineBasedFile<T> {
 mod tests {
     use super::*;
     use crate::files::PackageEntries;
-    use crate::files::entry::Prefixed::{Set, Unset};
 
     #[test]
     fn test_from_string() -> Result<()> {
@@ -89,14 +80,14 @@ mod tests {
             -app-arch/rpm
         ";
 
-        let file = PackageEntries::from_string(content.into())?;
+        let file = PackageEntries::from_string(content.into(), Precedence::Repository)?;
         assert_eq!(
             file.0,
             vec![
-                "dev-libs/libffi".parse()?,
-                "app-arch/xz-utils".parse()?,
-                "app-arch/zstd".parse()?,
-                "-app-arch/rpm".parse()?,
+                Entry::from_str("dev-libs/libffi", Precedence::Repository)?,
+                Entry::from_str("app-arch/xz-utils", Precedence::Repository)?,
+                Entry::from_str("app-arch/zstd", Precedence::Repository)?,
+                Entry::from_str("-app-arch/rpm", Precedence::Repository)?,
             ]
         );
         Ok(())
@@ -112,15 +103,16 @@ mod tests {
             app-arch/rpm
         "
             .into(),
+            Precedence::Repository,
         )?;
 
         let parent = PackageEntries::from_string(
             "
-            dev-libs/libffi
             -app-arch/rpm
             -sys-libs/glibc
             "
             .into(),
+            Precedence::Profile(0),
         )?;
 
         let mut child = PackageEntries::from_string(
@@ -131,6 +123,7 @@ mod tests {
             -app-arch/rpm
             "
             .into(),
+            Precedence::Profile(1),
         )?;
 
         child.inherit_from(&parent.inherit(&grand_parent));
@@ -138,11 +131,11 @@ mod tests {
         assert_eq!(
             child.0,
             vec![
-                Unset("app-arch/rpm".parse()?),
-                Set("app-arch/zstd".parse()?),
-                Unset("app-arch/xz-utils".parse()?),
-                Set("dev-libs/libffi".parse()?),
-                Unset("sys-libs/glibc".parse()?),
+                Entry::from_str("dev-libs/libffi", Precedence::Repository)?,
+                Entry::from_str("-sys-libs/glibc", Precedence::Profile(0))?,
+                Entry::from_str("-app-arch/xz-utils", Precedence::Profile(1))?,
+                Entry::from_str("app-arch/zstd", Precedence::Profile(1))?,
+                Entry::from_str("-app-arch/rpm", Precedence::Profile(1))?,
             ]
         );
         Ok(())
