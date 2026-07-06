@@ -5,18 +5,18 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-constcat = { version = "0.6.1", default-features = false }
-fxhash = { version = "0.2.1", default-features = false }
+constcat.workspace = true
+fxhash.workspace = true
 log.workspace = true
-md-5 = { version = "0.10.6", default-features = false, features = ["std"] }
-nix = { version = "0.31.2", default-features = false, features = ["process", "signal", "poll", "fs"] }
-rayon = { version = "1.11.0", default-features = false }
-regex = { version = "1.12.3", default-features = false, features = ["perf", "std"] }
-rkyv = { version = "0.8.15", default-features = false, features = ["bytecheck", "std"] }
-rust-ini = { version = "0.21.3", default-features = false }
-shlex = { version = "1.3.0", default-features = false, features = ["std"] }
-strum = { version = "0.28.0", default-features = false, features = ["std", "derive"] }
-walkdir = { version = "2.5.0", default-features = false }
+md-5.workspace = true
+nix.workspace = true
+rayon.workspace = true
+regex.workspace = true
+rkyv.workspace = true
+rust-ini.workspace = true
+shlex.workspace = true
+strum.workspace = true
+walkdir.workspace = true
 
 [lints]
 workspace = true
