@@ -8,8 +8,7 @@ const SUFFIX_PREFIXES: [&str; 5] = ["alpha", "beta", "pre", "rc", "p"];
 
 /// Holds a list of [`VersionSuffix`] for a package version.
 /// For example, `"_rc1_p20"`.
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, Default, Debug)]
 pub struct VersionSuffixes(Box<[VersionSuffix]>);
 
 impl VersionSuffixes {
@@ -95,8 +94,7 @@ impl fmt::Display for VersionSuffixes {
 
 /// Represents the different package version suffixes outlined in section 3.2.
 /// For example: `"alpha1", "beta2", "pre", "rc", "p20230101"`.
-#[derive(Archive, Serialize, Deserialize, Clone, Eq)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, Debug)]
 pub enum VersionSuffix {
     Alpha(Option<Box<str>>),
     Beta(Option<Box<str>>),

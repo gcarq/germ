@@ -19,8 +19,8 @@ use std::path::Path;
 ///
 /// TODO: consider adding a `new_unchecked` constructor, that also passes the `fqn` that doesn't
 ///  validate for performance reasons
-#[derive(Archive, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Clone)]
-#[cfg_attr(test, derive(Default, Debug))]
+#[derive(Archive, Serialize, Deserialize, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct CPV {
     category: Box<str>,
     package: Box<str>,

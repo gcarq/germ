@@ -18,8 +18,8 @@ static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_
 ///
 /// This includes the base version components (e.g., `1.2.3a`), any suffixes
 /// (e.g., `_alpha1`, `_p20240101`), and the revision number (e.g., `-r1`).
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[cfg_attr(test, derive(Default, Debug))]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct PackageVersion {
     number: VersionNumber,
     suffixes: VersionSuffixes,
