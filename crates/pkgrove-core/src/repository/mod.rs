@@ -58,9 +58,8 @@ pub struct Repository {
 impl Repository {
     /// Builds a new [`Repository`] with the given `location` and INI `properties` from repos.conf.
     ///
-    /// Packages must be collected separately by calling `collect_packages` since they require
+    /// categories, packages and eclasses must be collected separately by calling `populate` since they require
     /// parsing the whole repository and can be expensive to build.
-    /// This allows deferring package collection until it's actually needed.
     pub fn new(config: &RepositoryConfig) -> Result<Self> {
         let location = config.location.canonicalize()?;
         let profiles = location.join("profiles");
@@ -88,6 +87,11 @@ impl Repository {
             location,
         };
         Ok(repository)
+    }
+
+    /// Returns all known CPVs in the repository.
+    pub fn cpvs(&self) -> impl Iterator<Item = &CPV> {
+        self.avail_package_idx.values().flatten()
     }
 
     /// Finds and returns all packages that match the given `atom`.
