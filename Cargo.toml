@@ -1,6 +1,6 @@
 [workspace]
-members = ["cli", "lib"]
-default-members = ["cli"]
+members = ["crates/pkgrove", "crates/pkgrove-core"]
+default-members = ["crates/pkgrove"]
 resolver = "3"
 
 [workspace.package]

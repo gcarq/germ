@@ -10,9 +10,9 @@ use crate::commands::install::install;
 use crate::commands::sync::sync;
 use anyhow::Result;
 use clap::Subcommand;
-use lib::conf::PortageConf;
-use lib::deps::atom::Atom;
-use lib::repository::set::RepoSet;
+use pkgrove_core::conf::PortageConf;
+use pkgrove_core::deps::atom::Atom;
+use pkgrove_core::repository::set::RepoSet;
 
 #[derive(Subcommand)]
 pub enum Command {

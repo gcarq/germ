@@ -1,5 +1,5 @@
 [package]
-name = "lib"
+name = "pkgrove-core"
 version.workspace = true
 edition.workspace = true
 

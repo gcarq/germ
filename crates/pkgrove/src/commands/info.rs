@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
-use lib::conf::PortageConf;
-use lib::deps::atom::Atom;
-use lib::repository::set::RepoSet;
-use lib::vdb::Vdb;
-use lib::vdb::package::InstalledPackage;
+use pkgrove_core::conf::PortageConf;
+use pkgrove_core::deps::atom::Atom;
+use pkgrove_core::repository::set::RepoSet;
+use pkgrove_core::vdb::Vdb;
+use pkgrove_core::vdb::package::InstalledPackage;
 use std::path::PathBuf;
 use std::str::FromStr;
 

@@ -1,5 +1,5 @@
-use lib::repository::set::RepoSet;
 use log::error;
+use pkgrove_core::repository::set::RepoSet;
 
 /// Syncs all repositories.
 pub fn sync(repo_set: &RepoSet) {

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow};
-use lib::repository::set::RepoSet;
+use pkgrove_core::repository::set::RepoSet;
 
 /// Generates metadata cache for repositories.
 pub fn gencache(repo_name: Option<&String>, repo_set: &mut RepoSet) -> Result<()> {

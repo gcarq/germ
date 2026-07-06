@@ -175,18 +175,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
-name = "cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "colored 3.1.1",
- "fern",
- "lib",
- "log",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -425,25 +413,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
-name = "lib"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "constcat",
- "fxhash",
- "log",
- "md-5",
- "nix",
- "rayon",
- "regex",
- "rkyv",
- "rust-ini",
- "shlex",
- "strum",
- "walkdir",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -530,6 +499,37 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pkgrove"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "colored 3.1.1",
+ "fern",
+ "log",
+ "pkgrove-core",
+]
+
+[[package]]
+name = "pkgrove-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "constcat",
+ "fxhash",
+ "log",
+ "md-5",
+ "nix",
+ "rayon",
+ "regex",
+ "rkyv",
+ "rust-ini",
+ "shlex",
+ "strum",
+ "walkdir",
+]
 
 [[package]]
 name = "proc-macro2"
