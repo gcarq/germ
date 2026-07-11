@@ -177,6 +177,11 @@ impl Profile {
                     let repo = repo_set.get(repo_name).ok_or_else(|| {
                         anyhow!("Repository '{repo_name}' not found for profile '{profile}'")
                     })?;
+                    if !repo.is_loaded() {
+                        return Err(anyhow!(
+                            "repository '{repo_name}' not loaded; run sync first"
+                        ));
+                    }
                     repo.location.join("profiles").join(profile_path)
                 }
                 None => path.join(profile),

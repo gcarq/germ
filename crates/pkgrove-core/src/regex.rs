@@ -32,17 +32,43 @@ pub const V_REV: &str = concat!(VERSION, "(:?-r", REVISION, ")?");
 
 pub const PV_REV: &str = concat!(PACKAGE, "-", V_REV);
 
-/// Regex to validate if a string is a valid category name.
+/// Regex to validate a repository names.
+pub static REPO_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"^{REPOSITORY}$")).unwrap());
+
+/// Regex to validate a category name.
 pub static CATEGORY_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"^{CATEGORY}$")).unwrap());
 
-/// Regex to validate if a string is a valid package name.
+/// Regex to validate a package name.
 pub static PKG_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"^{PACKAGE}$")).unwrap());
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_repository_regex_match() {
+        let valid_names = ["gentoo", "my-repo_1", "repo123"];
+        for name in valid_names {
+            assert!(
+                REPO_RE.is_match(name),
+                "Repository '{name}' should be valid",
+            );
+        }
+    }
+
+    #[test]
+    fn test_repository_regex_no_match() {
+        let invalid_names = ["", "my repo", "repo!", "repo@123", "repo#name", "-repo"];
+        for name in invalid_names {
+            assert!(
+                !REPO_RE.is_match(name),
+                "Repository '{name}' should be invalid",
+            );
+        }
+    }
 
     #[test]
     fn test_category_regex_match() {

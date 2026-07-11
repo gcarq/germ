@@ -1,15 +1,18 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 use pkgrove_core::conf::PortageConf;
+use pkgrove_core::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
 use pkgrove_core::deps::atom::Atom;
 use pkgrove_core::repository::set::RepoSet;
 use pkgrove_core::vdb::Vdb;
 use pkgrove_core::vdb::package::InstalledPackage;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 /// Prints system- and package information for all packages matching the given `Atom`.
-pub fn info(atom: Option<&Atom>, repo_set: &RepoSet, conf: &PortageConf) -> Result<()> {
+pub fn info(atom: Option<&Atom>, repo_set: &RepoSet) -> Result<()> {
+    let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH), repo_set)?;
+
     println!("Repositories:");
     for repo in repo_set.values() {
         println!(" * {repo} -> {}", repo.location.display());
@@ -36,7 +39,7 @@ pub fn info(atom: Option<&Atom>, repo_set: &RepoSet, conf: &PortageConf) -> Resu
     );
     for pkg in packages {
         println!("{}", pkg.to_string().green().bold());
-        print_use_flags(pkg, conf);
+        print_use_flags(pkg, &conf);
         println!();
     }
 

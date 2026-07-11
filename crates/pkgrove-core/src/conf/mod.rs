@@ -46,7 +46,7 @@ impl PortageConf {
             &profile,
             PackageEntries::from_path(&path.join("package.mask"), Precedence::User, true)?,
             PackageEntries::from_path(&path.join("package.unmask"), Precedence::User, true)?,
-        );
+        )?;
 
         let use_masks = UseMasks::new(
             &profile,
@@ -88,12 +88,14 @@ impl PortageConf {
 
     /// Sanity check to ensure the given `ARCH` is supported by at least one repository.
     fn validate_arch(arch: &str, repo_set: &RepoSet) -> Result<()> {
-        match repo_set.values().any(|repo| repo.arch_list.supports(arch)) {
-            true => Ok(()),
-            false => Err(anyhow!(
-                "ARCH value '{arch}' is not supported by any configured repository"
-            )),
+        for repo in repo_set.values() {
+            if repo.arch_list()?.supports(arch) {
+                return Ok(());
+            }
         }
+        Err(anyhow!(
+            "ARCH value '{arch}' is not supported by any configured repository"
+        ))
     }
 
     /// Sanity check to ensure the given `profile` is valid for at least one repository.
@@ -107,7 +109,7 @@ impl PortageConf {
                 .display()
                 .to_string()
                 .strip_prefix(&profile_prefix)
-                && repo.is_known_profile(arch, p)
+                && repo.is_known_profile(arch, p)?
             {
                 return Ok(());
             }

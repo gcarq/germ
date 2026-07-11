@@ -29,8 +29,7 @@ impl SyncType {
 struct SyncConfig {
     // Absolute path to the repository location on the local filesystem.
     pub location: PathBuf,
-    pub auto_sync: bool,
-    pub sync_uri: Option<String>,
+    pub sync_uri: String,
 }
 
 impl SyncConfig {
@@ -38,27 +37,13 @@ impl SyncConfig {
         let location = properties
             .get("location")
             .map(PathBuf::from)
-            .ok_or_else(|| anyhow!("missing required 'location' property"))?
-            .canonicalize()?;
+            .ok_or_else(|| anyhow!("missing required 'location' property"))?;
 
-        let auto_sync = properties
-            .get("auto-sync")
-            .map(|s| match s.as_str() {
-                "true" | "yes" => Ok(true),
-                "false" | "no" => Ok(false),
-                _ => Err(anyhow!("invalid auto-sync value: '{s}'")),
-            })
-            .transpose()
-            .with_context(|| "invalid auto-sync value")?
-            .unwrap_or(true);
+        let Some(sync_uri) = properties.get("sync-uri").map(ToOwned::to_owned) else {
+            return Err(anyhow!("missing required 'sync-uri' property"));
+        };
 
-        let sync_uri = properties.get("sync-uri").map(ToOwned::to_owned);
-
-        Ok(SyncConfig {
-            location,
-            auto_sync,
-            sync_uri,
-        })
+        Ok(SyncConfig { location, sync_uri })
     }
 }
 
@@ -129,6 +114,7 @@ mod tests {
                 [gentoo]
                 location = /tmp
                 sync-type = git
+                sync-uri = https://github.com/gentoo-mirror/gentoo.git
             "#;
         let properties = load_properties(ini_content);
 
@@ -136,50 +122,5 @@ mod tests {
             .expect("failed to build sync handler")
             .expect("sync handler should be created");
         assert!(!handler.is_initialized());
-    }
-
-    #[test]
-    fn test_sync_config_from_ini_valid() {
-        let ini_content = r#"
-                [gentoo]
-                location = /tmp
-                auto-sync = true
-                sync-type = git
-                sync-uri = https://github.com/gentoo-mirror/gentoo.git
-            "#;
-        let properties = load_properties(ini_content);
-
-        let config = SyncConfig::from_ini(&properties).expect("failed to create SyncConfig");
-        assert_eq!(config.location, PathBuf::from("/tmp"));
-        assert!(config.auto_sync);
-        assert_eq!(
-            config.sync_uri,
-            Some("https://github.com/gentoo-mirror/gentoo.git".into())
-        );
-    }
-
-    #[test]
-    fn test_sync_config_defaults() {
-        let ini_content = r#"
-                [gentoo]
-                location = /tmp
-            "#;
-        let properties = load_properties(ini_content);
-
-        let config = SyncConfig::from_ini(&properties).expect("failed to create SyncConfig");
-        assert_eq!(config.location, PathBuf::from("/tmp"));
-        assert!(config.auto_sync);
-        assert!(config.sync_uri.is_none());
-    }
-
-    #[test]
-    fn test_sync_config_from_ini_invalid_auto_sync() {
-        let ini_content = r#"
-                [gentoo]
-                location = /tmp
-                auto-sync = maybe
-            "#;
-        let properties = load_properties(ini_content);
-        assert!(SyncConfig::from_ini(&properties).is_err());
     }
 }

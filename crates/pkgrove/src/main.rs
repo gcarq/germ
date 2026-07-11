@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::error;
-use pkgrove_core::conf::PortageConf;
 use pkgrove_core::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
 use pkgrove_core::repository::set::RepoSet;
 use std::io;
@@ -64,12 +63,10 @@ fn main() {
 
 /// Main application logic is here.
 fn run(args: Args) -> Result<()> {
-    let config_path = Path::new(DEFAULT_USE_PORTAGE_CONF_PATH);
-    let mut repo_set = RepoSet::new(&config_path.join("repos.conf"))
-        .with_context(|| "unable to process repos.conf")?;
-    let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH), &repo_set)?;
-
-    commands::execute(&args.command, &mut repo_set, &conf)?;
+    let config_path = Path::new(DEFAULT_USE_PORTAGE_CONF_PATH).join("repos.conf");
+    let mut repo_set =
+        RepoSet::new(&config_path).with_context(|| "unable to process repos.conf")?;
+    commands::execute(&args.command, &mut repo_set)?;
 
     repo_set.flush(false)
 }

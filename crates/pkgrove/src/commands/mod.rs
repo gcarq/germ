@@ -2,15 +2,12 @@
 mod gencache;
 mod info;
 mod install;
-mod sync;
 
 use crate::commands::gencache::gencache;
 use crate::commands::info::info;
 use crate::commands::install::install;
-use crate::commands::sync::sync;
 use anyhow::Result;
 use clap::Subcommand;
-use pkgrove_core::conf::PortageConf;
 use pkgrove_core::deps::atom::Atom;
 use pkgrove_core::repository::set::RepoSet;
 
@@ -40,12 +37,12 @@ pub enum Command {
     Sync,
 }
 
-pub fn execute(command: &Command, repo_set: &mut RepoSet, conf: &PortageConf) -> Result<()> {
+pub fn execute(command: &Command, repo_set: &mut RepoSet) -> Result<()> {
     match command {
-        Command::Info { atom } => info(atom.as_ref(), repo_set, conf)?,
+        Command::Info { atom } => info(atom.as_ref(), repo_set)?,
         Command::Install { atom } => install(atom, repo_set)?,
         Command::Gencache { repo } => gencache(repo.as_ref(), repo_set)?,
-        Command::Sync => sync(repo_set),
+        Command::Sync => repo_set.sync()?,
     }
     Ok(())
 }

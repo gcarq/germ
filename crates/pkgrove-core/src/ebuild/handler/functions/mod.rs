@@ -40,7 +40,7 @@ pub fn die(args: &[String], fatal: bool) -> ParentMessage {
 /// Resolves the given eclass `name` from `repository` and returns the path as string.
 pub fn resolve_eclass(name: &str, repository: &Repository) -> Result<ParentMessage> {
     let eclass = repository
-        .eclasses
+        .eclasses()?
         .get(name)
         .ok_or_else(|| anyhow!("eclass {name} not found in {repository} or its masters"))?;
 
