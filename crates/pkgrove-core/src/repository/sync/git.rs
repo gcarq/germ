@@ -4,7 +4,7 @@ use crate::types::FxHashMap;
 use anyhow::{Context, Result, anyhow};
 use log::{debug, info};
 use std::collections::HashMap;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 #[derive(Debug)]
 pub struct GitSyncHandler {
@@ -13,6 +13,13 @@ pub struct GitSyncHandler {
     pub clone_depth: usize,
     // If set to 0, the depth is unlimited. Defaults to 1.
     pub sync_depth: usize,
+}
+
+/// Helper function to create a non-interactive git `Command`
+fn git_command() -> Command {
+    let mut command = Command::new(GIT_BINARY_PATH);
+    command.env("GIT_TERMINAL_PROMPT", "0").stdin(Stdio::null());
+    command
 }
 
 impl SyncHandler for GitSyncHandler {
@@ -51,7 +58,7 @@ impl SyncHandler for GitSyncHandler {
             "Initializing git repository at {}",
             self.config.location.display()
         );
-        let mut command = Command::new(GIT_BINARY_PATH);
+        let mut command = git_command();
         command.arg("clone");
         if self.clone_depth > 0 {
             command.arg("--depth").arg(self.clone_depth.to_string());
@@ -152,7 +159,7 @@ impl GitSyncHandler {
 
     /// Updates the origin to the given `sync_uri`
     fn set_or_add_origin(&self, sync_uri: &str, env: &HashMap<String, String>) -> Result<()> {
-        let mut set_url = Command::new(GIT_BINARY_PATH);
+        let mut set_url = git_command();
         set_url
             .arg("remote")
             .arg("set-url")
@@ -182,7 +189,7 @@ impl GitSyncHandler {
     /// Prunes unreachable objects from the repository to prevent git gc from failing due to too
     /// many loose objects.
     fn prune_shallow_repository(&self, env: &HashMap<String, String>) -> Result<()> {
-        let mut command = Command::new(GIT_BINARY_PATH);
+        let mut command = git_command();
         command
             .arg("-c")
             .arg("gc.autodetach=false")
@@ -211,7 +218,7 @@ impl GitSyncHandler {
         revision: &str,
         env: &HashMap<String, String>,
     ) -> Result<String> {
-        let mut command = Command::new(GIT_BINARY_PATH);
+        let mut command = git_command();
         command
             .arg("rev-parse")
             .arg("--abbrev-ref")
@@ -237,7 +244,7 @@ impl GitSyncHandler {
         cmd_opts: &[String],
         env: &HashMap<String, String>,
     ) -> Result<()> {
-        let mut command = Command::new(GIT_BINARY_PATH);
+        let mut command = git_command();
         command
             .arg("fetch")
             .arg(remote)
@@ -251,7 +258,7 @@ impl GitSyncHandler {
 
     /// Performs a hard reset of the current branch to the specified `target` revision.
     fn reset_hard(&self, target: &str, env: &HashMap<String, String>) -> Result<()> {
-        let mut command = Command::new(GIT_BINARY_PATH);
+        let mut command = git_command();
         command
             .arg("reset")
             .arg("--hard")
@@ -292,14 +299,8 @@ mod tests {
     }
 
     fn git_in(path: &Path, args: &[&str]) -> Output {
-        let mut command = Command::new(GIT_BINARY_PATH);
+        let mut command = git_command();
         command.args(args).current_dir(path);
-        run(&mut command)
-    }
-
-    fn git(args: &[&str]) -> Output {
-        let mut command = Command::new(GIT_BINARY_PATH);
-        command.args(args);
         run(&mut command)
     }
 
@@ -323,7 +324,10 @@ mod tests {
         let bare = root.join("origin.git");
         let work = root.join("work");
         fs::create_dir_all(&work).unwrap();
-        git(&["init", "--bare", bare.to_str().unwrap()]);
+
+        let mut command = git_command();
+        command.args(&["init", "--bare", bare.to_str().unwrap()]);
+        run(&mut command);
         git_in(&work, &["init"]);
         git_in(&work, &["checkout", "-B", "main"]);
         RepositoryFixture::new(&work, repo_name)
