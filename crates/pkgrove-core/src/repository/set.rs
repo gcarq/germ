@@ -5,7 +5,7 @@ use crate::repository::config::{RepoSetConfig, RepositoryConfig};
 use crate::types::FxHashMap;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
-use log::debug;
+use log::{debug, error};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
@@ -56,10 +56,13 @@ impl RepoSet {
     }
 
     /// Syncs all repositories and reloads repository data from disk after successful syncs.
-    pub fn sync(&mut self) -> Result<()> {
+    ///
+    /// If a sync fails, an error is logged
+    pub fn maybe_sync(&mut self) -> Result<()> {
         for repo in self.repos.values() {
-            repo.sync()
-                .with_context(|| anyhow!("failed to sync repository '{}'", repo.name))?;
+            if let Err(err) = repo.sync() {
+                error!("Failed to sync repository '{}': {}", repo.name, err);
+            }
         }
 
         self.reload_from_disk()

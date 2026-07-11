@@ -42,7 +42,7 @@ pub fn execute(command: &Command, repo_set: &mut RepoSet) -> Result<()> {
         Command::Info { atom } => info(atom.as_ref(), repo_set)?,
         Command::Install { atom } => install(atom, repo_set)?,
         Command::Gencache { repo } => gencache(repo.as_ref(), repo_set)?,
-        Command::Sync => repo_set.sync()?,
+        Command::Sync => repo_set.maybe_sync()?,
     }
     Ok(())
 }

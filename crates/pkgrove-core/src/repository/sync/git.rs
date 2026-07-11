@@ -54,10 +54,7 @@ impl SyncHandler for GitSyncHandler {
     }
 
     fn init(&self) -> Result<()> {
-        info!(
-            "Initializing git repository at {}",
-            self.config.location.display()
-        );
+        info!("Cloning from '{}'", self.config.sync_uri);
         let mut command = git_command();
         command.arg("clone");
         if self.clone_depth > 0 {
