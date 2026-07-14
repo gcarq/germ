@@ -27,7 +27,7 @@ use crate::repository::misc::ArchList;
 use crate::repository::sync::{SyncHandler, build_sync_handler};
 use crate::repository::utils::resolve_cpv_from_category;
 use crate::utils::Inherit;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use log::{debug, info, warn};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
@@ -257,22 +257,22 @@ impl Repository {
     fn data(&self) -> Result<&RepositoryData> {
         match &self.state {
             RepositoryState::Loaded(data) => Ok(data),
-            RepositoryState::NotLoaded => Err(anyhow!(
+            RepositoryState::NotLoaded => bail!(
                 "repository '{}' at {} is not loaded; run sync first",
                 self.name,
                 self.location.display()
-            )),
+            ),
         }
     }
 
     fn data_mut(&mut self) -> Result<&mut RepositoryData> {
         match &mut self.state {
             RepositoryState::Loaded(data) => Ok(data),
-            RepositoryState::NotLoaded => Err(anyhow!(
+            RepositoryState::NotLoaded => bail!(
                 "repository '{}' at {} is not loaded; run sync first",
                 self.name,
                 self.location.display()
-            )),
+            ),
         }
     }
 
@@ -346,10 +346,10 @@ impl Repository {
 
     fn validate_repo_name(name: &str) -> Result<()> {
         if !REPO_RE.is_match(name) {
-            return Err(anyhow!(
+            bail!(
                 "Invalid repository name: {name}. It must match the regex: {}",
                 REPO_RE.as_str()
-            ));
+            );
         }
         Ok(())
     }

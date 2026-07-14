@@ -1,7 +1,7 @@
 use crate::package::cpv::CPV;
 use crate::package::version::PackageVersion;
 use crate::repository::EBUILD_RE;
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 use std::path::Path;
 use walkdir::WalkDir;
 
@@ -40,7 +40,8 @@ fn cpv_from_ebuild_name(category: &str, filename: &str) -> Result<Option<CPV>> {
         &caps["version"],
         Some(&caps["suffixes"]),
         caps.name("revision").map(|m| m.as_str()),
-    )?;
+    )
+    .with_context(|| anyhow!("unable to parse version from ebuild: '{filename}'"))?;
     Ok(Some(CPV::new_unchecked(category, package, version)))
 }
 

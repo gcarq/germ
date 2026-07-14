@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::Write;
@@ -27,7 +27,7 @@ impl VersionNumber {
         {
             c @ 'a'..='z' => (&version[..version.len() - 1], Some(c)),
             c if !c.is_ascii_digit() => {
-                return Err(anyhow!("invalid version suffix character in '{version}'"));
+                bail!("invalid version suffix character in '{version}'");
             }
             _ => (version, None),
         };
@@ -142,7 +142,7 @@ impl NumberComponent {
     /// Returns an `Err` if the `number` is empty or contains non-digit characters.
     pub fn new(number: &str, index: usize) -> Result<Self> {
         if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
-            return Err(anyhow!("invalid version component: '{number}'"));
+            bail!("invalid version component: '{number}'");
         }
         let component = match index == 0 || !number.starts_with('0') {
             true => NumberComponent::Numeric(number.into()),
@@ -158,8 +158,11 @@ impl Ord for NumberComponent {
             // Compare as integers, safe to unwrap as it can only contain numbers at this point.
             (NumberComponent::Numeric(a), NumberComponent::Numeric(b)) => a
                 .parse::<usize>()
-                .unwrap()
-                .cmp(&b.parse::<usize>().unwrap()),
+                .unwrap_or_else(|_| panic!("fatal: failed to parse '{a}' as usize"))
+                .cmp(
+                    &b.parse::<usize>()
+                        .unwrap_or_else(|_| panic!("fatal: failed to parse '{b}' as usize")),
+                ),
             (NumberComponent::Alphabetic(a), NumberComponent::Alphabetic(b))
             | (NumberComponent::Numeric(a), NumberComponent::Alphabetic(b))
             | (NumberComponent::Alphabetic(a), NumberComponent::Numeric(b)) => {

@@ -11,7 +11,7 @@ use crate::ebuild::handler::functions::{contains_word, debug_print, die, resolve
 use crate::ebuild::handler::prot::func::{FuncCall, FuncType};
 use crate::ebuild::handler::prot::{ChildMessage, ParentMessage};
 use crate::makenv::MakeEnv;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, bail};
 use ipc::IpcHandler;
 use log::{debug, trace};
 use std::fmt;
@@ -74,9 +74,7 @@ impl<'a> EbuildPhaseHandler<'a> {
                     trace!("ebuild process (PID: {}) exited successfully", process.id());
                     break;
                 }
-                return Err(anyhow!(
-                    "ebuild process exited with non-zero status: {status}"
-                ));
+                bail!("ebuild process exited with non-zero status: {status}");
             };
 
             match request {
@@ -99,15 +97,11 @@ impl<'a> EbuildPhaseHandler<'a> {
         match call.func {
             FuncType::ResolveEclass => match args {
                 [name] => resolve_eclass(name, self.ebuild.repo),
-                _ => Err(anyhow!(
-                    "invalid arguments: __resolve_eclass <name>: {args:?}",
-                )),
+                _ => bail!("invalid arguments: __resolve_eclass <name>: {args:?}"),
             },
             FuncType::ContainsWord => match args {
                 [word, args @ ..] => Ok(contains_word(word, args)),
-                _ => Err(anyhow!(
-                    "invalid arguments: contains_word <word> <string>: {args:?}",
-                )),
+                _ => bail!("invalid arguments: contains_word <word> <string>: {args:?}"),
             },
             FuncType::DebugPrint => Ok(debug_print(args)),
             FuncType::Die => match args {
@@ -119,42 +113,38 @@ impl<'a> EbuildPhaseHandler<'a> {
                     true => Ok(ParentMessage::Ok(None)),
                     false => Ok(ParentMessage::Err(None)),
                 },
-                _ => Err(anyhow!("invalid arguments: has <word> <args>: {args:?}",)),
+                _ => bail!("invalid arguments: has <word> <args>: {args:?}"),
             },
             FuncType::HasV if self.ebuild.eapi.supports_hasv() => match args {
                 [word, args @ ..] => match args.contains(word) {
                     true => Ok(ParentMessage::Ok(Some(word.clone()))),
                     false => Ok(ParentMessage::Err(None)),
                 },
-                _ => Err(anyhow!("invalid arguments: hasv <word> <args>: {args:?}",)),
+                _ => bail!("invalid arguments: hasv <word> <args>: {args:?}"),
             },
             FuncType::HasQ if self.ebuild.eapi.supports_hasq() => match args {
                 [word, args @ ..] => match args.contains(word) {
                     true => Ok(ParentMessage::Ok(None)),
                     false => Ok(ParentMessage::Err(None)),
                 },
-                _ => Err(anyhow!("invalid arguments: hasq <word> <args>: {args:?}",)),
+                _ => bail!("invalid arguments: hasq <word> <args>: {args:?}"),
             },
             FuncType::VerCut => match args {
                 [range] => ver_cut(self.ebuild.cpv, range, None),
                 [range, version] => ver_cut(self.ebuild.cpv, range, Some(version)),
-                _ => Err(anyhow!(
-                    "invalid arguments: ver_cut <range> [<version>]: {args:?}",
-                )),
+                _ => bail!("invalid arguments: ver_cut <range> [<version>]: {args:?}"),
             },
             FuncType::VerRs => ver_rs(self.ebuild.cpv, args),
             FuncType::VerTest => match args {
                 [op, v2] => ver_test(self.ebuild.cpv, None, op, v2),
                 [v1, op, v2] => ver_test(self.ebuild.cpv, Some(v1), op, v2),
-                _ => Err(anyhow!(
-                    "invalid arguments: ver_test [<v1>] op <v2>: {args:?}",
-                )),
+                _ => bail!("invalid arguments: ver_test [<v1>] op <v2>: {args:?}"),
             },
-            FuncType::HasV | FuncType::HasQ => Err(anyhow!(
+            FuncType::HasV | FuncType::HasQ => bail!(
                 "unsupported function '{}' for EAPI '{}'",
                 call.func,
                 self.ebuild.eapi,
-            )),
+            ),
         }
     }
 

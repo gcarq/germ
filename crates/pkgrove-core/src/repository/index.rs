@@ -2,7 +2,7 @@ use crate::deps::atom::Atom;
 use crate::package::Package;
 use crate::package::cpv::CPV;
 use crate::types::FxHashMap;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use log::debug;
 use rkyv::rancor;
 use rkyv::with::Skip;
@@ -102,10 +102,7 @@ impl ResolvedPackageIndex {
         let reader = match File::open(path) {
             Ok(file) => file,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => Err(anyhow!(
-                "unable to open package index at {}: {err}",
-                path.display()
-            ))?,
+            Err(err) => bail!("unable to open package index at {}: {err}", path.display()),
         };
         Ok(Some(Self::deserialize(reader)?))
     }

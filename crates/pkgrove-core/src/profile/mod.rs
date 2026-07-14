@@ -8,7 +8,7 @@ use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
 use crate::repository::set::RepoSet;
 use crate::utils::Inherit;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use log::warn;
 use std::path::{Path, PathBuf};
 use std::{fmt, fs};
@@ -178,9 +178,7 @@ impl Profile {
                         anyhow!("Repository '{repo_name}' not found for profile '{profile}'")
                     })?;
                     if !repo.is_loaded() {
-                        return Err(anyhow!(
-                            "repository '{repo_name}' not loaded; run sync first"
-                        ));
+                        bail!("repository '{repo_name}' not loaded; run sync first");
                     }
                     repo.location.join("profiles").join(profile_path)
                 }

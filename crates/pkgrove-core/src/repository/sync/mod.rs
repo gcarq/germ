@@ -5,7 +5,7 @@ mod git;
 
 use crate::repository::sync::git::GitSyncHandler;
 use crate::types::FxHashMap;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use std::fmt;
 use std::path::PathBuf;
 
@@ -17,7 +17,7 @@ impl SyncType {
     pub fn new(sync_type: &str) -> Result<Self> {
         match sync_type {
             "git" => Ok(SyncType::Git),
-            _ => Err(anyhow!("unsupported sync-type: '{sync_type}'")),
+            _ => bail!("unsupported sync-type: '{sync_type}'"),
         }
     }
 }
@@ -40,7 +40,7 @@ impl SyncConfig {
             .ok_or_else(|| anyhow!("missing required 'location' property"))?;
 
         let Some(sync_uri) = properties.get("sync-uri").map(ToOwned::to_owned) else {
-            return Err(anyhow!("missing required 'sync-uri' property"));
+            bail!("missing required 'sync-uri' property");
         };
 
         Ok(SyncConfig { location, sync_uri })

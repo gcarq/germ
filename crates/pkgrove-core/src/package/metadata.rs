@@ -5,7 +5,7 @@ use crate::eapi::Eapi;
 use crate::package::slot::PackageSlot;
 use crate::repository::eclass::Eclass;
 use crate::types::FxHashMap;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::path::Path;
 use std::str::FromStr;
@@ -74,10 +74,7 @@ impl PackageMetadata {
             match fs::read_to_string(path) {
                 Ok(content) => Ok(content.trim().to_string()),
                 Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(String::new()),
-                Err(e) => Err(anyhow!(
-                    "failed to read metadata from '{}': {e}",
-                    path.display()
-                )),
+                Err(e) => bail!("failed to read metadata from '{}': {e}", path.display()),
             }
         }
 

@@ -9,7 +9,7 @@ use crate::makenv::MakeEnv;
 use crate::profile::Profile;
 use crate::repository::set::RepoSet;
 use crate::utils::Inherit;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use log::debug;
 use masks::PackageMasks;
 use std::path::Path;
@@ -93,9 +93,7 @@ impl PortageConf {
                 return Ok(());
             }
         }
-        Err(anyhow!(
-            "ARCH value '{arch}' is not supported by any configured repository"
-        ))
+        bail!("ARCH value '{arch}' is not supported by any configured repository")
     }
 
     /// Sanity check to ensure the given `profile` is valid for at least one repository.
@@ -114,8 +112,6 @@ impl PortageConf {
                 return Ok(());
             }
         }
-        Err(anyhow!(
-            "Profile {profile} is not valid for any configured repository"
-        ))
+        bail!("Profile {profile} is not valid for any configured repository")
     }
 }

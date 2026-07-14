@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, bail};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
@@ -77,7 +77,7 @@ impl UseFlag {
     // TODO: implement name validation
     pub fn new(flag: String) -> Result<Self> {
         if flag.is_empty() {
-            return Err(anyhow!("use flag cannot be empty"));
+            bail!("use flag cannot be empty");
         }
         Ok(UseFlag(flag))
     }

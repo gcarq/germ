@@ -1,6 +1,6 @@
 use crate::deps::atom::Atom;
 use crate::deps::useflag::UseFlag;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, bail};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
@@ -126,7 +126,7 @@ impl FromStr for SysAtom {
     fn from_str(value: &str) -> Result<Self> {
         match value.strip_prefix('*') {
             Some(atom) => Ok(Self(atom.parse()?)),
-            None => Err(anyhow!("invalid system package syntax: {value}")),
+            None => bail!("invalid system package syntax: {value}"),
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::files::content_from_path;
 use crate::types::FxHashMap;
 use crate::utils;
 use crate::utils::Inherit;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, bail};
 use std::ops::Deref;
 use std::path::Path;
 use value::EnvValue;
@@ -58,7 +58,7 @@ impl MakeEnv {
                     let value = EnvValue::new(value, is_incremental_var(&key));
                     Ok((key, value))
                 } else {
-                    Err(anyhow!("invalid variable name: {key}"))
+                    bail!("invalid variable name: {key}")
                 }
             })
             .collect::<Result<Vec<_>>>()?;

@@ -1,5 +1,5 @@
 use crate::regex::SLOT;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, bail};
 use regex::Regex;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -52,14 +52,14 @@ impl PackageSlot {
                     Self::EqSubSlotRebuild(slot.into(), sub_slot.into())
                 }
                 None if SLOT_RE.is_match(slot) => Self::EqRebuild(slot.into()),
-                _ => Err(anyhow!("invalid slot '{slot_str}'"))?,
+                _ => bail!("invalid slot '{slot_str}'"),
             },
             None => match slot_str.split_once('/') {
                 Some((slot, sub_slot)) if SLOT_RE.is_match(slot) && SLOT_RE.is_match(sub_slot) => {
                     Self::EqSubSlot(slot.into(), sub_slot.into())
                 }
                 None if SLOT_RE.is_match(slot_str) => Self::Eq(slot_str.into()),
-                _ => Err(anyhow!("invalid slot '{slot_str}'"))?,
+                _ => bail!("invalid slot '{slot_str}'"),
             },
         };
 

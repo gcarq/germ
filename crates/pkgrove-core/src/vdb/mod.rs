@@ -5,7 +5,7 @@ use crate::package::cpv::CPV;
 use crate::package::version::PackageVersion;
 use crate::regex::PV_REV;
 use crate::vdb::package::InstalledPackage;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 use std::path::{Path, PathBuf};
@@ -43,10 +43,7 @@ impl Vdb {
             .filter_entry(|e| e.file_type().is_dir())
             .map(|entry| match entry {
                 Ok(entry) => Ok(entry.into_path()),
-                Err(e) => Err(anyhow!(
-                    "unable to read category in '{}': {e}",
-                    path.display()
-                )),
+                Err(e) => bail!("unable to read category in '{}': {e}", path.display()),
             })
             .collect::<Result<Vec<_>>>()?;
 

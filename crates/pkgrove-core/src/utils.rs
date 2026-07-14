@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use md5::{Digest, Md5};
 use std::fs::File;
 use std::io;
@@ -39,7 +39,7 @@ pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
         .into_iter()
         .map(|line| match line.split_once('=') {
             Some((key, value)) => Ok((key.to_string(), value.to_string())),
-            None => Err(anyhow!("syntax error in file: {line}")),
+            None => bail!("syntax error in file: {line}"),
         })
         .collect()
 }
@@ -58,7 +58,7 @@ pub fn list_files(path: &Path) -> impl Iterator<Item = Result<PathBuf>> {
         })
         .map(|entry| match entry {
             Ok(entry) => Ok(entry.into_path()),
-            Err(e) => Err(anyhow!("unable to read file '{}': {e}", path.display())),
+            Err(e) => bail!("unable to read file '{}': {e}", path.display()),
         })
 }
 

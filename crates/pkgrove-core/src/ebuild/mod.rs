@@ -3,7 +3,7 @@ pub mod handler;
 use crate::eapi::Eapi;
 use crate::package::cpv::CPV;
 use crate::repository::Repository;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use log::trace;
 use regex::Regex;
 use std::fmt;
@@ -43,7 +43,7 @@ impl<'a> Ebuild<'a> {
             if let Some(caps) = PMS_EAPI_RE.captures(&line) {
                 let eapi = Eapi::from_str(&caps["eapi"])?;
                 if !eapi.is_supported_for_ebuilds() {
-                    return Err(anyhow!("EAPI '{eapi}' is not supported for ebuilds"));
+                    bail!("EAPI '{eapi}' is not supported for ebuilds");
                 }
                 return Ok(Self {
                     path,
@@ -53,7 +53,7 @@ impl<'a> Ebuild<'a> {
                 });
             }
         }
-        Err(anyhow!("EAPI not found in ebuild: {}", path.display()))
+        bail!("EAPI not found in ebuild: {}", path.display())
     }
 }
 

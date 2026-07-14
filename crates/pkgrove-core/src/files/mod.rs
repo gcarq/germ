@@ -12,7 +12,7 @@ use crate::deps::atom::Atom;
 use crate::deps::useflag::UseFlag;
 use crate::files::entry::SysAtom;
 use crate::utils;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use linefile::LineBasedFile;
 use std::fs;
 use std::path::Path;
@@ -31,7 +31,7 @@ pub fn content_from_path(path: &Path, recursive: bool, optional: bool) -> Result
     let metadata = match path.metadata() {
         Ok(metadata) => metadata,
         Err(_) if optional => return Ok(String::default()),
-        Err(e) => return Err(anyhow!("unable to access {}: {e}", path.display())),
+        Err(e) => bail!("unable to access {}: {e}", path.display()),
     };
     if metadata.is_file() {
         return fs::read_to_string(path)
@@ -39,17 +39,14 @@ pub fn content_from_path(path: &Path, recursive: bool, optional: bool) -> Result
     }
 
     if !recursive {
-        return Err(anyhow!(
-            "{} is a directory, but should be a file",
-            path.display()
-        ));
+        bail!("{} is a directory, but should be a file", path.display());
     }
 
     let content = utils::list_files(path)
         .map(|p| match p {
             Ok(p) => fs::read_to_string(&p)
                 .with_context(|| anyhow!("unable to read file '{}'", p.display())),
-            Err(err) => Err(anyhow!(err)),
+            Err(err) => bail!(err),
         })
         .collect::<Result<Vec<_>>>()?
         .join("\n");

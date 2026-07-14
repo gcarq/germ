@@ -20,7 +20,7 @@ pub mod func;
 
 use crate::ebuild::handler::ipc::{ChildToParentMsg, ParentToChildMsg};
 use crate::ebuild::handler::prot::func::FuncCall;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use std::fmt;
 
 /// Holds a message from the ebuild process, that can be either a function to execute [`FuncCall`]
@@ -48,7 +48,7 @@ impl ChildToParentMsg for ChildMessage {
                 Self::Call(FuncCall::from_raw(func, &args)?)
             }
             Some("DATA") => Self::Data(parts.collect::<Vec<_>>().join(" ")),
-            _ => Err(anyhow!("invalid IPC request: {msg}"))?,
+            _ => bail!("invalid IPC request: {msg}"),
         };
         Ok(msg)
     }

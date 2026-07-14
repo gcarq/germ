@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, bail};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -36,7 +36,7 @@ impl Eapi {
             "7" => Self::Seven,
             "8" => Self::Eight,
             "9" => Self::Nine,
-            x => Err(anyhow!("unsupported EAPI: '{x}'"))?,
+            x => bail!("unsupported EAPI: '{x}'"),
         };
         Ok(version)
     }

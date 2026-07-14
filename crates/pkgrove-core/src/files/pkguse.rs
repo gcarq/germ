@@ -4,7 +4,7 @@ use crate::files::content_from_path;
 use crate::files::entry::{Entry, Precedence};
 use crate::types::{FxHashMap, FxHashSet};
 use crate::utils::Inherit;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, bail};
 use std::path::Path;
 
 #[derive(Clone, Default)]
@@ -41,7 +41,7 @@ impl PackageUseEntries {
     fn parse_line(line: &str, order: Precedence) -> Result<(Atom, EntryUseFlags)> {
         match line.split_once(char::is_whitespace) {
             Some((atom, flags)) => Ok((atom.parse()?, EntryUseFlags::from_str(flags, order)?)),
-            None => Err(anyhow!("invalid package.use definition: {line}")),
+            None => bail!("invalid package.use definition: {line}"),
         }
     }
 }

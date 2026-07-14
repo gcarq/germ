@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, bail};
 use log::trace;
 use regex::Regex;
 use rkyv::with::AsString;
@@ -84,7 +84,7 @@ impl Eclass {
             "eclass name should not contain the .eclass suffix"
         );
         if !ECLASS_RE.is_match(&name) || name == "default" {
-            return Err(anyhow!("invalid eclass name: '{name}'"));
+            bail!("invalid eclass name: '{name}'");
         }
         Ok(Self { name, path })
     }

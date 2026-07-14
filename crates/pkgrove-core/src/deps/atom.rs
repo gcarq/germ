@@ -3,7 +3,7 @@ use crate::deps::useflag::UseFlag;
 use crate::package::slot::PackageSlot;
 use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY, PV_REV, REPOSITORY, V_REV};
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use constcat::concat;
 use regex::{Captures, Regex};
 use rkyv::{Archive, Deserialize, Serialize};
@@ -79,7 +79,7 @@ impl AtomOperator {
             ">" => AtomOperator::Greater,
             ">=" => AtomOperator::GreaterEqual,
             "~" => AtomOperator::Approximate,
-            _ => return Err(anyhow!("invalid operator: {operator}")),
+            _ => bail!("invalid operator: {operator}"),
         };
         Ok(op)
     }
@@ -173,26 +173,26 @@ impl Atom {
     /// Returns `Err` if the string is not a valid atom.
     pub fn new(atom: &str) -> Result<Self> {
         if let Some(caps) = ATOM_OPERATOR_RE.captures(atom) {
-            return Ok(
-                Self::from_regex_capture(&caps, AtomVariant::VersionOperator)?.with_operator(
-                    match caps.name("operator") {
-                        Some(m) => Some(m.as_str().parse()?),
-                        None => None,
-                    },
-                ),
-            );
+            let atom = Self::from_regex_capture(&caps, AtomVariant::VersionOperator)
+                .with_context(|| anyhow!("unable to parse atom '{atom}'"))?
+                .with_operator(match caps.name("operator") {
+                    Some(m) => Some(m.as_str().parse()?),
+                    None => None,
+                });
+            return Ok(atom);
         }
         if let Some(caps) = ATOM_WILDCARD_RE.captures(atom) {
-            return Ok(
-                Self::from_regex_capture(&caps, AtomVariant::VersionWildcard)?
-                    .with_operator(Some(AtomOperator::Equal)),
-            );
+            let atom = Self::from_regex_capture(&caps, AtomVariant::VersionWildcard)
+                .with_context(|| anyhow!("unable to parse atom '{atom}'"))?
+                .with_operator(Some(AtomOperator::Equal));
+            return Ok(atom);
         }
         if let Some(caps) = ATOM_SIMPLE_RE.captures(atom) {
-            return Self::from_regex_capture(&caps, AtomVariant::Simple);
+            return Self::from_regex_capture(&caps, AtomVariant::Simple)
+                .with_context(|| anyhow!("unable to parse atom '{atom}'"));
         }
 
-        Err(anyhow!("'{atom}' is not a valid package atom"))
+        bail!("'{atom}' is not a valid package atom")
     }
 
     /// Returns the qualified name for this atom in the format
@@ -206,12 +206,13 @@ impl Atom {
     /// It assumes the correct regex has been used.
     /// NOTE: this does not set the operator field, see [`Self::with_operator`].
     fn from_regex_capture(captures: &Captures, variant: AtomVariant) -> Result<Self> {
-        let version = match Self::parse_version(captures)? {
-            Some(_) if variant == AtomVariant::Simple => Err(anyhow!(
-                "atom must have an operator or be in format <category>/<package>"
-            ))?,
-            v => v,
-        };
+        let version =
+            match Self::parse_version(captures).with_context(|| "unable to parse version")? {
+                Some(_) if variant == AtomVariant::Simple => {
+                    bail!("atom must have an operator or be in format <category>/<package>")
+                }
+                v => v,
+            };
 
         Ok(Self {
             operator: None,

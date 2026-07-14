@@ -1,5 +1,5 @@
 use crate::files::content_from_path;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, bail};
 use std::ops::Deref;
 use std::path::Path;
 
@@ -49,7 +49,7 @@ impl ProfileDescription {
                 profile_path: (*profile_path).to_owned(),
                 stability: (*stability).to_owned(),
             }),
-            _ => Err(anyhow!("Invalid profile description line: {line}")),
+            _ => bail!("Invalid profile description line: {line}"),
         }
     }
 }

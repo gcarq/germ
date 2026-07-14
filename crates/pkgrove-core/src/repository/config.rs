@@ -1,7 +1,7 @@
 use crate::repository::REPO_RE;
 use crate::types::FxHashMap;
 use crate::utils;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use ini::Ini;
 use log::{debug, warn};
 use std::fs;
@@ -94,7 +94,7 @@ impl RepositoryConfig {
     /// from repos.conf.
     pub fn new(repo_name: &str, properties: FxHashMap<String, String>) -> Result<RepositoryConfig> {
         if !REPO_RE.is_match(repo_name) {
-            return Err(anyhow!("Invalid repository name: {repo_name}"));
+            bail!("Invalid repository name: {repo_name}");
         }
 
         for prop in UNSUPPORTED_CONF_PROPERTIES {
@@ -112,10 +112,10 @@ impl RepositoryConfig {
             properties.contains_key("sync-type") && properties.contains_key("sync-uri");
 
         if !location.exists() && !has_sync_defined {
-            return Err(anyhow!(
+            bail!(
                 "Repository '{repo_name}' has no complete sync configuration and location '{}' doesn't exist",
                 location.display()
-            ));
+            );
         }
 
         let mut raw_properties = properties.clone();

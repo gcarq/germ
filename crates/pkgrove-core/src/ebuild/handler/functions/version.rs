@@ -1,7 +1,7 @@
 use crate::ebuild::handler::prot::ParentMessage;
 use crate::package::cpv::CPV;
 use crate::package::version::PackageVersion;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, bail};
 use std::cmp::Ordering;
 
 /// Implements the `ver_cut` function for ebuilds that extracts version components,
@@ -46,7 +46,7 @@ pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> Result<ParentMe
 /// Returns the modified version string or an `Err` if parsing fails.
 pub fn ver_rs(cpv: &CPV, args: &[String]) -> Result<ParentMessage> {
     if args.len() < 2 {
-        return Err(anyhow!("ver_rs requires at least two arguments"));
+        bail!("ver_rs requires at least two arguments");
     }
 
     let (pairs, version) = match args.len() & 1 == 0 {
@@ -117,7 +117,7 @@ pub fn ver_test(
         "-ne" => v1.cmp(v2) != Ordering::Equal,
         "-le" => v1.cmp(v2) != Ordering::Greater,
         "-lt" => v1.cmp(v2) == Ordering::Less,
-        _ => Err(anyhow!("invalid operator: '{op}'"))?,
+        _ => bail!("invalid operator: '{op}'"),
     };
     Ok(ParentMessage::from_bool(does_match))
 }
@@ -171,7 +171,7 @@ fn ver_split(version: &str) -> Vec<(String, String)> {
 fn parse_range(range: &str, max: usize) -> Result<(usize, usize)> {
     if let Some((a, b)) = range.split_once('-') {
         let start = match a.is_empty() {
-            true => return Err(anyhow!("range must start with a number")),
+            true => bail!("range must start with a number"),
             false => a.parse::<usize>()?,
         };
         let end = if b.is_empty() {
@@ -179,7 +179,7 @@ fn parse_range(range: &str, max: usize) -> Result<(usize, usize)> {
         } else {
             let end = b.parse::<usize>()?;
             if start > end {
-                return Err(anyhow!("range end must be >= start"));
+                bail!("range end must be >= start");
             }
             end
         };

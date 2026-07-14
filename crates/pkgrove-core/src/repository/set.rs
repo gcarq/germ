@@ -4,7 +4,7 @@ use crate::repository::Repository;
 use crate::repository::config::{RepoSetConfig, RepositoryConfig};
 use crate::types::FxHashMap;
 use crate::utils::Inherit;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use log::{debug, error, warn};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
@@ -32,7 +32,8 @@ impl RepoSet {
             config: RepoSetConfig::load(location)?,
             repos: FxHashMap::default(),
         };
-        set.reload_from_disk()?;
+        set.reload_from_disk()
+            .with_context(|| "unable to inizialize local data for repositories")?;
         Ok(set)
     }
 
@@ -66,6 +67,7 @@ impl RepoSet {
         }
 
         self.reload_from_disk()
+            .with_context(|| "unable to reload local data for repositories")
     }
 
     /// Write repository indexes and caches to disk.
@@ -132,9 +134,7 @@ impl RepoSet {
         match states.get(repo_name) {
             Some(VisitState::Done) => return Ok(()),
             Some(VisitState::Visiting) => {
-                return Err(anyhow!(
-                    "Repository master cycle detected involving '{repo_name}'"
-                ));
+                bail!("Repository master cycle detected involving '{repo_name}'");
             }
             None => {}
         }
@@ -173,9 +173,10 @@ impl RepoSet {
             repo.inherit_from(master);
         }
 
-        repo.populate()?;
+        repo.populate()
+            .with_context(|| anyhow!("unable to populate data for '{repo}' repository"))?;
         repo.load_index()
-            .with_context(|| anyhow!("unable to load package index for {repo}"))?;
+            .with_context(|| anyhow!("unable to load package index for '{repo}' repository"))?;
 
         repos.insert(repo.name.clone(), repo);
         Ok(())
@@ -429,7 +430,7 @@ mod tests {
 
         let err = RepoSet::new(&repos_conf).unwrap_err().to_string();
 
-        assert!(err.contains("master cycle detected"));
+        assert!(err.contains("unable to inizialize local data for repositories"));
         Ok(())
     }
 

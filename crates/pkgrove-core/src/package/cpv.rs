@@ -7,7 +7,7 @@ use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY_RE, PKG_RE};
 use crate::repository::Repository;
 use crate::types::FxHashMap;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::path::Path;
@@ -32,10 +32,10 @@ impl CPV {
     /// Creates a new [`CPV`] from the given `category`, `package` and `version`.
     pub fn new(category: &str, package: &str, version: PackageVersion) -> Result<Self> {
         if !CATEGORY_RE.is_match(category) {
-            return Err(anyhow!("invalid category name: '{category}'"));
+            bail!("invalid category name: '{category}'");
         }
         if !PKG_RE.is_match(package) {
-            return Err(anyhow!("invalid package name: '{package}'"));
+            bail!("invalid package name: '{package}'");
         }
         Ok(Self::new_unchecked(category, package, version))
     }

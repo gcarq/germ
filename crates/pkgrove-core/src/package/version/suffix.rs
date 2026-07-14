@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::str::FromStr;
@@ -111,7 +111,7 @@ impl VersionSuffix {
             .iter()
             .any(|prefix| suffix.starts_with(prefix))
         {
-            return Err(anyhow!("invalid version suffix: {suffix}"));
+            bail!("invalid version suffix: {suffix}");
         }
         let split_index = suffix
             .find(|c: char| c.is_ascii_digit())
@@ -133,7 +133,7 @@ impl VersionSuffix {
             "pre" => Self::Pre(number),
             "rc" => Self::Rc(number),
             "p" => Self::Patch(number),
-            _ => return Err(anyhow!("invalid version suffix: {suffix}")),
+            _ => bail!("invalid version suffix: {suffix}"),
         };
         Ok(suffix)
     }

@@ -5,7 +5,7 @@ use crate::deps::ExpressionItem;
 use crate::deps::parser::arena::{Expression, ExpressionArena, ExpressionId};
 use crate::deps::parser::lexer::{Lexer, Token};
 use crate::deps::useflag::UseFlag;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use std::ops::Range;
 
 /// A parser for ebuild dependency expressions commonly found in `DEPEND`, `REQUIRED_USE`, etc..
@@ -66,10 +66,10 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
                 Some(Token::Ident(name)) => {
                     Expression::Forbidden(self.parse_expression(Token::Ident(name))?)
                 }
-                Some(t) => Err(anyhow!("expected identifier, got '{t}'"))?,
-                None => Err(anyhow!("expected identifier, got EOF"))?,
+                Some(t) => bail!("expected identifier, got '{t}'"),
+                None => bail!("expected identifier, got EOF"),
             },
-            Token::RParen | Token::Illegal(_) => Err(anyhow!("unexpected token '{token}'"))?,
+            Token::RParen | Token::Illegal(_) => bail!("unexpected token '{token}'"),
         };
         Ok(self.expression.push_expression(node))
     }
@@ -86,7 +86,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
             }
             buffer.push(self.parse_expression(token)?);
         }
-        Err(anyhow!("unexpected EOF while parsing group"))
+        bail!("unexpected EOF while parsing group")
     }
 
     /// Expects the next [`Token`] to be the given `token`.
@@ -95,8 +95,8 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     fn expect_next(&mut self, token: Token) -> Result<()> {
         match self.lexer.next() {
             Some(next) if next == token => Ok(()),
-            Some(next) => Err(anyhow!("expected '{token}', got '{next}'")),
-            None => Err(anyhow!("expected '{token}', got EOF")),
+            Some(next) => bail!("expected '{token}', got '{next}'"),
+            None => bail!("expected '{token}', got EOF"),
         }
     }
 }

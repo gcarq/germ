@@ -1,7 +1,7 @@
 use crate::consts::GIT_BINARY_PATH;
 use crate::repository::sync::{SyncConfig, SyncHandler};
 use crate::types::FxHashMap;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use log::{debug, info};
 use std::collections::HashMap;
 use std::process::{Command, Output, Stdio};
@@ -229,7 +229,7 @@ impl GitSyncHandler {
             .trim()
             .to_owned();
         match branch.is_empty() {
-            true => Err(anyhow!("git rev-parse returned an empty branch")),
+            true => bail!("git rev-parse returned an empty branch"),
             false => Ok(branch),
         }
     }
