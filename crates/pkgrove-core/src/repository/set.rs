@@ -5,7 +5,7 @@ use crate::repository::config::{RepoSetConfig, RepositoryConfig};
 use crate::types::FxHashMap;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
-use log::{debug, error};
+use log::{debug, error, warn};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
@@ -91,10 +91,16 @@ impl RepoSet {
             .iter()
             .map(|conf| {
                 let mut repo = Repository::new(conf)?;
-                if repo.location.exists() {
-                    repo.load_data_from_disk().with_context(|| {
-                        anyhow!("Unable to load data for repository '{}'", repo.name)
-                    })?;
+                if repo.location.exists()
+                    && let Err(err) = repo.load_data_from_disk()
+                {
+                    // The main repository must exist and be correct
+                    if repo.name == self.config.main_repo_name {
+                        return Err(err).with_context(|| {
+                            format!("Unable to load data for main repository '{}'", repo.name)
+                        });
+                    }
+                    warn!("Unable to load data for repository '{}': {err}", repo.name);
                 }
                 Ok((repo.name.clone(), repo))
             })
@@ -235,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn test_layout_masters_are_used_after_repository_exists() -> Result<()> {
+    fn test_layout_masters_are_used() -> Result<()> {
         let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
         let master = RepositoryFixture::new(temp.path().join("master"), "master")
             .categories(["app-misc"])
@@ -359,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reload_after_master_mutation_refreshes_dependent_overlays() -> Result<()> {
+    fn test_reload_refreshes_dependent_overlays() -> Result<()> {
         let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
         let master = RepositoryFixture::new(temp.path().join("master"), "master")
             .categories(["app-misc"])
@@ -404,56 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn test_disk_names_must_match_configured_repository_name() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
-        let repo = RepositoryFixture::new(temp.path().join("actual"), "actual").write()?;
-        let repos_conf = write_repos_conf(
-            temp.path(),
-            &format!("[configured]\nlocation = {}\n", repo.display()),
-        )?;
-
-        let err = RepoSet::new(&repos_conf).unwrap_err().to_string();
-
-        assert!(err.contains("Repository name mismatch"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_invalid_layout_name_is_rejected_during_disk_loading() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
-        let repo = RepositoryFixture::new(temp.path().join("repo"), "repo")
-            .layout_name("invalid name")
-            .write()?;
-        let repos_conf = write_repos_conf(
-            temp.path(),
-            &format!("[repo]\nlocation = {}\n", repo.display()),
-        )?;
-
-        let err = RepoSet::new(&repos_conf).unwrap_err().to_string();
-
-        assert!(err.contains("Invalid repository name"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_profiles_repo_name_fallback_must_match_configured_repository_name() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
-        let repo = RepositoryFixture::new(temp.path().join("actual"), "actual")
-            .without_layout_name()
-            .write()?;
-        let repos_conf = write_repos_conf(
-            temp.path(),
-            &format!("[configured]\nlocation = {}\n", repo.display()),
-        )?;
-
-        let err = RepoSet::new(&repos_conf).unwrap_err().to_string();
-
-        assert!(err.contains("Repository name mismatch"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_master_cycle_returns_error() -> Result<()> {
+    fn test_master_cycle_err() -> Result<()> {
         let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
         let first = RepositoryFixture::new(temp.path().join("first"), "first")
             .masters(["second"])

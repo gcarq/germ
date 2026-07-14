@@ -12,6 +12,7 @@ const UNSUPPORTED_CONF_PROPERTIES: &[&str] = &["aliases", "auto-sync", "eclass-o
 
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct RepoSetConfig {
+    pub main_repo_name: String,
     repo_confs: Vec<RepositoryConfig>,
 }
 
@@ -25,6 +26,13 @@ impl RepoSetConfig {
         debug!("Loading repos.conf from '{}' ...", location.display());
         let conf = Self::parse_conf(location).with_context(|| "unable to parse repos.conf")?;
 
+        // For now, use "gentoo" as fallback if no DEFAULT section or main-repo property is defined
+        let main_repo_name = conf
+            .section(Some("DEFAULT"))
+            .and_then(|props| props.get("main-repo").map(ToOwned::to_owned))
+            .unwrap_or_else(|| "gentoo".into());
+        debug!("Using {main_repo_name} as main repository...");
+
         let repo_confs = conf
             .into_iter()
             .filter_map(|(section, properties)| match section {
@@ -37,7 +45,10 @@ impl RepoSetConfig {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        Ok(Self { repo_confs })
+        Ok(Self {
+            main_repo_name,
+            repo_confs,
+        })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &RepositoryConfig> {

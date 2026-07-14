@@ -5,7 +5,6 @@ use std::path::PathBuf;
 pub(crate) struct RepositoryFixture {
     location: PathBuf,
     repo_name: String,
-    layout_name: Option<String>,
     masters: Vec<String>,
     categories: Vec<String>,
     eclasses: Vec<String>,
@@ -16,22 +15,11 @@ impl RepositoryFixture {
         let repo_name = repo_name.into();
         Self {
             location: location.into(),
-            layout_name: Some(repo_name.clone()),
             repo_name,
             masters: Vec::new(),
             categories: Vec::new(),
             eclasses: Vec::new(),
         }
-    }
-
-    pub(crate) fn layout_name(mut self, name: impl Into<String>) -> Self {
-        self.layout_name = Some(name.into());
-        self
-    }
-
-    pub(crate) fn without_layout_name(mut self) -> Self {
-        self.layout_name = None;
-        self
     }
 
     pub(crate) fn masters<I, S>(mut self, masters: I) -> Self
@@ -65,13 +53,13 @@ impl RepositoryFixture {
         fs::create_dir_all(&profiles)?;
         fs::create_dir_all(&eclasses)?;
 
-        let layout_name = self
-            .layout_name
-            .map(|name| format!("name = {name}\n"))
-            .unwrap_or_default();
         fs::write(
             metadata.join("layout.conf"),
-            format!("{layout_name}masters = {}\n", self.masters.join(" ")),
+            format!(
+                "name = {}\nmasters = {}\n",
+                self.repo_name,
+                self.masters.join(" ")
+            ),
         )?;
         fs::write(profiles.join("repo_name"), format!("{}\n", self.repo_name))?;
         fs::write(
