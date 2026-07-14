@@ -21,6 +21,7 @@ pub struct UseMasks {
     use_stable_force: FxHashSet<UseFlag>,
 
     // Enabled USE flags on a per-package basis
+    #[allow(unused)]
     package_use: FxHashMap<Atom, EntryUseFlags>,
     // Masked USE flags on a per-package basis
     package_use_mask: FxHashMap<Atom, EntryUseFlags>,

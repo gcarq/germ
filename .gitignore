@@ -3,5 +3,5 @@
 .idea/
 
 /*.sh
-profile.json.gz
+.scratch
 .cache/

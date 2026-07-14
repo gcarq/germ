@@ -28,7 +28,7 @@ use crate::repository::sync::{SyncHandler, build_sync_handler};
 use crate::repository::utils::resolve_cpv_from_category;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow};
-use log::{debug, info};
+use log::{debug, info, warn};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 use std::hash::{Hash, Hasher};
@@ -355,8 +355,11 @@ impl Repository {
     }
 
     fn load_data_from_disk(&mut self) -> Result<()> {
-        let layout = Layout::from_path(&self.location.join("metadata").join("layout.conf"))
-            .with_context(|| "unable to load layout.conf")?;
+        let layout_path = &self.location.join("metadata").join("layout.conf");
+
+        let layout = Layout::from_path(layout_path).with_context(|| {
+            anyhow!("unable to load layout.conf from {}", layout_path.display())
+        })?;
 
         // repo name from layout
         let name = match layout.name.as_ref() {
@@ -365,10 +368,10 @@ impl Repository {
         };
         Self::validate_repo_name(&name)?;
         if name != self.name {
-            return Err(anyhow!(
-                "Repository name mismatch: '{name}' vs '{}' (from repos.conf)!",
-                self.name,
-            ));
+            warn!(
+                "Repository name mismatch: repo_name='{name}' vs repos.conf='{}'! Using {}...",
+                self.name, self.name,
+            );
         }
 
         let profiles = self.location.join("profiles");

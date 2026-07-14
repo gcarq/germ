@@ -92,7 +92,9 @@ impl RepoSet {
             .map(|conf| {
                 let mut repo = Repository::new(conf)?;
                 if repo.location.exists() {
-                    repo.load_data_from_disk()?;
+                    repo.load_data_from_disk().with_context(|| {
+                        anyhow!("Unable to load data for repository '{}'", repo.name)
+                    })?;
                 }
                 Ok((repo.name.clone(), repo))
             })

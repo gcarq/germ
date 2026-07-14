@@ -24,6 +24,7 @@ pub trait Inherit {
 }
 
 /// Calculates and returns the MD5 hash of the given `file` as a hexadecimal `String`.
+#[allow(unused)]
 pub fn md5sum(file: &Path) -> Result<String> {
     let mut file = File::open(file)?;
     let mut hasher = Md5::new();

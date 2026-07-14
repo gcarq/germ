@@ -34,6 +34,7 @@ impl Deref for ProfileDescriptions {
 pub struct ProfileDescription {
     pub keyword: String,
     pub profile_path: String,
+    #[allow(unused)]
     pub stability: String,
 }
 
