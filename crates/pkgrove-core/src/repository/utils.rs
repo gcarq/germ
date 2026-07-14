@@ -21,9 +21,10 @@ pub fn resolve_cpv_from_category(
                     .is_some_and(|s| s.ends_with(".ebuild"))
         })
         .filter_map(Result::ok)
-        .filter_map(|e| match e.file_name().to_str() {
-            Some(filename) => cpv_from_ebuild_name(category, filename).transpose(),
-            _ => None,
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()
+                .and_then(|filename| cpv_from_ebuild_name(category, filename).transpose())
         })
 }
 
@@ -45,30 +46,30 @@ fn cpv_from_ebuild_name(category: &str, filename: &str) -> Result<Option<CPV>> {
     Ok(Some(CPV::new_unchecked(category, package, version)))
 }
 
-#[test]
-fn cpv_from_ebuild_path_ok() {
-    // (category, file name, is_some)
-    let valid_ebuilds = [
-        ("app-editors", "vim-8.2.3456.ebuild", true),
-        ("app-editors", "vim-8.2.3456-r1.ebuild", true),
-        ("dev-lang", "rust-1.65.0_alpha1-r2.ebuild", true),
-        ("net-misc", "curl-7.79.1_beta2_p20220101.ebuild", true),
-        ("net-misc", "Manifest", false),
-    ];
-    for (category, filename, is_some) in valid_ebuilds {
-        let cpv = cpv_from_ebuild_name(category, filename);
-        assert!(cpv.is_ok(), "CPV from '{filename}' should be valid");
-        assert_eq!(
-            cpv.unwrap().is_some(),
-            is_some,
-            "failure for ebuild '{filename}'",
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cpv_from_ebuild_path_ok() {
+        // (category, file name, is_some)
+        let valid_ebuilds = [
+            ("app-editors", "vim-8.2.3456.ebuild", true),
+            ("app-editors", "vim-8.2.3456-r1.ebuild", true),
+            ("dev-lang", "rust-1.65.0_alpha1-r2.ebuild", true),
+            ("net-misc", "curl-7.79.1_beta2_p20220101.ebuild", true),
+            ("net-misc", "Manifest", false),
+        ];
+        for (category, filename, is_some) in valid_ebuilds {
+            let cpv = cpv_from_ebuild_name(category, filename);
+            assert!(cpv.is_ok(), "CPV from '{filename}' should be valid");
+            assert_eq!(
+                cpv.unwrap().is_some(),
+                is_some,
+                "failure for ebuild '{filename}'",
+            );
+        }
+    }
 
     #[test]
     fn cpv_from_ebuild_path_none() {

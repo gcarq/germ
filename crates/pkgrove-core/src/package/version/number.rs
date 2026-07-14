@@ -155,14 +155,11 @@ impl NumberComponent {
 impl Ord for NumberComponent {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            // Compare as integers, safe to unwrap as it can only contain numbers at this point.
-            (NumberComponent::Numeric(a), NumberComponent::Numeric(b)) => a
-                .parse::<usize>()
-                .unwrap_or_else(|_| panic!("fatal: failed to parse '{a}' as usize"))
-                .cmp(
-                    &b.parse::<usize>()
-                        .unwrap_or_else(|_| panic!("fatal: failed to parse '{b}' as usize")),
-                ),
+            (NumberComponent::Numeric(a), NumberComponent::Numeric(b)) => {
+                let a = a.trim_start_matches('0');
+                let b = b.trim_start_matches('0');
+                a.len().cmp(&b.len()).then_with(|| a.cmp(b))
+            }
             (NumberComponent::Alphabetic(a), NumberComponent::Alphabetic(b))
             | (NumberComponent::Numeric(a), NumberComponent::Alphabetic(b))
             | (NumberComponent::Alphabetic(a), NumberComponent::Numeric(b)) => {
@@ -311,10 +308,14 @@ mod tests {
     fn test_number_component_ord() {
         let num1 = NumberComponent::Numeric("1".into());
         let num2 = NumberComponent::Numeric("2".into());
+        let huge = NumberComponent::Numeric("64027794000528877187958462653".into());
+        let larger_huge = NumberComponent::Numeric("164027794000528877187958462653".into());
         let alpha03 = NumberComponent::Alphabetic("03".into());
         let alpha3 = NumberComponent::Alphabetic("3".into());
 
         assert!(num1 < num2);
+        assert!(num2 < huge);
+        assert!(huge < larger_huge);
         assert!(alpha03 < alpha3); // '03' vs '3' should compare as ascii
         assert!(alpha03 < num1); // Numeric vs Alphabetic comparison
         assert!(alpha3 > num2); // Alphabetic vs Numeric comparison

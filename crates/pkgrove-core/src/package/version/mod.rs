@@ -23,7 +23,7 @@ static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_
 pub struct PackageVersion {
     number: VersionNumber,
     suffixes: VersionSuffixes,
-    revision: u32,
+    revision: u64,
 }
 
 impl PackageVersion {
@@ -39,8 +39,8 @@ impl PackageVersion {
             },
             revision: match revision {
                 Some(rev) => rev
-                    .parse::<u32>()
-                    .with_context(|| anyhow!("revision must be a valid u32, got '{rev}'"))?,
+                    .parse::<u64>()
+                    .with_context(|| anyhow!("revision must be a valid u64, got '{rev}'"))?,
                 None => 0,
             },
         })
