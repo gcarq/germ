@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/pkgrove", "crates/pkgrove-core"]
-default-members = ["crates/pkgrove"]
+members = ["crates/cli", "crates/core"]
+default-members = ["crates/cli"]
 resolver = "3"
 
 [workspace.package]
@@ -17,7 +17,7 @@ fxhash = { version = "0.2.1", default-features = false }
 log = { version = "0.4.29", default-features = false }
 md-5 = { version = "0.10.6", default-features = false, features = ["std"] }
 nix = { version = "0.31.2", default-features = false, features = ["process", "signal", "poll", "fs"] }
-pkgrove-core = { path = "crates/pkgrove-core" }
+pkgrove-core = { path = "crates/core" }
 rayon = { version = "1.11.0", default-features = false }
 regex = { version = "1.12.3", default-features = false, features = ["perf", "std"] }
 rkyv = { version = "0.8.15", default-features = false, features = ["bytecheck", "std"] }
