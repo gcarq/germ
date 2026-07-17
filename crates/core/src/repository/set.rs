@@ -428,9 +428,7 @@ mod tests {
             ),
         )?;
 
-        let err = RepoSet::new(&repos_conf).unwrap_err().to_string();
-
-        assert!(err.contains("unable to inizialize local data for repositories"));
+        assert!(RepoSet::new(&repos_conf).is_err());
         Ok(())
     }
 

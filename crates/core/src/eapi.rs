@@ -1,10 +1,11 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
-use std::fmt;
+use std::path::Path;
 use std::str::FromStr;
+use std::{fmt, fs};
 
 /// An EAPI can be thought of as a ‘version’ of the PMS to which a package conforms.
-/// See PMS section 2 for more details.nbv
+/// See PMS section 2 for more details.
 #[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Default)]
 #[cfg_attr(test, derive(Debug))]
 pub enum Eapi {
@@ -22,6 +23,21 @@ pub enum Eapi {
 }
 
 impl Eapi {
+    /// Creates a new instance from the EAPI file at the given `path`.
+    ///
+    /// Returns `Eapi::default()` if no eapi file exists.
+    pub fn from_eapi_file(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Eapi::default());
+        }
+        fs::read_to_string(path)
+            .with_context(|| anyhow!("unable to read eapi file {}", path.display()))?
+            .lines()
+            .next()
+            .ok_or_else(|| anyhow!("empty eapi file {}", path.display()))?
+            .parse()
+    }
+
     /// Creates a new instance from the given EAPI `version`.
     /// Returns an `Err` if the version is unsupported.
     fn new(version: &str) -> Result<Self> {

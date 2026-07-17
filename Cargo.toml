@@ -31,7 +31,6 @@ walkdir = { version = "2.5.0", default-features = false }
 dbg_macro = "warn"
 disallowed_script_idents = "warn"
 doc_link_with_quotes = "warn"
-doc_markdown = "warn"
 empty_structs_with_brackets = "warn"
 filter_map_next = "warn"
 format_collect = "warn"

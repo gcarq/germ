@@ -7,7 +7,7 @@ mod misc;
 pub mod set;
 mod sync;
 #[cfg(test)]
-pub(crate) mod test_support;
+pub mod test_support;
 mod utils;
 
 use crate::consts::DEFAULT_CACHE_PATH;
@@ -321,21 +321,6 @@ impl Repository {
         Ok(())
     }
 
-    /// Reads the repository eapi version from the given repository `path`.
-    ///
-    /// Returns `Eapi::default()` if no eapi file exists.
-    fn read_eapi(path: &Path) -> Result<Eapi> {
-        let eapi_file = path.join("profiles").join("eapi");
-        if !fs::exists(&eapi_file)? {
-            return Ok(Eapi::default());
-        }
-        fs::read_to_string(&eapi_file)?
-            .lines()
-            .next()
-            .ok_or_else(|| anyhow!("Empty eapi file"))?
-            .parse()
-    }
-
     fn read_repo_name(location: &Path) -> Result<String> {
         fs::read_to_string(location.join("profiles").join("repo_name"))?
             .lines()
@@ -375,7 +360,8 @@ impl Repository {
         }
 
         let profiles = self.location.join("profiles");
-        let dir_support = Self::read_eapi(&self.location)?.supports_profile_file_dirs();
+        let eapi = Eapi::from_eapi_file(&profiles.join("eapi"))?;
+        let dir_support = eapi.supports_profile_file_dirs() || layout.supports_profile_file_dirs();
         let data = RepositoryData {
             layout,
             categories: Vec::default(),
@@ -441,6 +427,17 @@ impl fmt::Display for Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repository::test_support::RepositoryFixture;
+
+    fn load_repository(location: PathBuf, name: &str) -> Result<Repository> {
+        let mut repository = Repository {
+            location,
+            name: name.to_owned(),
+            ..Default::default()
+        };
+        repository.load_data_from_disk()?;
+        Ok(repository)
+    }
 
     #[test]
     fn test_repository_equality() {
@@ -469,5 +466,48 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(repo.to_string(), "gentoo");
+    }
+
+    #[test]
+    fn test_pms_rejects_mask_directory() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let location = RepositoryFixture::new(temp.path().join("repo"), "repo")
+            .profile_formats(["pms"])
+            .profiles_eapi("0")
+            .repository_directory("package.mask", "app-misc/foo\n")
+            .write()?;
+
+        assert!(load_repository(location, "repo").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_portage_mask_directories() -> Result<()> {
+        for format in ["portage-1", "portage-2"] {
+            let temp = tempfile::tempdir()?;
+            let location = RepositoryFixture::new(temp.path().join("repo"), "repo")
+                .profile_formats([format])
+                .profiles_eapi("0")
+                .repository_directory("package.mask", "app-misc/foo\n")
+                .write()?;
+
+            load_repository(location, "repo")?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_eapi_mask_directories() -> Result<()> {
+        for eapi in ["7", "8"] {
+            let temp = tempfile::tempdir()?;
+            let location = RepositoryFixture::new(temp.path().join("repo"), "repo")
+                .profile_formats(["pms"])
+                .profiles_eapi(eapi)
+                .repository_directory("package.mask", "app-misc/foo\n")
+                .write()?;
+
+            load_repository(location, "repo")?;
+        }
+        Ok(())
     }
 }

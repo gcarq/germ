@@ -323,7 +323,7 @@ mod tests {
         fs::create_dir_all(&work).unwrap();
 
         let mut command = git_command();
-        command.args(&["init", "--bare", bare.to_str().unwrap()]);
+        command.args(["init", "--bare", bare.to_str().unwrap()]);
         run(&mut command);
         git_in(&work, &["init"]);
         git_in(&work, &["checkout", "-B", "main"]);

@@ -1,4 +1,5 @@
 mod deprecation;
+mod parent;
 
 use crate::eapi::Eapi;
 use crate::files::entry::Precedence;
@@ -6,12 +7,53 @@ use crate::files::pkguse::PackageUseEntries;
 use crate::files::{PackageEntries, SysPackageEntries, UseEntries};
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
+use crate::profile::parent::ParentEntry;
+use crate::repository::Repository;
 use crate::repository::set::RepoSet;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow, bail};
 use log::warn;
+use std::fmt;
 use std::path::{Path, PathBuf};
-use std::{fmt, fs};
+
+/// Identifies a profile by its canonical path and owning repository.
+struct ProfileSource<'repo> {
+    path: PathBuf,
+    owning_repo: &'repo Repository,
+}
+
+impl<'repo> ProfileSource<'repo> {
+    /// Resolves a profile path and identifies its owning repository.
+    fn from_path(path: &Path, repo_set: &'repo RepoSet) -> Result<Self> {
+        let path = path
+            .canonicalize()
+            .with_context(|| anyhow!("unable to resolve profile {}", path.display()))?;
+
+        for repository in repo_set
+            .values()
+            .filter(|repository| repository.is_loaded())
+        {
+            let profiles_root = repository.location.join("profiles").canonicalize()?;
+            if path.starts_with(&profiles_root) {
+                return Ok(Self {
+                    path,
+                    owning_repo: repository,
+                });
+            }
+        }
+
+        bail!(
+            "profile {} is not owned by a loaded configured repository",
+            path.display()
+        )
+    }
+}
+
+impl fmt::Display for ProfileSource<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.path.display())
+    }
+}
 
 /// Represents a profile outlined in PMS section 5.
 ///
@@ -54,93 +96,89 @@ impl Profile {
     /// Resolves a profile from the given `location` and takes care of inheriting all parents.
     /// `repo_set` is used to resolve profiles in different repositories.
     ///
-    /// Returns `Err` if `location` doesn't exist or the profile directory is invalid.
+    /// Returns `Err` if `location` doesn't exist, the profile directory is invalid or
+    /// if the profile is not valid.
     pub fn resolve(location: &Path, repo_set: &RepoSet) -> Result<Self> {
-        let parents = Self::resolve_parents(location, repo_set)
-            .with_context(|| anyhow!("unable to resolve parents for {}", location.display()))?;
+        let source = ProfileSource::from_path(location, repo_set)
+            .with_context(|| anyhow!("unable to resolve profile {}", location.display()))?;
 
-        let mut parents = parents
-            .into_iter()
-            .enumerate()
-            .map(|(i, path)| {
-                Self::new(&path, Precedence::Profile(i))
-                    .with_context(|| anyhow!("unable to build profile from {}", path.display()))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut parents = Vec::new();
+        Self::build_parents(&source, repo_set, &mut parents)
+            .with_context(|| anyhow!("unable to resolve parents for {source}"))?;
 
-        let profile = Self::new(location, Precedence::Profile(parents.len()))?;
+        let profile = Self::load(&source, Precedence::Profile(parents.len()))?;
         if parents.is_empty() {
             return Ok(profile);
         }
 
-        let mut prev = parents.remove(0);
-        for next in parents {
-            prev = next.inherit(&prev);
+        let mut inherited = parents.remove(0);
+        for parent in parents {
+            inherited = parent.inherit(&inherited);
         }
 
-        Ok(profile.inherit(&prev))
+        Ok(profile.inherit(&inherited))
     }
 
-    /// Builds a profile from the given `location`.
+    /// Loads one profile directory without resolving its parents.
     /// The passed `order` must be the order in the inheritance chain.
-    ///
-    /// Returns `Err` if `location` doesn't exist or the profile directory is invalid.
-    fn new(location: &Path, order: Precedence) -> Result<Self> {
-        let eapi = Self::read_eapi(&location.join("eapi"))?;
-        let dir_support = eapi.supports_profile_file_dirs();
+    fn load(source: &ProfileSource<'_>, order: Precedence) -> Result<Self> {
+        let path = &source.path;
+        let eapi = Eapi::from_eapi_file(&path.join("eapi"))?;
+        let supports_file_dirs = eapi.supports_profile_file_dirs()
+            || source.owning_repo.layout()?.supports_profile_file_dirs();
 
         let profile = Self {
-            make_defaults: MakeEnv::from_path(&location.join("make.defaults"), false, true)?,
-            deprecated: DeprecationInfo::from_path(&location.join("deprecated"))?,
-            packages: SysPackageEntries::from_path(&location.join("packages"), order, dir_support)?,
+            make_defaults: MakeEnv::from_path(&path.join("make.defaults"), false, true)?,
+            deprecated: DeprecationInfo::from_path(&path.join("deprecated"))?,
+            packages: SysPackageEntries::from_path(&path.join("packages"), order, false)?,
             package_mask: PackageEntries::from_path(
-                &location.join("package.mask"),
+                &path.join("package.mask"),
                 order,
-                dir_support,
+                supports_file_dirs,
             )?,
             package_unmask: PackageEntries::from_path(
-                &location.join("package.unmask"),
+                &path.join("package.unmask"),
                 order,
-                dir_support,
+                supports_file_dirs,
             )?,
             package_use: PackageUseEntries::from_path(
-                &location.join("package.use"),
+                &path.join("package.use"),
                 order,
-                dir_support,
+                supports_file_dirs,
             )?,
-            use_mask: UseEntries::from_path(&location.join("use.mask"), order, dir_support)?,
-            use_force: UseEntries::from_path(&location.join("use.force"), order, dir_support)?,
+            use_mask: UseEntries::from_path(&path.join("use.mask"), order, supports_file_dirs)?,
+            use_force: UseEntries::from_path(&path.join("use.force"), order, supports_file_dirs)?,
             use_stable_mask: UseEntries::from_path(
-                &location.join("use.stable.mask"),
+                &path.join("use.stable.mask"),
                 order,
-                dir_support,
+                supports_file_dirs,
             )?,
             use_stable_force: UseEntries::from_path(
-                &location.join("use.stable.force"),
+                &path.join("use.stable.force"),
                 order,
-                dir_support,
+                supports_file_dirs,
             )?,
             package_use_mask: PackageUseEntries::from_path(
-                &location.join("package.use.mask"),
+                &path.join("package.use.mask"),
                 order,
-                dir_support,
+                supports_file_dirs,
             )?,
             package_use_force: PackageUseEntries::from_path(
-                &location.join("package.use.force"),
+                &path.join("package.use.force"),
                 order,
-                dir_support,
+                supports_file_dirs,
             )?,
             package_use_stable_mask: PackageUseEntries::from_path(
-                &location.join("package.use.stable.mask"),
+                &path.join("package.use.stable.mask"),
                 order,
-                dir_support,
+                supports_file_dirs,
             )?,
             package_use_stable_force: PackageUseEntries::from_path(
-                &location.join("package.use.stable.force"),
+                &path.join("package.use.stable.force"),
                 order,
-                dir_support,
+                supports_file_dirs,
             )?,
-            location: location.canonicalize()?,
+            location: path.clone(),
         };
         if let Some(deprecation) = &profile.deprecated {
             warn!(
@@ -151,56 +189,24 @@ impl Profile {
         Ok(profile)
     }
 
-    /// Takes a `path` to a profile directory and resolves all profile paths it inherits from.
-    /// `repo_set` is used to resolve profiles in different repositories.
-    fn resolve_parents(path: &Path, repo_set: &RepoSet) -> Result<Vec<PathBuf>> {
-        let parent = path.join("parent");
-        if !parent.exists() {
-            return Ok(Vec::new());
-        }
+    /// Builds all parent profiles in inheritance order.
+    fn build_parents<'repo>(
+        source: &ProfileSource<'repo>,
+        repo_set: &'repo RepoSet,
+        profiles: &mut Vec<Self>,
+    ) -> Result<()> {
+        for parent in ParentEntry::from_parent_file(&source.path.join("parent"))? {
+            let parent_source = parent.resolve(source, repo_set).with_context(|| {
+                anyhow!("invalid parent reference '{parent}' in profile {source}")
+            })?;
+            Self::build_parents(&parent_source, repo_set, profiles)?;
 
-        let content = fs::read_to_string(parent).with_context(|| "unable to read parent file")?;
-        let parent_profiles = content
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'));
-
-        let mut paths = Vec::new();
-        for profile in parent_profiles {
-            // If a profiles references a specific repository, resolve it first.
-            // This is not specified in PMS but is implemented in portage
-            // see https://bugs.gentoo.org/515666
-            // TODO: this behavior is controlled via profile-formats in <repo>/metadata/layout.conf
-            //  see https://wiki.gentoo.org/wiki/Portage/Profiles/Custom_profiles
-            let path = match profile.split_once(':') {
-                Some((repo_name, profile_path)) => {
-                    let repo = repo_set.get(repo_name).ok_or_else(|| {
-                        anyhow!("Repository '{repo_name}' not found for profile '{profile}'")
-                    })?;
-                    if !repo.is_loaded() {
-                        bail!("repository '{repo_name}' not loaded; run sync first");
-                    }
-                    repo.location.join("profiles").join(profile_path)
-                }
-                None => path.join(profile),
-            };
-            paths.extend(Self::resolve_parents(&path, repo_set)?);
-            paths.push(path.canonicalize()?);
+            let order = Precedence::Profile(profiles.len());
+            let profile = Self::load(&parent_source, order)
+                .with_context(|| anyhow!("unable to build profile from {parent_source}"))?;
+            profiles.push(profile);
         }
-        Ok(paths)
-    }
-
-    /// Reads the EAPI version from the given file `path`.
-    fn read_eapi(path: &Path) -> Result<Eapi> {
-        if !path.exists() {
-            return Ok(Eapi::default());
-        }
-        fs::read_to_string(path)
-            .with_context(|| "unable to read eapi file")?
-            .lines()
-            .next()
-            .ok_or_else(|| anyhow!("empty eapi file"))?
-            .parse()
+        Ok(())
     }
 }
 
@@ -237,6 +243,46 @@ mod tests {
     use super::*;
     use crate::files::entry::Entry;
     use crate::files::pkguse::EntryUseFlags;
+    use crate::repository::test_support::RepositoryFixture;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn repository(root: &Path, name: &str, format: &str) -> RepositoryFixture {
+        RepositoryFixture::new(root.join(name), name).profile_formats([format])
+    }
+
+    fn load_repo_set(root: &Path, repositories: &[(&str, &Path)]) -> Result<RepoSet> {
+        let mut config = format!("[DEFAULT]\nmain-repo = {}\n", repositories[0].0);
+        for (name, location) in repositories {
+            config.push_str(&format!("\n[{name}]\nlocation = {}\n", location.display()));
+        }
+        let path = root.join("repos.conf");
+        fs::write(&path, config)?;
+        RepoSet::new(&path)
+    }
+
+    fn profile_path(repository: &Path, profile: &str) -> PathBuf {
+        repository.join("profiles").join(profile)
+    }
+
+    fn assert_parent_case(format: &str, parent: &str, succeeds: bool) -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = repository(temp.path(), "source", format)
+            .profile("base")
+            .profile_parents("child", [parent])
+            .write()?;
+        let target = repository(temp.path(), "target", "pms")
+            .profile("base")
+            .write()?;
+        let repo_set = load_repo_set(
+            temp.path(),
+            &[("source", source.as_path()), ("target", target.as_path())],
+        )?;
+        let selected = profile_path(&source, "child");
+
+        assert_eq!(Profile::resolve(&selected, &repo_set).is_ok(), succeeds);
+        Ok(())
+    }
 
     #[test]
     fn test_profile_inherit_from() -> Result<()> {
@@ -291,6 +337,92 @@ mod tests {
             .into_iter()
             .collect()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_profile_directories() -> Result<()> {
+        let cases = [
+            ("pms-eapi-0", "pms", "0", false),
+            ("portage-1-eapi-0", "portage-1", "0", true),
+            ("pms-eapi-7", "pms", "7", true),
+        ];
+
+        for (name, format, eapi, succeeds) in cases {
+            let temp = tempfile::tempdir()?;
+            let repository = repository(temp.path(), name, format)
+                .profile_eapi("selected", eapi)
+                .profile_directory("selected", "use.mask", "test\n")
+                .write()?;
+            let repo_set = load_repo_set(temp.path(), &[(name, repository.as_path())])?;
+            let selected = profile_path(&repository, "selected");
+
+            assert_eq!(Profile::resolve(&selected, &repo_set).is_ok(), succeeds);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_packages_are_file_only() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let repository = repository(temp.path(), "repo", "portage-2")
+            .profile_eapi("selected", "8")
+            .profile_directory("selected", "packages", "sys-apps/coreutils\n")
+            .write()?;
+        let repo_set = load_repo_set(temp.path(), &[("repo", repository.as_path())])?;
+        let selected = profile_path(&repository, "selected");
+
+        assert!(Profile::resolve(&selected, &repo_set).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_parent_formats() -> Result<()> {
+        for format in ["pms", "portage-1", "portage-2"] {
+            assert_parent_case(format, "../base", true)?;
+            assert_parent_case(format, "target:base", format == "portage-2")?;
+            assert_parent_case(format, ":base", format == "portage-2")?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_unavailable_parent_repositories() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = repository(temp.path(), "source", "portage-2")
+            .profile_parents("unknown", ["missing:base"])
+            .profile_parents("unloaded", ["target:base"])
+            .write()?;
+        let unavailable = temp.path().join("target");
+        let config = temp.path().join("repos.conf");
+        fs::write(
+            &config,
+            format!(
+                "[DEFAULT]\nmain-repo = source\n\n[source]\nlocation = {}\n\n[target]\nlocation = {}\nsync-type = git\nsync-uri = https://example.invalid/target.git\n",
+                source.display(),
+                unavailable.display()
+            ),
+        )?;
+        let repo_set = RepoSet::new(&config)?;
+        assert!(!repo_set.get("target").unwrap().is_loaded());
+
+        assert!(Profile::resolve(&profile_path(&source, "unknown"), &repo_set).is_err());
+        assert!(Profile::resolve(&profile_path(&source, "unloaded"), &repo_set).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_root_parent_escape() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = repository(temp.path(), "source", "portage-2")
+            .profile_parents("root-relative", [":../outside"])
+            .profile_parents("ordinary-relative", ["../../outside"])
+            .write()?;
+        fs::create_dir(source.join("outside"))?;
+        let repo_set = load_repo_set(temp.path(), &[("source", source.as_path())])?;
+
+        assert!(Profile::resolve(&profile_path(&source, "root-relative"), &repo_set).is_err());
+        assert!(Profile::resolve(&profile_path(&source, "ordinary-relative"), &repo_set).is_err());
         Ok(())
     }
 }
