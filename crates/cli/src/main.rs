@@ -57,6 +57,7 @@ fn main() {
             } else {
                 error!("{err}\nCaused by\n{error_cause}");
             }
+            std::process::exit(1);
         }
     }
 }
