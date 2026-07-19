@@ -16,7 +16,7 @@ fern = { version = "0.7.1", default-features = false, features = ["colored"] }
 fxhash = { version = "0.2.1", default-features = false }
 log = { version = "0.4.33", default-features = false }
 md-5 = { version = "0.10.6", default-features = false, features = ["std"] }
-nix = { version = "0.31.2", default-features = false, features = ["process", "signal", "poll", "fs"] }
+nix = { version = "0.31.3", default-features = false, features = ["process", "signal", "poll", "fs"] }
 pkgrove-core = { path = "crates/core" }
 rayon = { version = "1.11.0", default-features = false }
 regex = { version = "1.12.3", default-features = false, features = ["perf", "std"] }
