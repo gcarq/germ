@@ -14,7 +14,7 @@ colored = { version = "3.1.1", default-features = false }
 constcat = { version = "0.6.1", default-features = false }
 fern = { version = "0.7.1", default-features = false, features = ["colored"] }
 fxhash = { version = "0.2.1", default-features = false }
-log = { version = "0.4.29", default-features = false }
+log = { version = "0.4.33", default-features = false }
 md-5 = { version = "0.10.6", default-features = false, features = ["std"] }
 nix = { version = "0.31.2", default-features = false, features = ["process", "signal", "poll", "fs"] }
 pkgrove-core = { path = "crates/core" }
