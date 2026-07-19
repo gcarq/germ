@@ -1,7 +1,6 @@
 use anyhow::{Result, anyhow, bail};
 use md5::{Digest, Md5};
-use std::fs::File;
-use std::io;
+use std::fmt::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -25,11 +24,15 @@ pub trait Inherit {
 
 /// Calculates and returns the MD5 hash of the given `file` as a hexadecimal `String`.
 #[allow(unused)]
-pub fn md5sum(file: &Path) -> Result<String> {
-    let mut file = File::open(file)?;
-    let mut hasher = Md5::new();
-    io::copy(&mut file, &mut hasher)?;
-    Ok(format!("{:x}", hasher.finalize()))
+pub fn md5sum(data: &[u8]) -> Result<String> {
+    let hash = Md5::digest(data);
+    let mut checksum = String::with_capacity(hash.len() * 2);
+
+    for byte in hash {
+        write!(checksum, "{byte:02x}")?;
+    }
+
+    Ok(checksum)
 }
 
 /// Uses [`shlex`] to analyze and split the given [`String`] into key-value pairs.
@@ -97,5 +100,11 @@ mod tests {
         "#;
 
         assert!(shlex_split(content.to_string()).is_err());
+    }
+
+    #[test]
+    fn test_md5sum() {
+        let hash = md5sum("The quick brown fox jumps over the lazy dog".as_bytes()).unwrap();
+        assert_eq!(hash, "9e107d9d372bb6826bd81d3542a419d6");
     }
 }
