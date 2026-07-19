@@ -391,14 +391,14 @@ impl Inherit for Repository {
     fn inherit_from(&mut self, master: &Repository) {
         match (&mut self.state, &master.state) {
             (RepositoryState::Loaded(data), RepositoryState::Loaded(master_data)) => {
-                debug!("Inheriting '{}' from '{}' ...", self.name, &master.name);
+                debug!("Inheriting '{}' from '{}' ...", self.name, master.name);
                 data.categories
                     .extend(master_data.categories.iter().cloned());
                 data.eclasses.extend(&master_data.eclasses);
             }
             _ => debug!(
                 "Skipping inheritance from '{}' to '{}' because one repository is not loaded",
-                &master.name, self.name
+                master.name, self.name
             ),
         }
     }
