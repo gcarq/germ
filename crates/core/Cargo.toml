@@ -15,7 +15,6 @@ regex.workspace = true
 rkyv.workspace = true
 rust-ini.workspace = true
 shlex.workspace = true
-strum.workspace = true
 walkdir.workspace = true
 
 [dev-dependencies]

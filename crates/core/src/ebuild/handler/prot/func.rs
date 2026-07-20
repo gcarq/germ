@@ -1,40 +1,67 @@
-use anyhow::Result;
 use anyhow::{Context, anyhow};
+use anyhow::{Result, bail};
 use std::fmt;
 use std::str::FromStr;
-use strum::{Display, EnumString};
 
 /// All supported ebuild functions that can be called from the ebuild process.
-#[derive(EnumString, Display, PartialEq)]
+#[derive(PartialEq)]
 #[cfg_attr(test, derive(Debug))]
 pub enum FuncType {
     // Internal ebuild functions
-    #[strum(serialize = "__resolve_eclass")]
     ResolveEclass,
 
     // Misc Commands
-    #[strum(serialize = "contains_word")]
     ContainsWord,
-    #[strum(serialize = "debug-print")]
     DebugPrint,
-    #[strum(serialize = "die")]
     Die,
 
     // PMS 12.3.13 text list functions
-    #[strum(serialize = "has")]
     Has,
-    #[strum(serialize = "hasv")]
     HasV,
-    #[strum(serialize = "hasq")]
     HasQ,
 
     // PMS 12.3.14 version functions
-    #[strum(serialize = "ver_cut")]
     VerCut,
-    #[strum(serialize = "ver_rs")]
     VerRs,
-    #[strum(serialize = "ver_test")]
     VerTest,
+}
+
+impl FromStr for FuncType {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "__resolve_eclass" => Ok(Self::ResolveEclass),
+            "contains_word" => Ok(Self::ContainsWord),
+            "debug-print" => Ok(Self::DebugPrint),
+            "die" => Ok(Self::Die),
+            "has" => Ok(Self::Has),
+            "hasv" => Ok(Self::HasV),
+            "hasq" => Ok(Self::HasQ),
+            "ver_cut" => Ok(Self::VerCut),
+            "ver_rs" => Ok(Self::VerRs),
+            "ver_test" => Ok(Self::VerTest),
+            _ => bail!("unknown ebuild function '{value}'"),
+        }
+    }
+}
+
+impl fmt::Display for FuncType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::ResolveEclass => "__resolve_eclass",
+            Self::ContainsWord => "contains_word",
+            Self::DebugPrint => "debug-print",
+            Self::Die => "die",
+            Self::Has => "has",
+            Self::HasV => "hasv",
+            Self::HasQ => "hasq",
+            Self::VerCut => "ver_cut",
+            Self::VerRs => "ver_rs",
+            Self::VerTest => "ver_test",
+        };
+        f.write_str(value)
+    }
 }
 
 /// Holds a function call from the ebuild process,

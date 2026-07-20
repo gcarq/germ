@@ -3,23 +3,12 @@ mod commands;
 use crate::commands::Command;
 use anyhow::{Context, Result};
 use clap::Parser;
-use fern::colors::{Color, ColoredLevelConfig};
+use colored::{Color, Colorize};
 use log::error;
 use pkgrove_core::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
 use pkgrove_core::repository::set::RepoSet;
 use std::io;
 use std::path::Path;
-use std::sync::LazyLock;
-
-/// Colors for log levels.
-static COLORS: LazyLock<ColoredLevelConfig> = LazyLock::new(|| {
-    ColoredLevelConfig::new()
-        .error(Color::Red)
-        .warn(Color::Yellow)
-        .info(Color::Green)
-        .debug(Color::Cyan)
-        .trace(Color::BrightCyan)
-});
 
 /// Package management tool for Gentoo-like systems.
 #[derive(Parser)]
@@ -76,15 +65,19 @@ fn run(args: Args) -> Result<()> {
 fn setup_logger(log_level: log::LevelFilter) -> Result<()> {
     fern::Dispatch::new()
         .format(|out, message, record| {
+            let color = match record.level() {
+                log::Level::Error => Color::Red,
+                log::Level::Warn => Color::Yellow,
+                log::Level::Info => Color::Green,
+                log::Level::Debug => Color::Cyan,
+                log::Level::Trace => Color::BrightCyan,
+            };
+            let level = record.level().to_string().color(color);
             let format = match record.level() {
                 log::Level::Trace | log::Level::Debug => {
-                    format_args!(
-                        "[{}] {} - {message}",
-                        COLORS.color(record.level()),
-                        record.target()
-                    )
+                    format_args!("[{level}] {} - {message}", record.target())
                 }
-                _ => format_args!("[{}] {message}", COLORS.color(record.level())),
+                _ => format_args!("[{level}] {message}"),
             };
             out.finish(format);
         })
