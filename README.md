@@ -1,18 +1,52 @@
 # pkgrove
 
-pkgrove is an experimental package manager for Gentoo that aims to adhere to the [Package Manager Specification](https://wiki.gentoo.org/wiki/Project:Package_Manager_Specification).
+pkgrove is an experimental package manager for Gentoo that aims to implement the [Package Manager Specification](https://wiki.gentoo.org/wiki/Project:Package_Manager_Specification).
 
-At this stage it's a recreational project and might not be continued or finished.
+This is a recreational project and might not be continued or finished.
+
+At this point it uses the existing portage config (`/etc/portage` and `/usr/share/portage/config`) and doesn't rely on additional configuration.
+
+## Capabilities
+
+### Implemented
+
+- repository and profile handling
+- repository synchronization (git only)
+- ebuild metadata generation and dependency expression parsing
+- ebuild metadata caching and indexing (stored in `.cache`)
+- package matching based on atoms
+- reading installed package database (VDB)
+
+All of this is experimental and might only work for common configurations. There are still many bugs and unsupported edge cases, especially due to the flexibility Portage offers.
+
+### Planned
+
+- proper `USE_EXPAND` and keyword handling
+- dependency resolution
+- download and build package sources
+- binary package handling
+- package installation and removal
+
+## Quick Start
+
+Clone this repository, build and run it with Cargo:
+
+```sh
+git clone https://github.com/gcarq/pkgrove
+cd pkgrove/
+cargo run --release -- info dev-lang/python
+```
 
 ## Usage
-```
+
+```sh
 Package management tool for Gentoo-like systems
 
 Usage: pkgrove [OPTIONS] <COMMAND>
 
 Commands:
   info      Provides information about the system, useful for troubleshooting
-  install   Install a package
+  install   Install a package (this is just a placeholder!)
   gencache  Generate metadata cache for ebuild repositories
   sync      Sync repositories
   help      Print this message or the help of the given subcommand(s)
@@ -22,3 +56,28 @@ Options:
   -h, --help        Print help
   -V, --version     Print version
 ```
+
+## Testing
+
+```sh
+cargo test --workspace
+```
+
+## Contributing
+
+This repository is open to contributions. LLM assisted PRs will be considered, as long as the code matches the expected code quality and is reasonable in scope.
+
+The code must pass the test suite, should follow the [Rust Style Guide](https://doc.rust-lang.org/stable/style-guide/) and shouldn't produce any `clippy` warnings.
+
+## Dependencies
+
+- app-shells/bash
+- dev-lang/rust
+- dev-vcs/git
+- sys-apps/sandbox
+
+## Resources
+
+- [Package Manager Specification](https://wiki.gentoo.org/wiki/Project:Package_Manager_Specification)
+- [Gentoo devmanual](https://devmanual.gentoo.org/index.html)
+- [portage](https://github.com/gentoo/portage)

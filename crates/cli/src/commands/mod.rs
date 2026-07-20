@@ -19,7 +19,7 @@ pub enum Command {
         #[arg(value_name = "atom")]
         atom: Option<Atom>,
     },
-    /// Install a package
+    /// Install a package (this is just a placeholder!)
     Install {
         /// Package atom to install, e.g. dev-lang/rust
         #[arg(value_name = "atom")]
