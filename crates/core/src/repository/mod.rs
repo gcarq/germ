@@ -190,6 +190,8 @@ impl Repository {
     /// Resolves the given `cpvs` in parallel using `rayon`.
     ///
     /// Only unresolved packages will be resolved.
+    /// Errors for individual packages will be logged as warning,
+    /// an `Err` will be returned if the resulting `Vec` contains 0 elements.
     fn par_resolve_packages<'a>(
         &self,
         cpvs: impl Iterator<Item = &'a CPV>,
@@ -202,11 +204,20 @@ impl Repository {
             return Ok(Vec::new());
         }
 
-        filtered
+        let packages = filtered
             .into_par_iter()
-            .map(|cpv| self.resolve_package(cpv))
-            .collect::<Result<Vec<_>>>()
-            .with_context(|| "unable to resolve packages")
+            .filter_map(|cpv| match self.resolve_package(cpv) {
+                Ok(pkg) => Some(pkg),
+                Err(err) => {
+                    warn!("Failed to resolve package {cpv}: {err:?}");
+                    return None;
+                }
+            })
+            .collect::<Vec<_>>();
+        if packages.is_empty() {
+            bail!("Failed to resolve any packages");
+        }
+        Ok(packages)
     }
 
     /// Resolves the given [`CPV`] into a [`Package`] with its metadata.
