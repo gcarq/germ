@@ -96,6 +96,16 @@ impl Repository {
         Ok(self.data()?.avail_package_idx.values().flatten())
     }
 
+    /// Returns all known packages (including metadata) in the repository.
+    ///
+    /// This function will call [`Repository::build_package_index()`] and
+    /// index all missing packages.
+    pub fn packages(&mut self) -> Result<impl Iterator<Item = &Package>> {
+        self.build_package_index()
+            .with_context(|| anyhow!("unable to build package index for {self}"))?;
+        Ok(self.data()?.resolved_package_idx.values())
+    }
+
     /// Returns repository package masks.
     pub fn package_mask(&self) -> Result<&PackageEntries> {
         Ok(&self.data()?.package_mask)
@@ -199,7 +209,7 @@ impl Repository {
             .with_context(|| "unable to resolve packages")
     }
 
-    /// Resolves the given `cpv` into a [`Package`] with its metadata.
+    /// Resolves the given [`CPV`] into a [`Package`] with its metadata.
     fn resolve_package(&self, cpv: &CPV) -> Result<Package> {
         let ebuild_path = self
             .location
