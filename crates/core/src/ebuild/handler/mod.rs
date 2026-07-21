@@ -105,8 +105,8 @@ impl<'a> EbuildPhaseHandler<'a> {
             },
             FuncType::DebugPrint => Ok(debug_print(args)),
             FuncType::Die => match args {
-                [first, args @ ..] if first == "-n" => Ok(die(args, false)),
-                args => Ok(die(args, true)),
+                [first, args @ ..] if first == "-n" => die(args, false),
+                args => die(args, true),
             },
             FuncType::Has => match args {
                 [word, args @ ..] => match args.contains(word) {

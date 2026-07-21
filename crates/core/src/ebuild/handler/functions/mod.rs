@@ -2,9 +2,8 @@ pub mod version;
 
 use crate::ebuild::handler::prot::ParentMessage;
 use crate::repository::Repository;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use log::{debug, error};
-use std::process;
 
 /// Checks if the given `word` is present anywhere in the list of `args`.
 /// Returns `Err` if `word` contains whitespace or is not present.
@@ -28,13 +27,15 @@ pub fn debug_print(args: &[String]) -> ParentMessage {
     ParentMessage::Ok(None)
 }
 
-/// Logs the given `message` to `error!()` and exits with code 1 if `fatal` is true.
-pub fn die(args: &[String], fatal: bool) -> ParentMessage {
-    error!("die: {}", args.join(" "));
+/// Logs the given `message` to `error!()`.
+///
+/// Returns `Err` if `fatal` is true.
+pub fn die(args: &[String], fatal: bool) -> Result<ParentMessage> {
     if fatal {
-        process::exit(1);
+        bail!("die: {}", args.join(" "));
     }
-    ParentMessage::Err(None)
+    error!("die: {}", args.join(" "));
+    Ok(ParentMessage::Err(None))
 }
 
 /// Resolves the given eclass `name` from `repository` and returns the path as string.
