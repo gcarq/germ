@@ -3,7 +3,7 @@ use crate::package::Package;
 use crate::package::cpv::CPV;
 use crate::types::FxHashMap;
 use anyhow::{Context, Result, anyhow, bail};
-use log::debug;
+use log::{debug, warn};
 use rkyv::rancor;
 use rkyv::with::Skip;
 use rkyv::{Archive, Deserialize, Serialize};
@@ -21,6 +21,16 @@ impl AvailablePackageIndex {
     /// Inserts the given `cpv` into the index.
     pub fn insert(&mut self, cpv: CPV) {
         let entry = self.0.entry(cpv.qualified_name()).or_default();
+        // Its possible that a repository contains the same ebuild with and without explicit
+        // revision 0.
+        if let Some(index) = entry.iter().position(|existing| existing == &cpv) {
+            warn!(
+                "Ignoring equal version collision between {} and {}",
+                entry[index].pf(),
+                cpv.pf()
+            );
+            return;
+        }
         entry.push(cpv);
         entry.sort_unstable_by(|a, b| b.cmp(a));
     }
@@ -194,6 +204,34 @@ mod tests {
             .unwrap();
         assert_eq!(&packages, &[&python3_14, &python_3_13]);
         assert!(index.contains(&rust));
+    }
+
+    #[test]
+    fn test_available_package_index_r0_collision() {
+        let implicit = CPV::new(
+            "dev-libs",
+            "pkg",
+            PackageVersion::new("1.0", None, None).unwrap(),
+        )
+        .unwrap();
+        let explicit = CPV::new(
+            "dev-libs",
+            "pkg",
+            PackageVersion::new("1.0", None, Some("0")).unwrap(),
+        )
+        .unwrap();
+        let r1 = CPV::new(
+            "dev-libs",
+            "pkg",
+            PackageVersion::new("1.0", None, Some("1")).unwrap(),
+        )
+        .unwrap();
+
+        for colliding in [vec![explicit, implicit, r1]] {
+            let mut index = AvailablePackageIndex::default();
+            index.insert_all(colliding);
+            assert_eq!(index["dev-libs/pkg"].len(), 2);
+        }
     }
 
     #[test]

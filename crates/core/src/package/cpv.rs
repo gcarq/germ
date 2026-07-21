@@ -125,7 +125,7 @@ impl CPV {
 
     /// Returns the package name, version, and revision (if any), for example `vim-7.0.174-r1`.
     pub fn pf(&self) -> String {
-        format!("{}-{}", self.package, self.version)
+        format!("{}-{}", self.package, self.version.pvr())
     }
 
     /// Returns the package name, for example `vim`.
@@ -145,7 +145,7 @@ impl CPV {
 
     /// Returns the package version and revision (if any), for example `7.0.174` or `7.0.174-r1`.
     pub fn pvr(&self) -> String {
-        self.version.to_string()
+        self.version.pvr()
     }
 }
 
@@ -243,6 +243,22 @@ mod tests {
             let atom = Atom::new(atom).unwrap();
             assert!(!cpv.matches_atom(&atom), "{atom} shouldn't match {cpv}");
         }
+    }
+
+    #[test]
+    fn test_cpv_explicit_r0_formatting() {
+        let cpv = CPV::new(
+            "dev-libs",
+            "pkg",
+            PackageVersion::new("1.0", None, Some("0")).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(cpv.fqn(), "dev-libs/pkg-1.0");
+        assert_eq!(cpv.to_string(), "dev-libs/pkg-1.0");
+        assert_eq!(cpv.pf(), "pkg-1.0-r0");
+        assert_eq!(cpv.pvr(), "1.0-r0");
+        assert_eq!(cpv.pr(), "r0");
     }
 
     #[test]

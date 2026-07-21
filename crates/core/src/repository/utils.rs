@@ -55,6 +55,7 @@ mod tests {
         // (category, file name, is_some)
         let valid_ebuilds = [
             ("app-editors", "vim-8.2.3456.ebuild", true),
+            ("app-editors", "vim-8.2.3456-r0.ebuild", true),
             ("app-editors", "vim-8.2.3456-r1.ebuild", true),
             ("dev-lang", "rust-1.65.0_alpha1-r2.ebuild", true),
             ("net-misc", "curl-7.79.1_beta2_p20220101.ebuild", true),
@@ -69,6 +70,16 @@ mod tests {
                 "failure for ebuild '{filename}'",
             );
         }
+    }
+
+    #[test]
+    fn test_cpv_from_explicit_r0_ebuild() {
+        let cpv = cpv_from_ebuild_name("dev-libs", "pkg-1.0-r0.ebuild")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(cpv.fqn(), "dev-libs/pkg-1.0");
+        assert_eq!(cpv.pf(), "pkg-1.0-r0");
     }
 
     #[test]

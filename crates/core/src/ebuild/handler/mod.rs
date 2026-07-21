@@ -82,7 +82,7 @@ impl<'a> EbuildPhaseHandler<'a> {
                     let response = match self.handle_request(func_call) {
                         Ok(response) => response,
                         Err(err) => {
-                            let _ = process
+                            process
                                 .kill()
                                 .with_context(|| "unable to kill ebuild process")?;
                             return Err(err);

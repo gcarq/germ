@@ -250,6 +250,7 @@ mod tests {
             .write()?;
         let overlay = RepositoryFixture::new(temp.path().join("overlay"), "overlay")
             .masters(["master"])
+            .categories(["app-misc"])
             .write()?;
         add_ebuild(&overlay, "app-misc", "foo", "1")?;
         let repos_conf = write_repos_conf(
@@ -262,13 +263,12 @@ mod tests {
         )?;
 
         let repo_set = RepoSet::new(&repos_conf)?;
-        let has_package = repo_set
-            .get("overlay")
-            .unwrap()
-            .cpvs()?
-            .any(|cpv| cpv.fqn() == "app-misc/foo-1");
+        let overlay = repo_set.get("overlay").unwrap();
+        let has_package = overlay.cpvs()?.any(|cpv| cpv.fqn() == "app-misc/foo-1");
 
         assert!(has_package);
+        assert_eq!(overlay.data()?.categories.len(), 1);
+        assert!(overlay.data()?.categories.contains("app-misc"));
         assert!(
             repo_set
                 .get("overlay")

@@ -26,6 +26,7 @@ use crate::repository::layout::Layout;
 use crate::repository::misc::ArchList;
 use crate::repository::sync::{SyncHandler, build_sync_handler};
 use crate::repository::utils::resolve_cpv_from_category;
+use crate::types::FxHashSet;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow, bail};
 use log::{debug, info, warn};
@@ -64,7 +65,7 @@ enum RepositoryState {
 #[cfg_attr(test, derive(Debug))]
 struct RepositoryData {
     layout: Layout,
-    categories: Vec<String>,
+    categories: FxHashSet<String>,
     package_mask: PackageEntries,
     package_unmask: PackageEntries,
     eclasses: Eclasses,
@@ -210,7 +211,7 @@ impl Repository {
                 Ok(pkg) => Some(pkg),
                 Err(err) => {
                     warn!("Failed to resolve package {cpv}: {err:?}");
-                    return None;
+                    None
                 }
             })
             .collect::<Vec<_>>();
@@ -267,6 +268,7 @@ impl Repository {
             "Loading package index for '{self}' from {} ...",
             path.display()
         );
+        // TODO: handle corrupt or outdated index
         if let Some(index) = ResolvedPackageIndex::load_from_path(&path)? {
             let data = self.data_mut()?;
             data.resolved_package_idx = index;
@@ -385,7 +387,7 @@ impl Repository {
         let dir_support = eapi.supports_profile_file_dirs() || layout.supports_profile_file_dirs();
         let data = RepositoryData {
             layout,
-            categories: Vec::default(),
+            categories: FxHashSet::default(),
             package_mask: PackageEntries::from_path(
                 &profiles.join("package.mask"),
                 Precedence::Repository,

@@ -1,12 +1,14 @@
 mod number;
+mod revision;
 mod suffix;
 
 use crate::deps::atom::{Atom, AtomOperator, AtomVariant};
 use crate::package::version::suffix::VersionSuffixes;
 use crate::regex::V_REV;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use number::VersionNumber;
 use regex::Regex;
+use revision::PackageRevision;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::sync::LazyLock;
@@ -23,7 +25,7 @@ static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_
 pub struct PackageVersion {
     number: VersionNumber,
     suffixes: VersionSuffixes,
-    revision: u64,
+    revision: PackageRevision,
 }
 
 impl PackageVersion {
@@ -37,12 +39,7 @@ impl PackageVersion {
                 Some(s) => s.parse()?,
                 None => VersionSuffixes::default(),
             },
-            revision: match revision {
-                Some(rev) => rev
-                    .parse::<u64>()
-                    .with_context(|| anyhow!("revision must be a valid u64, got '{rev}'"))?,
-                None => 0,
-            },
+            revision: PackageRevision::new(revision)?,
         })
     }
 
@@ -51,12 +48,23 @@ impl PackageVersion {
         format!("{}{}", self.number, self.suffixes)
     }
 
+    /// Returns the effective numeric revision, defaulting to zero when omitted.
+    pub const fn effective_revision(&self) -> u64 {
+        self.revision.effective()
+    }
+
     /// Returns the revision, or `r0` if none exists.
     pub fn pr(&self) -> String {
-        match self.revision {
-            0 => "r0".to_owned(),
-            rev => format!("r{rev}"),
+        format!("r{}", self.effective_revision())
+    }
+
+    /// Returns the source-sensitive package version and revision.
+    pub fn pvr(&self) -> String {
+        let mut pvr = self.pv();
+        if let Some(revision) = self.revision.explicit() {
+            pvr.push_str(&format!("-r{revision}"));
         }
+        pvr
     }
 
     /// Checks if the given `atom` matches this version.
@@ -112,14 +120,12 @@ impl TryFrom<&str> for PackageVersion {
 }
 
 impl fmt::Display for PackageVersion {
-    /// Returns the full version string including suffixes and revision.
-    ///
-    /// For example: `1.2.3_alpha1-r1`. This is also referred to as the `PVR` in PMS.
+    /// Returns the canonical version string, omitting revision zero.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.number, self.suffixes)?;
-        if self.revision > 0 {
-            f.write_str("-r")?;
-            write!(f, "{}", self.revision)?;
+        let revision = self.effective_revision();
+        if revision > 0 {
+            write!(f, "-r{revision}")?;
         }
         Ok(())
     }
@@ -128,6 +134,7 @@ impl fmt::Display for PackageVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn test_package_version_new_ok() {
@@ -166,6 +173,7 @@ mod tests {
     fn test_package_version_display() {
         let test_cases = vec![
             (PackageVersion::new("1.0.0", None, None), "1.0.0"),
+            (PackageVersion::new("1.0.0", None, Some("0")), "1.0.0"),
             (
                 PackageVersion::new("1.2.3a", Some("_alpha1"), None),
                 "1.2.3a_alpha1",
@@ -187,11 +195,42 @@ mod tests {
     #[test]
     fn test_package_version_ord_revision() {
         let v1_r0 = PackageVersion::new("1.0.0", None, None).unwrap();
+        let v1_explicit_r0 = PackageVersion::new("1.0.0", None, Some("0")).unwrap();
         let v1_r1 = PackageVersion::new("1.0.0", None, Some("1")).unwrap();
         let v1_r2 = PackageVersion::new("1.0.0", None, Some("2")).unwrap();
 
+        assert_eq!(v1_r0, v1_explicit_r0);
         assert!(v1_r0 < v1_r1);
         assert!(v1_r1 < v1_r2);
+    }
+
+    #[test]
+    fn test_package_version_r0_semantics() {
+        let implicit = PackageVersion::new("1.0.0", None, None).unwrap();
+        let explicit = PackageVersion::new("1.0.0", None, Some("0")).unwrap();
+        let mut versions = HashSet::new();
+
+        versions.insert(implicit.clone());
+        versions.insert(explicit.clone());
+
+        assert_eq!(implicit, explicit);
+        assert_eq!(versions.len(), 1);
+        assert_eq!(implicit.effective_revision(), 0);
+        assert_eq!(explicit.effective_revision(), 0);
+        assert_eq!(implicit.pr(), "r0");
+        assert_eq!(explicit.pr(), "r0");
+        assert_eq!(implicit.pvr(), "1.0.0");
+        assert_eq!(explicit.pvr(), "1.0.0-r0");
+    }
+
+    #[test]
+    fn test_package_version_explicit_zero_revision_matches_atom() {
+        let version = PackageVersion::new("1.0.0", None, Some("0")).unwrap();
+        let implicit_atom = Atom::new("=dev-libs/pkg-1.0.0").unwrap();
+        let explicit_atom = Atom::new("=dev-libs/pkg-1.0.0-r0").unwrap();
+
+        assert!(version.matches_atom(&implicit_atom));
+        assert!(version.matches_atom(&explicit_atom));
     }
 
     #[test]

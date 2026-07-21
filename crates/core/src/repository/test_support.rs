@@ -2,6 +2,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::types::FxHashSet;
+
 enum FixtureEntry {
     File { path: PathBuf, contents: String },
     Directory { path: PathBuf, contents: String },
@@ -15,7 +17,7 @@ pub struct RepositoryFixture {
     profiles_eapi: Option<String>,
     profiles: Vec<PathBuf>,
     entries: Vec<FixtureEntry>,
-    categories: Vec<String>,
+    categories: FxHashSet<String>,
     eclasses: Vec<String>,
 }
 
@@ -30,7 +32,7 @@ impl RepositoryFixture {
             profiles_eapi: None,
             profiles: Vec::new(),
             entries: Vec::new(),
-            categories: Vec::new(),
+            categories: FxHashSet::default(),
             eclasses: Vec::new(),
         }
     }
@@ -154,7 +156,9 @@ impl RepositoryFixture {
             "amd64 default/linux stable\n",
         )?;
         fs::write(profiles.join("arch.list"), "amd64\n")?;
-        fs::write(profiles.join("categories"), self.categories.join("\n"))?;
+        let mut categories = self.categories.into_iter().collect::<Vec<_>>();
+        categories.sort_unstable();
+        fs::write(profiles.join("categories"), categories.join("\n"))?;
 
         for profile in self.profiles {
             fs::create_dir_all(profiles.join(profile))?;
