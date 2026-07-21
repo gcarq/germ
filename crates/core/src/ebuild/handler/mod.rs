@@ -11,7 +11,7 @@ use crate::ebuild::handler::functions::{contains_word, debug_print, die, resolve
 use crate::ebuild::handler::prot::func::{FuncCall, FuncType};
 use crate::ebuild::handler::prot::{ChildMessage, ParentMessage};
 use crate::makenv::MakeEnv;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use ipc::IpcHandler;
 use log::{debug, trace};
 use std::fmt;
@@ -79,7 +79,15 @@ impl<'a> EbuildPhaseHandler<'a> {
 
             match request {
                 ChildMessage::Call(func_call) => {
-                    let response = self.handle_request(func_call)?;
+                    let response = match self.handle_request(func_call) {
+                        Ok(response) => response,
+                        Err(err) => {
+                            let _ = process
+                                .kill()
+                                .with_context(|| "unable to kill ebuild process")?;
+                            return Err(err);
+                        }
+                    };
                     ipc.send(response)?;
                 }
                 ChildMessage::Data(data) => received_data.push(data),
