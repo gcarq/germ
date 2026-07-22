@@ -8,7 +8,6 @@ unalias -a
 source "./bin/eapi.sh" || exit
 source "./bin/functions.sh" || exit
 
-
 if [[ ${EBUILD_PHASE} == depend ]]; then
     __depend_phase_forbidden() {
         die "${FUNCNAME[1]}() calls are not allowed in global scope"
@@ -47,10 +46,10 @@ if [[ ${EBUILD_PHASE} == depend ]]; then
 
     # prevent the shell from finding external executables
     # note: we can't use empty because it implies current directory
-	export PATH=/dev/null
-	command_not_found_handle() {
-		die "External commands disallowed while sourcing ebuild: ${*}"
-	}
+    export PATH=/dev/null
+    command_not_found_handle() {
+        die "External commands disallowed while sourcing ebuild: ${*}"
+    }
 fi
 
 # Don't use sandbox's BASH_ENV for new shells because it does
@@ -63,10 +62,10 @@ unset BASH_ENV
 # code will be eval'd:
 # src_unpack() { base_src_unpack; }
 EXPORT_FUNCTIONS() {
-	if [[ -z "${ECLASS}" ]]; then
-		die "EXPORT_FUNCTIONS without a defined ECLASS"
-	fi
-	eval ${__export_funcs_var}+=\" $*\"
+    if [[ -z "${ECLASS}" ]]; then
+        die "EXPORT_FUNCTIONS without a defined ECLASS"
+    fi
+    eval ${__export_funcs_var}+=\" $*\"
 }
 
 trap 'exit 1' SIGTERM
@@ -109,8 +108,8 @@ if [[ ${EBUILD_PHASE} == depend ]]; then
         src_install pkg_nofetch pkg_postinst pkg_postrm pkg_preinst
         src_prepare pkg_prerm pkg_pretend pkg_setup src_test src_unpack"
     DEFINED_PHASES=
-    for _f in ${_valid_phases} ; do
-        if declare -F ${_f} >/dev/null ; then
+    for _f in ${_valid_phases}; do
+        if declare -F ${_f} >/dev/null; then
             _f=${_f#pkg_}
             DEFINED_PHASES+=" ${_f#src_}"
         fi
