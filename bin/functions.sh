@@ -1,7 +1,6 @@
 source "./bin/internals.sh" || exit
 
 __resolve_eclass() { __ipc_call __resolve_eclass "$@"; }
-contains_word()    { __ipc_call contains_word    "$@"; }
 die()              { __ipc_call die              "$@"; }
 has()              { __ipc_call has              "$@"; }
 hasv()             { __ipc_call hasv             "$@"; }
@@ -10,6 +9,7 @@ ver_cut()          { __ipc_call ver_cut          "$@"; }
 ver_rs()           { __ipc_call ver_rs           "$@"; }
 ver_test()         { __ipc_call ver_test         "$@"; }
 
+contains_word()    { [[ ${1} != *" "* && " ${2} " == *" ${1} "* ]]; }
 
 # Debugging functions.
 # If EBUILD_DEBUG is not set to 1, these functions do nothing.

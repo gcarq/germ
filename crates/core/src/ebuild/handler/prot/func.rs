@@ -109,10 +109,6 @@ mod tests {
                     vec!["*** Multiple Inheritance (Level: 2)"],
                 ),
             ),
-            (
-                ("contains_word", vec!["foo", "foobar"]),
-                (FuncType::ContainsWord, vec!["foo", "foobar"]),
-            ),
         ];
 
         for ((func, args), (expected_func, expected_args)) in test_data {

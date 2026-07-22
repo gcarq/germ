@@ -7,7 +7,7 @@ use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
 use crate::ebuild::Ebuild;
 use crate::ebuild::handler::env::EbuildEnv;
 use crate::ebuild::handler::functions::version::{ver_cut, ver_rs, ver_test};
-use crate::ebuild::handler::functions::{contains_word, debug_print, die, resolve_eclass};
+use crate::ebuild::handler::functions::{debug_print, die, resolve_eclass};
 use crate::ebuild::handler::prot::func::{FuncCall, FuncType};
 use crate::ebuild::handler::prot::{ChildMessage, ParentMessage};
 use crate::makenv::MakeEnv;
@@ -106,10 +106,6 @@ impl<'a> EbuildPhaseHandler<'a> {
             FuncType::ResolveEclass => match args {
                 [name] => resolve_eclass(name, self.ebuild.repo),
                 _ => bail!("invalid arguments: __resolve_eclass <name>: {args:?}"),
-            },
-            FuncType::ContainsWord => match args {
-                [word, args @ ..] => Ok(contains_word(word, args)),
-                _ => bail!("invalid arguments: contains_word <word> <string>: {args:?}"),
             },
             FuncType::DebugPrint => Ok(debug_print(args)),
             FuncType::Die => match args {

@@ -5,22 +5,6 @@ use crate::repository::Repository;
 use anyhow::{Result, anyhow, bail};
 use log::{debug, error};
 
-/// Checks if the given `word` is present anywhere in the list of `args`.
-/// Returns `Err` if `word` contains whitespace or is not present.
-pub fn contains_word(word: &str, args: &[String]) -> ParentMessage {
-    if word.contains(' ') {
-        return ParentMessage::Err(None);
-    }
-    match args
-        .iter()
-        .flat_map(|arg| arg.split_ascii_whitespace())
-        .any(|w| w == word)
-    {
-        true => ParentMessage::Ok(None),
-        false => ParentMessage::Err(None),
-    }
-}
-
 /// Logs the given `args` using `debug!()`.
 pub fn debug_print(args: &[String]) -> ParentMessage {
     debug!(target: "ebuild", "{}", args.join(" "));
@@ -75,10 +59,6 @@ mod tests {
             ),
             (
                 FuncCall::from_raw("has", &["foo", "foo", "bar", "baz"]).unwrap(),
-                ParentMessage::Ok(None),
-            ),
-            (
-                FuncCall::from_raw("contains_word", &["baz", "foo", "foobar", "baz"]).unwrap(),
                 ParentMessage::Ok(None),
             ),
             (
