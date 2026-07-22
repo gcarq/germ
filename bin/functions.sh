@@ -52,6 +52,7 @@ inherit() {
 	local B_IDEPEND
 	local B_PROPERTIES
 	local B_RESTRICT
+	local __ipc_reply
 	while [[ "${1}" ]]; do
 		local location=""
 
@@ -74,7 +75,8 @@ inherit() {
 			fi
 		fi
 
-        location=$(__resolve_eclass "${ECLASS}")
+        __resolve_eclass "${ECLASS}" >/dev/null
+        location=${__ipc_reply}
 		debug-print "inherit: ${1} -> ${location}"
 		[[ -z ${location} ]] && die "${1}.eclass could not be found by inherit()"
 

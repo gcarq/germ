@@ -1,7 +1,10 @@
 # This is a stub function to call functions in the parent process via IPC.
-# The format is as follows: FN\0function_name\0arg1\0arg2\0...\4
-# So a hardcoded FN identifier, followed by the function name and arguments, everything is delimited by \0 and the
-# message is terminated with \4.
+#
+# The format is as follows: `FN\0function_name\0arg1\0arg2\0...\4`
+# This means, a hardcoded `FN` identifier, followed by the function name and arguments.
+# Everything is delimited by `\0` and the message is terminated with `\4`.
+#
+# NOTE: The result of the function call is also stored in `__ipc_reply`.
 __ipc_call() {
     {
         printf 'FN\0%s' "$1"
@@ -12,15 +15,31 @@ __ipc_call() {
         printf '\4'
     } >&"${CHILD_WRITE_FD}" || exit 2
 
-    local reply
-    IFS= read -r reply <&"${CHILD_READ_FD}" || exit 1
+    IFS= read -r __ipc_reply <&"${CHILD_READ_FD}" || exit 1
 
-    case ${reply} in
-        OK) return 0 ;;
-        OK\ *) printf '%s\n' "${reply#OK }"; return 0 ;;
-        ERR) return 1 ;;
-        ERR\ *) printf '%s\n' "${reply#ERR }" >&2; return 1 ;;
-        *) printf 'protocol error: %s\n' "${reply}" >&2; exit 2 ;;
+    case ${__ipc_reply} in
+    OK)
+        __ipc_reply=
+        return 0
+        ;;
+    OK\ *)
+        __ipc_reply=${__ipc_reply#OK }
+        printf '%s\n' "${__ipc_reply}"
+        return 0
+        ;;
+    ERR)
+        __ipc_reply=
+        return 1
+        ;;
+    ERR\ *)
+        printf '%s\n' "${__ipc_reply#ERR }" >&2
+        __ipc_reply=
+        return 1
+        ;;
+    *)
+        printf 'protocol error: %s\n' "${__ipc_reply}" >&2
+        exit 2
+        ;;
     esac
 }
 

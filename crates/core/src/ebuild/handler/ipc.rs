@@ -118,6 +118,8 @@ impl Drop for IpcHandler {
 
 #[cfg(test)]
 mod tests {
+    use crate::consts::BASH_BINARY_PATH;
+
     use super::*;
 
     struct ParentTestMsg(String);
@@ -131,37 +133,82 @@ mod tests {
 
     impl ChildToParentMsg for ChildTestMsg {
         fn from_bytes(bytes: &[u8]) -> Result<Self> {
-            let s = String::from_utf8(bytes.to_owned())
-                .with_context(|| "invalid UTF-8 in child message")?
-                .clone();
-            Ok(Self(s))
+            Ok(Self(String::from_utf8(bytes.to_owned())?))
         }
+    }
+
+    fn spawn_process<const N: usize>(
+        script: &str,
+        env: [(&str, &str); N],
+    ) -> (IpcHandler, process::Child) {
+        let args = vec!["-c".into(), script.into()];
+        let env = env
+            .into_iter()
+            .map(|(key, value)| (key.into(), value.into()))
+            .collect();
+        IpcHandler::spawn(BASH_BINARY_PATH, &args, &env).unwrap()
+    }
+
+    fn recv(ipc: &mut IpcHandler) -> String {
+        ipc.recv::<ChildTestMsg>().unwrap().unwrap().0
+    }
+
+    #[test]
+    fn test_ipc_reply_state() {
+        let (mut ipc, mut process) = spawn_process(
+            r#"
+                source "${INTERNALS_PATH}" || exit 1
+                capture_reply() {
+                    local __ipc_reply=stale
+                    __ipc_call payload >/dev/null || exit 1
+                    printf 'RESULT\0payload\0%s\4' "${__ipc_reply}" >&${CHILD_WRITE_FD} || exit 1
+
+                    __ipc_reply=stale
+                    __ipc_call no-payload >/dev/null || exit 1
+                    printf 'RESULT\0no-payload\0%s\4' "${__ipc_reply}" >&${CHILD_WRITE_FD} || exit 1
+
+                    __ipc_reply=stale
+                    if __ipc_call failure >/dev/null; then
+                        exit 1
+                    fi
+                    printf 'RESULT\0failure\0%s\4' "${__ipc_reply}" >&${CHILD_WRITE_FD} || exit 1
+                }
+                capture_reply
+            "#,
+            [(
+                "INTERNALS_PATH",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../bin/internals.sh"),
+            )],
+        );
+
+        for (request, reply, result) in [
+            ("FN\0payload", "OK value", "RESULT\0payload\0value"),
+            ("FN\0no-payload", "OK", "RESULT\0no-payload\0"),
+            ("FN\0failure", "ERR", "RESULT\0failure\0"),
+        ] {
+            assert_eq!(recv(&mut ipc), request);
+            ipc.send(ParentTestMsg(reply.into())).unwrap();
+            assert_eq!(recv(&mut ipc), result);
+        }
+
+        assert!(process.wait().unwrap().success());
     }
 
     #[test]
     fn test_ipc_handler_pipes() {
-        let args = vec![
-            "-c".into(),
+        let (mut ipc, mut process) = spawn_process(
             r#"
                 IFS= read -r response <&${CHILD_READ_FD} || exit 1
                 printf '%s\4' "${response}" >&${CHILD_WRITE_FD} || exit 1
                 printf '%s\4' "${TEST_ENV}" >&${CHILD_WRITE_FD} || exit 1
-                sleep 30
-            "#
-            .into(),
-        ];
-        let env: FxHashMap<String, String> =
-            FxHashMap::from_iter([("TEST_ENV".into(), "42".into())]);
-
-        let (mut ipc, mut process) = IpcHandler::spawn("/usr/bin/bash", &args, &env).unwrap();
+            "#,
+            [("TEST_ENV", "42")],
+        );
 
         ipc.send(ParentTestMsg("sync".into())).unwrap();
-        let resp = ipc.recv::<ChildTestMsg>().unwrap().unwrap();
-        assert_eq!(resp.0, "sync", "expected echoed line");
+        assert_eq!(recv(&mut ipc), "sync", "expected echoed line");
+        assert_eq!(recv(&mut ipc), "42", "expected value from env variable");
 
-        let resp = ipc.recv::<ChildTestMsg>().unwrap().unwrap();
-        assert_eq!(resp.0, "42", "expected value from env variable");
-
-        process.kill().unwrap();
+        assert!(process.wait().unwrap().success());
     }
 }

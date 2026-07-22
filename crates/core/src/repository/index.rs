@@ -227,11 +227,9 @@ mod tests {
         )
         .unwrap();
 
-        for colliding in [vec![explicit, implicit, r1]] {
-            let mut index = AvailablePackageIndex::default();
-            index.insert_all(colliding);
-            assert_eq!(index["dev-libs/pkg"].len(), 2);
-        }
+        let mut index = AvailablePackageIndex::default();
+        index.insert_all(vec![explicit, implicit, r1]);
+        assert_eq!(index["dev-libs/pkg"].len(), 2);
     }
 
     #[test]
