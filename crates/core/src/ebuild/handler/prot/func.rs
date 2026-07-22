@@ -11,7 +11,6 @@ pub enum FuncType {
     ResolveEclass,
 
     // Misc Commands
-    ContainsWord,
     DebugPrint,
     Die,
 
@@ -32,7 +31,6 @@ impl FromStr for FuncType {
     fn from_str(value: &str) -> Result<Self> {
         match value {
             "__resolve_eclass" => Ok(Self::ResolveEclass),
-            "contains_word" => Ok(Self::ContainsWord),
             "debug-print" => Ok(Self::DebugPrint),
             "die" => Ok(Self::Die),
             "has" => Ok(Self::Has),
@@ -50,7 +48,6 @@ impl fmt::Display for FuncType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
             Self::ResolveEclass => "__resolve_eclass",
-            Self::ContainsWord => "contains_word",
             Self::DebugPrint => "debug-print",
             Self::Die => "die",
             Self::Has => "has",
