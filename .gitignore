@@ -2,6 +2,6 @@
 
 .idea/
 
-/*.sh
+scripts/*
 .scratch
 .cache/
