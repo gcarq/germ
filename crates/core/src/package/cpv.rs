@@ -78,10 +78,9 @@ impl CPV {
         let ebuild = Ebuild::new(ebuild_path.to_path_buf(), self, repo)
             .with_context(|| anyhow!("unable to create ebuild from '{}'", ebuild_path.display()))?;
         let mut handler =
-            EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default());
-        let data = handler
-            .spawn()
-            .with_context(|| "ebuild script execution failed")?;
+            EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default())
+                .with_context(|| "unable to spawn ebuild phase handler")?;
+        let data = handler.spawn()?;
         let data = data
             .iter()
             .filter_map(|d| d.split_once('=').map(|(k, v)| (k.trim(), v.trim())))

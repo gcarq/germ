@@ -70,7 +70,8 @@ EXPORT_FUNCTIONS() {
 
 trap 'exit 1' SIGTERM
 
-export SANDBOX_ON="1"
+eval "PORTAGE_ECLASS_LOCATIONS=(${PORTAGE_ECLASS_LOCATIONS})"
+
 
 if [[ ${EBUILD_PHASE} == depend ]]; then
 
@@ -84,8 +85,38 @@ if [[ ${EBUILD_PHASE} == depend ]]; then
     unset E_RESTRICT PROVIDES_EXCLUDE REQUIRES_EXCLUDE
     unset PORTAGE_EXPLICIT_INHERIT
 
+	pre_source_sandbox() {
+		export SANDBOX_ON=1
+
+		export SANDBOX_PREDICT=""
+		export SANDBOX_READ="${EBUILD}:${BASH_SOURCE[1]}:${SANDBOX_LOG}"
+		export SANDBOX_WRITE="${SANDBOX_LOG}:/dev/null"
+		[[ ${EBUILD_DEBUG} != 1 ]] || export SANDBOX_DEBUG=1
+
+		# We need inherit to work
+		local repo_location
+		for repo_location in "${PORTAGE_ECLASS_LOCATIONS[@]}"; do
+			local potential_location="${repo_location}/eclass"
+			if [[ -d ${potential_location} ]]; then
+				SANDBOX_READ+=":${potential_location}"
+			fi
+		done
+
+		# Give a nicer error message in case someone is confused
+		adddeny() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME}" ; }
+		addpredict() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME}" ; }
+		addread() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME}" ; }
+		addwrite() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME}" ; }
+
+		# Disallow any tampering
+		readonly SANDBOX_{ALLOW,ACTIVE,DENY,DEBUG,ON,PREDICT,READ,WRITE}
+	}
+	pre_source_sandbox
+
     # shellcheck source=/dev/null
     source "${EBUILD}" || die "error sourcing ebuild"
+
+    [[ -s ${SANDBOX_LOG} ]] && die "Sandbox violations found, exiting"
 
     # Add in dependency info from eclasses
     IUSE+="${IUSE:+ }${E_IUSE}"
@@ -120,5 +151,5 @@ if [[ ${EBUILD_PHASE} == depend ]]; then
     __send_metadata
 
 else
-    die "TODO: not implemented"
+    die "TODO: ${EBUILD_PHASE} is not implemented"
 fi

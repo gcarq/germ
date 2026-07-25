@@ -44,12 +44,12 @@ pub struct EbuildPhaseHandler<'a> {
 
 impl<'a> EbuildPhaseHandler<'a> {
     /// Create a new ebuild phase handler for the given `ebuild` and `phase`.
-    pub fn new(ebuild: &'a Ebuild, phase: EbuildPhase, make_env: &MakeEnv) -> Self {
-        Self {
-            env: EbuildEnv::new(ebuild, &phase, make_env),
+    pub fn new(ebuild: &'a Ebuild, phase: EbuildPhase, make_env: &MakeEnv) -> Result<Self> {
+        Ok(Self {
+            env: EbuildEnv::new(ebuild, &phase, make_env)?,
             ebuild,
             phase,
-        }
+        })
     }
 
     /// Spawns the process and returns the data sent by the ebuild process.

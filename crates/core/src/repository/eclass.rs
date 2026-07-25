@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use walkdir::WalkDir;
 
+use crate::types::FxHashSet;
+
 /// Regex to validate eclass names according to PMS 3.1.6.
 /// NOTE: look-ahead to exclude "default" is not supported by the regex crate.
 static ECLASS_RE: LazyLock<Regex> =
@@ -45,6 +47,16 @@ impl Eclasses {
             }
         }
         Ok(eclasses)
+    }
+
+    /// Returns a `HashSet` containing repository paths for all known eclasses.
+    ///
+    /// This is required for the ebuild phase handler for proper sandboxing.
+    pub fn repo_paths(&self) -> FxHashSet<&Path> {
+        self.0
+            .values()
+            .filter_map(|eclass| eclass.path.parent()?.parent())
+            .collect()
     }
 
     pub fn insert(&mut self, eclass: Eclass) {

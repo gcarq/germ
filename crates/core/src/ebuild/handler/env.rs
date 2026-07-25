@@ -1,3 +1,5 @@
+use anyhow::{Context, Result};
+
 use crate::ebuild::Ebuild;
 use crate::ebuild::handler::EbuildPhase;
 use crate::makenv::MakeEnv;
@@ -172,17 +174,27 @@ impl EbuildEnv {
     ///
     /// TODO: ensure `LC_CTYPE` and `LC_COLLATE` are equivalent to POSIX locale
     /// TODO: add more variables as needed
-    pub fn new(ebuild: &Ebuild, phase: &EbuildPhase, make_env: &MakeEnv) -> Self {
+    pub fn new(ebuild: &Ebuild, phase: &EbuildPhase, make_env: &MakeEnv) -> Result<Self> {
+        let repo_paths = shlex::try_join(
+            ebuild
+                .repo
+                .eclasses()?
+                .repo_paths()
+                .iter()
+                .filter_map(|p| p.as_os_str().to_str()),
+        )
+        .with_context(|| "unable to escape repo paths")?;
+
+        let bash_version = ebuild.eapi.supported_bash_version().to_owned();
+
         let mut env = make_env
             .iter()
             .filter_map(|(name, value)| {
                 Self::filter_var(name).then_some((name.clone(), value.to_string()))
             })
             .chain([
-                (
-                    "BASH_COMPAT".to_owned(),
-                    ebuild.eapi.supported_bash_version().to_owned(),
-                ),
+                ("PORTAGE_ECLASS_LOCATIONS".to_owned(), repo_paths),
+                ("BASH_COMPAT".to_owned(), bash_version),
                 // Force invalid paths for bashrc and bash_env to avoid sourcing user files.
                 ("BASHRC".to_owned(), "/dev/null".to_owned()),
                 ("BASH_ENV".to_owned(), "/dev/null".to_owned()),
@@ -209,7 +221,7 @@ impl EbuildEnv {
                 env.remove(name);
             }
         }
-        Self(env)
+        Ok(Self(env))
     }
 
     /// Returns true if the given variable `name` is allowed to be propagated into the ebuild env.
