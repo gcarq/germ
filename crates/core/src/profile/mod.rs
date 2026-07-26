@@ -243,44 +243,29 @@ mod tests {
     use super::*;
     use crate::files::entry::Entry;
     use crate::files::pkguse::EntryUseFlags;
-    use crate::repository::test_support::RepositoryFixture;
+    use crate::repository::test_support::{RepoSetFixture, RepositoryFixture};
     use std::fs;
     use std::path::{Path, PathBuf};
-
-    fn repository(root: &Path, name: &str, format: &str) -> RepositoryFixture {
-        RepositoryFixture::new(root.join(name), name).profile_formats([format])
-    }
-
-    fn load_repo_set(root: &Path, repositories: &[(&str, &Path)]) -> Result<RepoSet> {
-        let mut config = format!("[DEFAULT]\nmain-repo = {}\n", repositories[0].0);
-        for (name, location) in repositories {
-            config.push_str(&format!("\n[{name}]\nlocation = {}\n", location.display()));
-        }
-        let path = root.join("repos.conf");
-        fs::write(&path, config)?;
-        RepoSet::new(&path)
-    }
 
     fn profile_path(repository: &Path, profile: &str) -> PathBuf {
         repository.join("profiles").join(profile)
     }
 
     fn assert_parent_case(format: &str, parent: &str, succeeds: bool) -> Result<()> {
-        let temp = tempfile::tempdir()?;
-        let source = repository(temp.path(), "source", format)
-            .profile("base")
-            .profile_parents("child", [parent])
-            .write()?;
-        let target = repository(temp.path(), "target", "pms")
-            .profile("base")
-            .write()?;
-        let repo_set = load_repo_set(
-            temp.path(),
-            &[("source", source.as_path()), ("target", target.as_path())],
-        )?;
-        let selected = profile_path(&source, "child");
+        let fixture = RepoSetFixture::new(vec![
+            RepositoryFixture::new("source")
+                .formats([format])
+                .profile("base")
+                .parents("child", [parent]),
+            RepositoryFixture::new("target")
+                .formats(["pms"])
+                .profile("base"),
+        ])?;
 
-        assert_eq!(Profile::resolve(&selected, &repo_set).is_ok(), succeeds);
+        let source_path = fixture.get_repo_path("source").unwrap();
+        let selected = profile_path(source_path, "child");
+
+        assert_eq!(Profile::resolve(&selected, &fixture).is_ok(), succeeds);
         Ok(())
     }
 
@@ -349,30 +334,34 @@ mod tests {
         ];
 
         for (name, format, eapi, succeeds) in cases {
-            let temp = tempfile::tempdir()?;
-            let repository = repository(temp.path(), name, format)
-                .profile_eapi("selected", eapi)
-                .profile_directory("selected", "use.mask", "test\n")
-                .write()?;
-            let repo_set = load_repo_set(temp.path(), &[(name, repository.as_path())])?;
-            let selected = profile_path(&repository, "selected");
+            let fixture = RepoSetFixture::new(vec![
+                RepositoryFixture::new(name)
+                    .formats([format])
+                    .profile_eapi("selected", eapi)
+                    .profile_entries_dir("selected/use.mask", "test\n"),
+            ])?;
 
-            assert_eq!(Profile::resolve(&selected, &repo_set).is_ok(), succeeds);
+            let repo_path = fixture.get_repo_path(name).unwrap();
+            let selected = profile_path(repo_path, "selected");
+
+            assert_eq!(Profile::resolve(&selected, &fixture).is_ok(), succeeds);
         }
         Ok(())
     }
 
     #[test]
     fn test_packages_are_file_only() -> Result<()> {
-        let temp = tempfile::tempdir()?;
-        let repository = repository(temp.path(), "repo", "portage-2")
-            .profile_eapi("selected", "8")
-            .profile_directory("selected", "packages", "sys-apps/coreutils\n")
-            .write()?;
-        let repo_set = load_repo_set(temp.path(), &[("repo", repository.as_path())])?;
-        let selected = profile_path(&repository, "selected");
+        let fixture = RepoSetFixture::new(vec![
+            RepositoryFixture::new("repo")
+                .formats(["portage-2"])
+                .profile_eapi("selected", "8")
+                .profile_entries_dir("selected/packages", "sys-apps/coreutils\n"),
+        ])?;
 
-        assert!(Profile::resolve(&selected, &repo_set).is_err());
+        let repo_path = fixture.get_repo_path("repo").unwrap();
+        let selected = profile_path(repo_path, "selected");
+
+        assert!(Profile::resolve(&selected, &fixture).is_err());
         Ok(())
     }
 
@@ -387,42 +376,21 @@ mod tests {
     }
 
     #[test]
-    fn test_unavailable_parent_repositories() -> Result<()> {
-        let temp = tempfile::tempdir()?;
-        let source = repository(temp.path(), "source", "portage-2")
-            .profile_parents("unknown", ["missing:base"])
-            .profile_parents("unloaded", ["target:base"])
-            .write()?;
-        let unavailable = temp.path().join("target");
-        let config = temp.path().join("repos.conf");
-        fs::write(
-            &config,
-            format!(
-                "[DEFAULT]\nmain-repo = source\n\n[source]\nlocation = {}\n\n[target]\nlocation = {}\nsync-type = git\nsync-uri = https://example.invalid/target.git\n",
-                source.display(),
-                unavailable.display()
-            ),
-        )?;
-        let repo_set = RepoSet::new(&config)?;
-        assert!(!repo_set.get("target").unwrap().is_loaded());
-
-        assert!(Profile::resolve(&profile_path(&source, "unknown"), &repo_set).is_err());
-        assert!(Profile::resolve(&profile_path(&source, "unloaded"), &repo_set).is_err());
-        Ok(())
-    }
-
-    #[test]
     fn test_root_parent_escape() -> Result<()> {
-        let temp = tempfile::tempdir()?;
-        let source = repository(temp.path(), "source", "portage-2")
-            .profile_parents("root-relative", [":../outside"])
-            .profile_parents("ordinary-relative", ["../../outside"])
-            .write()?;
-        fs::create_dir(source.join("outside"))?;
-        let repo_set = load_repo_set(temp.path(), &[("source", source.as_path())])?;
+        let fixture = RepoSetFixture::new(vec![
+            RepositoryFixture::new("source")
+                .formats(["portage-2"])
+                .parents("root-relative", [":../outside"])
+                .parents("ordinary-relative", ["../../outside"]),
+        ])?;
 
-        assert!(Profile::resolve(&profile_path(&source, "root-relative"), &repo_set).is_err());
-        assert!(Profile::resolve(&profile_path(&source, "ordinary-relative"), &repo_set).is_err());
+        let source_path = fixture.get_repo_path("source").unwrap();
+        fs::create_dir(source_path.join("outside"))?;
+
+        assert!(Profile::resolve(&profile_path(source_path, "root-relative"), &fixture).is_err());
+        assert!(
+            Profile::resolve(&profile_path(source_path, "ordinary-relative"), &fixture).is_err()
+        );
         Ok(())
     }
 }

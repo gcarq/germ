@@ -23,6 +23,12 @@ use crate::ebuild::handler::prot::func::FuncCall;
 use anyhow::{Context, Result, anyhow, bail};
 use std::fmt;
 
+/// Parameters delimiter in function call requests from the ebuild process.
+const PARAM_DELIM: char = '\0';
+
+/// End-of-Text byte for messages from the ebuild process.
+pub(super) const MSG_EOT: u8 = 0x04;
+
 /// Holds a message from the ebuild process, that can be either a function to execute [`FuncCall`]
 /// or some `String` data.
 pub enum ChildMessage {
@@ -32,12 +38,10 @@ pub enum ChildMessage {
 
 impl ChildToParentMsg for ChildMessage {
     /// Creates a new [`ChildMessage`] from raw bytes received from the ebuild process
-    /// excluding the end of text delimiter '\4'.
+    /// excluding the end of text delimiter [`MSG_EOT`].
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        //trace!("Received message from child process: {bytes:?}");
-
         let msg = str::from_utf8(bytes).with_context(|| anyhow!("invalid UTF-8 in IPC message"))?;
-        let mut parts = msg.split('\0');
+        let mut parts = msg.split(PARAM_DELIM);
 
         let msg = match parts.next() {
             Some("FN") => {

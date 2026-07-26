@@ -327,7 +327,7 @@ mod tests {
         run(&mut command);
         git_in(&work, &["init"]);
         git_in(&work, &["checkout", "-B", "main"]);
-        RepositoryFixture::new(&work, repo_name)
+        RepositoryFixture::with_location(&work, repo_name)
             .categories(["app-misc"])
             .write()
             .unwrap();

@@ -12,7 +12,7 @@ use std::cmp::Ordering;
 /// If `version` is `None`, the package's PV is used.
 /// Returns `Err` if the EAPI does not support `ver_cut`.
 pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> Result<ParentMessage> {
-    // Use PV as fallback if
+    // Use PV as fallback if no version is provided
     let version = match version {
         Some(v) => v,
         None => &cpv.pv(),

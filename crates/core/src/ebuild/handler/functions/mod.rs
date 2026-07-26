@@ -47,6 +47,7 @@ mod tests {
     use crate::makenv::MakeEnv;
     use crate::package::cpv::CPV;
     use crate::package::version::PackageVersion;
+    use crate::repository::test_support::{RepoSetFixture, RepositoryFixture};
     use std::path::PathBuf;
 
     #[test]
@@ -71,6 +72,9 @@ mod tests {
             ),
         ];
 
+        let fixture = RepoSetFixture::new(vec![RepositoryFixture::new("repo")]).unwrap();
+        let repo = fixture.get("repo").unwrap();
+
         let cpv = CPV::new(
             "app-editors",
             "vim",
@@ -81,10 +85,11 @@ mod tests {
         let ebuild = Ebuild {
             eapi: Eapi::Eight,
             cpv: &cpv,
-            repo: &Repository::default(),
+            repo: repo,
             path: PathBuf::default(),
         };
-        let handler = EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default());
+        let handler =
+            EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default()).unwrap();
         for (func, response) in test_data {
             assert_eq!(handler.handle_request(func).unwrap(), response);
         }

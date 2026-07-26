@@ -81,7 +81,7 @@ impl RepoSet {
     }
 
     /// Reloads all repository data from disk.
-    fn reload_from_disk(&mut self) -> Result<()> {
+    pub(crate) fn reload_from_disk(&mut self) -> Result<()> {
         let configs = self
             .config
             .iter()
@@ -122,6 +122,11 @@ impl RepoSet {
 
         self.repos = repos;
         Ok(())
+    }
+
+    /// Consumes `self` and returns all repositories
+    pub fn drain(self) -> impl Iterator<Item = Repository> {
+        self.repos.into_values()
     }
 
     /// Finalizes the given `repo_name` after recursively finalizing its loaded masters.
@@ -224,53 +229,29 @@ impl DerefMut for RepoSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::test_support::RepositoryFixture;
+    use crate::repository::test_support::{RepoSetFixture, RepositoryFixture};
     use std::fs;
-    use std::path::{Path, PathBuf};
-
-    fn add_ebuild(repo: &Path, category: &str, package: &str, version: &str) -> Result<()> {
-        let package_dir = repo.join(category).join(package);
-        fs::create_dir_all(&package_dir)?;
-        fs::write(package_dir.join(format!("{package}-{version}.ebuild")), "")?;
-        Ok(())
-    }
-
-    fn write_repos_conf(root: &Path, content: &str) -> Result<PathBuf> {
-        let path = root.join("repos.conf");
-        fs::write(&path, content)?;
-        Ok(path)
-    }
 
     #[test]
     fn test_layout_masters_are_used() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
-        let master = RepositoryFixture::new(temp.path().join("master"), "master")
-            .categories(["app-misc"])
-            .eclass("master")
-            .write()?;
-        let overlay = RepositoryFixture::new(temp.path().join("overlay"), "overlay")
-            .masters(["master"])
-            .categories(["app-misc"])
-            .write()?;
-        add_ebuild(&overlay, "app-misc", "foo", "1")?;
-        let repos_conf = write_repos_conf(
-            temp.path(),
-            &format!(
-                "[master]\nlocation = {}\n\n[overlay]\nlocation = {}\n",
-                master.display(),
-                overlay.display()
-            ),
-        )?;
+        let fixture = RepoSetFixture::new(vec![
+            RepositoryFixture::new("master")
+                .categories(["app-misc"])
+                .eclass("master"),
+            RepositoryFixture::new("overlay")
+                .masters(["master"])
+                .categories(["app-misc"])
+                .ebuild("app-misc", "foo", "1"),
+        ])?;
 
-        let repo_set = RepoSet::new(&repos_conf)?;
-        let overlay = repo_set.get("overlay").unwrap();
+        let overlay = fixture.get("overlay").unwrap();
         let has_package = overlay.cpvs()?.any(|cpv| cpv.fqn() == "app-misc/foo-1");
 
         assert!(has_package);
         assert_eq!(overlay.data()?.categories.len(), 1);
         assert!(overlay.data()?.categories.contains("app-misc"));
         assert!(
-            repo_set
+            fixture
                 .get("overlay")
                 .unwrap()
                 .eclasses()?
@@ -281,26 +262,17 @@ mod tests {
 
     #[test]
     fn test_explicit_empty_masters_overrides_layout_masters() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
-        let master = RepositoryFixture::new(temp.path().join("master"), "master")
-            .categories(["app-misc"])
-            .eclass("master")
-            .write()?;
-        let overlay = RepositoryFixture::new(temp.path().join("overlay"), "overlay")
-            .masters(["master"])
-            .write()?;
-        add_ebuild(&overlay, "app-misc", "foo", "1")?;
-        let repos_conf = write_repos_conf(
-            temp.path(),
-            &format!(
-                "[master]\nlocation = {}\n\n[overlay]\nlocation = {}\nmasters =\n",
-                master.display(),
-                overlay.display()
-            ),
-        )?;
+        let fixture = RepoSetFixture::new(vec![
+            RepositoryFixture::new("master")
+                .categories(["app-misc"])
+                .eclass("master"),
+            RepositoryFixture::new("overlay")
+                .masters(["master"])
+                .masters_override()
+                .ebuild("app-misc", "foo", "1"),
+        ])?;
 
-        let repo_set = RepoSet::new(&repos_conf)?;
-        let has_package = repo_set
+        let has_package = fixture
             .get("overlay")
             .unwrap()
             .cpvs()?
@@ -308,7 +280,7 @@ mod tests {
 
         assert!(!has_package);
         assert!(
-            !repo_set
+            !fixture
                 .get("overlay")
                 .unwrap()
                 .eclasses()?
@@ -319,44 +291,34 @@ mod tests {
 
     #[test]
     fn test_reload_from_disk_preserves_inherited_data() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
-        let master = RepositoryFixture::new(temp.path().join("master"), "master")
-            .categories(["app-misc"])
-            .eclass("master")
-            .write()?;
-        let overlay = RepositoryFixture::new(temp.path().join("overlay"), "overlay")
-            .masters(["master"])
-            .write()?;
-        add_ebuild(&overlay, "app-misc", "foo", "1")?;
-        let repos_conf = write_repos_conf(
-            temp.path(),
-            &format!(
-                "[master]\nlocation = {}\n\n[overlay]\nlocation = {}\n",
-                master.display(),
-                overlay.display()
-            ),
-        )?;
+        let mut fixture = RepoSetFixture::new(vec![
+            RepositoryFixture::new("master")
+                .categories(["app-misc"])
+                .eclass("master"),
+            RepositoryFixture::new("overlay")
+                .masters(["master"])
+                .ebuild("app-misc", "foo", "1"),
+        ])?;
 
-        let mut repo_set = RepoSet::new(&repos_conf)?;
         assert!(
-            repo_set
+            fixture
                 .get("overlay")
                 .unwrap()
                 .cpvs()?
                 .any(|cpv| cpv.fqn() == "app-misc/foo-1")
         );
 
-        repo_set.reload_from_disk()?;
+        fixture.reload_from_disk()?;
 
         assert!(
-            repo_set
+            fixture
                 .get("overlay")
                 .unwrap()
                 .cpvs()?
                 .any(|cpv| cpv.fqn() == "app-misc/foo-1")
         );
         assert!(
-            repo_set
+            fixture
                 .get("overlay")
                 .unwrap()
                 .eclasses()?
@@ -367,41 +329,31 @@ mod tests {
 
     #[test]
     fn test_reload_refreshes_dependent_overlays() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
-        let master = RepositoryFixture::new(temp.path().join("master"), "master")
-            .categories(["app-misc"])
-            .write()?;
-        let overlay = RepositoryFixture::new(temp.path().join("overlay"), "overlay")
-            .masters(["master"])
-            .write()?;
-        add_ebuild(&overlay, "app-misc", "foo", "1")?;
-        add_ebuild(&overlay, "dev-libs", "bar", "1")?;
-        let repos_conf = write_repos_conf(
-            temp.path(),
-            &format!(
-                "[master]\nlocation = {}\n\n[overlay]\nlocation = {}\n",
-                master.display(),
-                overlay.display()
-            ),
-        )?;
+        let mut fixture = RepoSetFixture::new(vec![
+            RepositoryFixture::new("master").categories(["app-misc"]),
+            RepositoryFixture::new("overlay")
+                .masters(["master"])
+                .ebuild("app-misc", "foo", "1")
+                .ebuild("dev-libs", "bar", "1"),
+        ])?;
 
-        let mut repo_set = RepoSet::new(&repos_conf)?;
         assert!(
-            !repo_set
+            !fixture
                 .get("overlay")
                 .unwrap()
                 .cpvs()?
                 .any(|cpv| cpv.fqn() == "dev-libs/bar-1")
         );
 
+        let master_path = fixture.get_repo_path("master").unwrap();
         fs::write(
-            master.join("profiles").join("categories"),
+            master_path.join("profiles").join("categories"),
             "app-misc\ndev-libs\n",
         )?;
-        repo_set.reload_from_disk()?;
+        fixture.reload_from_disk()?;
 
         assert!(
-            repo_set
+            fixture
                 .get("overlay")
                 .unwrap()
                 .cpvs()?
@@ -411,51 +363,36 @@ mod tests {
     }
 
     #[test]
-    fn test_master_cycle_err() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
-        let first = RepositoryFixture::new(temp.path().join("first"), "first")
-            .masters(["second"])
-            .write()?;
-        let second = RepositoryFixture::new(temp.path().join("second"), "second")
-            .masters(["first"])
-            .write()?;
-        let repos_conf = write_repos_conf(
-            temp.path(),
-            &format!(
-                "[first]\nlocation = {}\n\n[second]\nlocation = {}\n",
-                first.display(),
-                second.display()
-            ),
-        )?;
-
-        assert!(RepoSet::new(&repos_conf).is_err());
-        Ok(())
+    fn test_master_cycle_err() {
+        let result = RepoSetFixture::new(vec![
+            RepositoryFixture::new("first").masters(["second"]),
+            RepositoryFixture::new("second").masters(["first"]),
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]
     fn test_missing_and_unloaded_masters_are_skipped() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
-        let loaded = RepositoryFixture::new(temp.path().join("loaded"), "loaded")
-            .categories(["app-misc"])
-            .eclass("loaded")
-            .write()?;
-        let child = RepositoryFixture::new(temp.path().join("child"), "child").write()?;
-        add_ebuild(&child, "app-misc", "foo", "1")?;
-        let unavailable = temp.path().join("unavailable");
-        let repos_conf = write_repos_conf(
-            temp.path(),
-            &format!(
-                "[loaded]\nlocation = {}\n\n[unavailable]\nlocation = {}\nsync-type = git\nsync-uri = https://example.invalid/unavailable.git\n\n[child]\nlocation = {}\nmasters = missing loaded unavailable\n",
-                loaded.display(),
-                unavailable.display(),
-                child.display()
-            ),
-        )?;
+        let mut fixture = RepoSetFixture::new(vec![
+            RepositoryFixture::new("loaded")
+                .categories(["app-misc"])
+                .eclass("loaded"),
+            RepositoryFixture::new("unavailable")
+                .repos_conf_property("sync-type", "git")
+                .repos_conf_property("sync-uri", "https://example.invalid/unavailable.git"),
+            RepositoryFixture::new("child")
+                .masters(["missing", "loaded", "unavailable"])
+                .ebuild("app-misc", "foo", "1"),
+        ])?;
 
-        let repo_set = RepoSet::new(&repos_conf)?;
-        let child = repo_set.get("child").unwrap();
+        // Remove the unavailable repo so it simulates a non-existent location
+        let unavailable_path = fixture.get_repo_path("unavailable").unwrap();
+        fs::remove_dir_all(unavailable_path)?;
+        fixture.reload_from_disk()?;
 
-        assert!(!repo_set.get("unavailable").unwrap().is_loaded());
+        let child = fixture.get("child").unwrap();
+
+        assert!(!fixture.get("unavailable").unwrap().is_loaded());
         assert!(child.eclasses()?.contains_key("loaded"));
         assert!(child.cpvs()?.any(|cpv| cpv.fqn() == "app-misc/foo-1"));
         Ok(())
@@ -463,33 +400,21 @@ mod tests {
 
     #[test]
     fn test_direct_master_order_is_preserved() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
-        let first = RepositoryFixture::new(temp.path().join("first"), "first")
-            .eclass("shared")
-            .write()?;
-        let second = RepositoryFixture::new(temp.path().join("second"), "second")
-            .eclass("shared")
-            .write()?;
-        let child = RepositoryFixture::new(temp.path().join("child"), "child").write()?;
-        let repos_conf = write_repos_conf(
-            temp.path(),
-            &format!(
-                "[first]\nlocation = {}\n\n[second]\nlocation = {}\n\n[child]\nlocation = {}\nmasters = first second\n",
-                first.display(),
-                second.display(),
-                child.display()
-            ),
-        )?;
+        let fixture = RepoSetFixture::new(vec![
+            RepositoryFixture::new("first").eclass("shared"),
+            RepositoryFixture::new("second").eclass("shared"),
+            RepositoryFixture::new("child").masters(["first", "second"]),
+        ])?;
 
-        let repo_set = RepoSet::new(&repos_conf)?;
-        let shared = repo_set
+        let second_path = fixture.get_repo_path("second").unwrap();
+        let shared = fixture
             .get("child")
             .unwrap()
             .eclasses()?
             .get("shared")
             .unwrap();
 
-        assert!(shared.path.starts_with(second));
+        assert!(shared.path.starts_with(second_path));
         Ok(())
     }
 }

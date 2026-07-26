@@ -1,3 +1,4 @@
+use crate::ebuild::handler::prot::MSG_EOT;
 use crate::types::FxHashMap;
 use anyhow::{Context, Result};
 use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
@@ -89,7 +90,7 @@ impl IpcHandler {
             .with_context(|| "failed to write to pipe")
     }
 
-    /// Reads raw bytes from the child process until `\4` is encountered.
+    /// Reads raw bytes from the child process until [`MSG_EOT`] is encountered.
     /// Returns [`ChildToParentMsg`] or `Ok(None)` if EOF is reached.
     pub fn recv<T>(&mut self) -> Result<Option<T>>
     where
@@ -98,7 +99,7 @@ impl IpcHandler {
         self.buffer.clear();
         let num_bytes = self
             .reader
-            .read_until(4, &mut self.buffer)
+            .read_until(MSG_EOT, &mut self.buffer)
             .with_context(|| "failed to read from child process")?;
         // We got EOF
         if num_bytes == 0 {

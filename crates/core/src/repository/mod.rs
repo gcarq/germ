@@ -179,8 +179,31 @@ impl Repository {
             .any(|desc| desc.keyword == arch && desc.profile_path == profile_path))
     }
 
+    /// Writes the resolved package index to disk.
+    ///
+    /// If `force` is `true`, the index will be written even if it hasn't been modified
+    /// since the last write.
+    ///
+    /// Returns `Err` if the index cannot be serialized or the file cannot be created.
+    pub fn write_index(&self, force: bool) -> Result<()> {
+        let data = self.data()?;
+        let meta_dir = PathBuf::from(DEFAULT_CACHE_PATH).join("metadata");
+        if !fs::exists(&meta_dir)? {
+            fs::create_dir_all(&meta_dir)
+                .with_context(|| anyhow!("unable to create directory: {}", meta_dir.display()))?;
+        }
+        debug!(
+            "Writing package index for '{self}' into {} ...",
+            meta_dir.display()
+        );
+        data.resolved_package_idx
+            .write_to_path(&meta_dir.join(&self.name), force)
+            .with_context(|| anyhow!("failed to write package index for '{self}'"))?;
+        Ok(())
+    }
+
     /// Synchronizes the repository using its [`SyncHandler`].
-    fn sync(&self) -> Result<()> {
+    pub fn sync(&self) -> Result<()> {
         if let Some(sync_handler) = &self.sync_handler {
             info!("Syncing repository '{}'", self.name);
             sync_handler.sync()?;
@@ -232,29 +255,6 @@ impl Repository {
             .generate_metadata(&ebuild_path, self)
             .with_context(|| anyhow!("unable to generate metadata for {cpv}"))?;
         Ok(Package::new(cpv.clone(), self.name.clone(), metadata))
-    }
-
-    /// Writes the resolved package index to disk.
-    ///
-    /// If `force` is `true`, the index will be written even if it hasn't been modified
-    /// since the last write.
-    ///
-    /// Returns `Err` if the index cannot be serialized or the file cannot be created.
-    fn write_index(&self, force: bool) -> Result<()> {
-        let data = self.data()?;
-        let meta_dir = PathBuf::from(DEFAULT_CACHE_PATH).join("metadata");
-        if !fs::exists(&meta_dir)? {
-            fs::create_dir_all(&meta_dir)
-                .with_context(|| anyhow!("unable to create directory: {}", meta_dir.display()))?;
-        }
-        debug!(
-            "Writing package index for '{self}' into {} ...",
-            meta_dir.display()
-        );
-        data.resolved_package_idx
-            .write_to_path(&meta_dir.join(&self.name), force)
-            .with_context(|| anyhow!("failed to write package index for '{self}'"))?;
-        Ok(())
     }
 
     /// Loads the resolved package index from disk.
@@ -362,7 +362,7 @@ impl Repository {
         Ok(())
     }
 
-    fn load_data_from_disk(&mut self) -> Result<()> {
+    pub(crate) fn load_data_from_disk(&mut self) -> Result<()> {
         let layout_path = &self.location.join("metadata").join("layout.conf");
 
         let layout = Layout::from_path(layout_path).with_context(|| {
@@ -493,11 +493,10 @@ mod tests {
 
     #[test]
     fn test_pms_rejects_mask_directory() -> Result<()> {
-        let temp = tempfile::tempdir()?;
-        let location = RepositoryFixture::new(temp.path().join("repo"), "repo")
-            .profile_formats(["pms"])
-            .profiles_eapi("0")
-            .repository_directory("package.mask", "app-misc/foo\n")
+        let location = RepositoryFixture::new("repo")
+            .formats(["pms"])
+            .eapi("0")
+            .profile_entries_dir("package.mask", "app-misc/foo\n")
             .write()?;
 
         assert!(load_repository(location, "repo").is_err());
@@ -507,11 +506,10 @@ mod tests {
     #[test]
     fn test_portage_mask_directories() -> Result<()> {
         for format in ["portage-1", "portage-2"] {
-            let temp = tempfile::tempdir()?;
-            let location = RepositoryFixture::new(temp.path().join("repo"), "repo")
-                .profile_formats([format])
-                .profiles_eapi("0")
-                .repository_directory("package.mask", "app-misc/foo\n")
+            let location = RepositoryFixture::new("repo")
+                .formats([format])
+                .eapi("0")
+                .profile_entries_dir("package.mask", "app-misc/foo\n")
                 .write()?;
 
             load_repository(location, "repo")?;
@@ -522,11 +520,10 @@ mod tests {
     #[test]
     fn test_eapi_mask_directories() -> Result<()> {
         for eapi in ["7", "8"] {
-            let temp = tempfile::tempdir()?;
-            let location = RepositoryFixture::new(temp.path().join("repo"), "repo")
-                .profile_formats(["pms"])
-                .profiles_eapi(eapi)
-                .repository_directory("package.mask", "app-misc/foo\n")
+            let location = RepositoryFixture::new("repo")
+                .formats(["pms"])
+                .eapi(eapi)
+                .profile_entries_dir("package.mask", "app-misc/foo\n")
                 .write()?;
 
             load_repository(location, "repo")?;
