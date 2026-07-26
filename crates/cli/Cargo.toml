@@ -1,5 +1,5 @@
 [package]
-name = "pkgrove"
+name = "germ"
 version.workspace = true
 edition.workspace = true
 
@@ -9,7 +9,7 @@ clap.workspace = true
 colored.workspace = true
 fern.workspace = true
 log.workspace = true
-pkgrove-core.workspace = true
+germ-core.workspace = true
 
 [lints]
 workspace = true

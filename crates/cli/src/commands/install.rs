@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
-use pkgrove_core::deps::atom::Atom;
-use pkgrove_core::repository::set::RepoSet;
+use germ_core::deps::atom::Atom;
+use germ_core::repository::set::RepoSet;
 
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.

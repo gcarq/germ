@@ -4,9 +4,9 @@ use crate::commands::Command;
 use anyhow::{Context, Result};
 use clap::Parser;
 use colored::{Color, Colorize};
+use germ_core::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
+use germ_core::repository::set::RepoSet;
 use log::error;
-use pkgrove_core::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
-use pkgrove_core::repository::set::RepoSet;
 use std::io;
 use std::path::Path;
 

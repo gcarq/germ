@@ -1,7 +1,7 @@
 use crate::repository::REPO_RE;
 use crate::types::FxHashMap;
 use crate::utils;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use ini::Ini;
 use log::{debug, warn};
 use std::fs;
@@ -161,7 +161,6 @@ mod tests {
     #[test]
     fn test_incomplete_sync_config() {
         let temp = tempfile::Builder::new()
-            .prefix("pkgrove-test-")
             .tempdir()
             .unwrap();
         let location = temp.path().join("missing");
@@ -181,7 +180,6 @@ mod tests {
     #[test]
     fn test_invalid_repo_name() {
         let temp = tempfile::Builder::new()
-            .prefix("pkgrove-test-")
             .tempdir()
             .unwrap();
         let location = temp.path().join("missing");
@@ -199,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_merge_repo_confs() -> Result<()> {
-        let temp = tempfile::Builder::new().prefix("pkgrove-test-").tempdir()?;
+        let temp = tempfile::Builder::new().tempdir()?;
         let repos_conf = temp.path().join("repos.conf");
         fs::create_dir(&repos_conf)?;
         fs::write(

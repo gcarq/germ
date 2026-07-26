@@ -1,6 +1,6 @@
-# pkgrove
+# germ
 
-pkgrove is an experimental package manager for Gentoo that aims to implement the [Package Manager Specification](https://wiki.gentoo.org/wiki/Project:Package_Manager_Specification).
+germ (**G**entoo **E**build **R**epository **M**anager) is an experimental package manager for Gentoo that aims to implement the [Package Manager Specification](https://wiki.gentoo.org/wiki/Project:Package_Manager_Specification).
 
 This is a recreational project and might not be continued or finished.
 
@@ -32,8 +32,8 @@ All of this is experimental and might only work for common configurations. There
 Clone this repository, build and run it with Cargo:
 
 ```sh
-git clone https://github.com/gcarq/pkgrove
-cd pkgrove/
+git clone https://github.com/gcarq/germ
+cd germ/
 cargo run --release -- info dev-lang/python
 ```
 
@@ -42,7 +42,7 @@ cargo run --release -- info dev-lang/python
 ```sh
 Package management tool for Gentoo-like systems
 
-Usage: pkgrove [OPTIONS] <COMMAND>
+Usage: germ [OPTIONS] <COMMAND>
 
 Commands:
   info      Provides information about the system, useful for troubleshooting

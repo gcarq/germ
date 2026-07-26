@@ -8,8 +8,8 @@ use crate::commands::info::info;
 use crate::commands::install::install;
 use anyhow::Result;
 use clap::Subcommand;
-use pkgrove_core::deps::atom::Atom;
-use pkgrove_core::repository::set::RepoSet;
+use germ_core::deps::atom::Atom;
+use germ_core::repository::set::RepoSet;
 
 #[derive(Subcommand)]
 pub enum Command {

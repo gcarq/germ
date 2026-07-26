@@ -1,5 +1,5 @@
 [package]
-name = "pkgrove-core"
+name = "germ-core"
 version.workspace = true
 edition.workspace = true
 

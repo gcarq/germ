@@ -307,9 +307,9 @@ mod tests {
             path,
             &[
                 "-c",
-                "user.name=Pkgrove Test",
+                "user.name=Germ Test",
                 "-c",
-                "user.email=pkgrove@example.invalid",
+                "user.email=germ@example.invalid",
                 "commit",
                 "-m",
                 message,
@@ -350,7 +350,6 @@ mod tests {
     #[test]
     fn test_parses_default_depth_values() {
         let temp = tempfile::Builder::new()
-            .prefix("pkgrove-test-")
             .tempdir()
             .unwrap();
         let properties = properties(&temp.path().join("repo"), "file:///tmp/origin.git");
@@ -363,7 +362,6 @@ mod tests {
     #[test]
     fn test_clone_from_local_origin_creates_destination() {
         let temp = tempfile::Builder::new()
-            .prefix("pkgrove-test-")
             .tempdir()
             .unwrap();
         let (_bare, _work, origin_url) = create_origin(temp.path(), "gentoo", "initial");
@@ -382,7 +380,6 @@ mod tests {
     #[test]
     fn test_clone_depth_zero_uses_full_history() {
         let temp = tempfile::Builder::new()
-            .prefix("pkgrove-test-")
             .tempdir()
             .unwrap();
         let (_bare, _work, origin_url) = create_origin(temp.path(), "gentoo", "initial");
@@ -400,7 +397,6 @@ mod tests {
     #[test]
     fn test_update_fetches_and_hard_resets_to_origin() {
         let temp = tempfile::Builder::new()
-            .prefix("pkgrove-test-")
             .tempdir()
             .unwrap();
         let (_bare, work, origin_url) = create_origin(temp.path(), "gentoo", "initial");
@@ -432,7 +428,6 @@ mod tests {
     #[test]
     fn test_update_replaces_existing_origin_url() {
         let temp = tempfile::Builder::new()
-            .prefix("pkgrove-test-")
             .tempdir()
             .unwrap();
         let origin_one_root = temp.path().join("one");

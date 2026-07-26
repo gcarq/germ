@@ -4,9 +4,10 @@ use std::io;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
+use anyhow::{anyhow, Result};
+
 use crate::repository::set::RepoSet;
 use crate::types::FxHashSet;
-use anyhow::Result;
 
 enum FixtureEntry {
     File { path: PathBuf, contents: String },
@@ -257,9 +258,8 @@ impl RepoSetFixture {
     /// is loaded.
     pub fn new(repositories: Vec<RepositoryFixture>) -> Result<Self> {
         let temp = tempfile::Builder::new()
-            .prefix("pkgrove-test-")
             .tempdir()
-            .map_err(|e| io::Error::new(e.kind(), format!("failed to create temp dir: {e}")))?;
+            .map_err(|e| anyhow!("failed to create temp dir: {e}"))?;
 
         // Collect paths and repos.conf properties before consuming the fixtures
         let mut paths = HashMap::new();
@@ -281,12 +281,8 @@ impl RepoSetFixture {
         for mut repo in repositories {
             let repo_name = repo.repo_name.clone();
             repo.location = paths[&repo_name].clone();
-            repo.write().map_err(|e| {
-                io::Error::new(
-                    e.kind(),
-                    format!("failed to write repository '{repo_name}': {e}"),
-                )
-            })?;
+            repo.write()
+                .map_err(|e| anyhow!("failed to write repository '{repo_name}': {e}"))?;
         }
 
         // Build and write repos.conf
@@ -302,8 +298,7 @@ impl RepoSetFixture {
         }
 
         let repos_conf = temp.path().join("repos.conf");
-        fs::write(&repos_conf, conf)
-            .map_err(|e| io::Error::new(e.kind(), format!("failed to write repos.conf: {e}")))?;
+        fs::write(&repos_conf, conf).map_err(|e| anyhow!("failed to write repos.conf: {e}"))?;
 
         let repo_set = RepoSet::new(&repos_conf)?;
 
