@@ -3,5 +3,6 @@
 .idea/
 
 scripts/*
+!scripts/test.sh
 .scratch
 .cache/

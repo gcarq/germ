@@ -6,14 +6,19 @@ This is a recreational project and might not be continued or finished.
 
 At this point it uses the existing portage config (`/etc/portage` and `/usr/share/portage/config`) and doesn't rely on additional configuration.
 
+## Known issues
+
+- broken ebuild.sh path when using `germ-core` as library
+- hardcoded ebuild metadata path `.cache`
+
 ## Capabilities
 
 ### Implemented
 
 - repository and profile handling
 - repository synchronization (git only)
-- ebuild metadata generation and dependency expression parsing
-- ebuild metadata caching and indexing (stored in `.cache`)
+- ebuild metadata generation and caching
+- dependency expression parsing
 - package matching based on atoms
 - reading installed package database (VDB)
 
@@ -26,6 +31,7 @@ All of this is experimental and might only work for common configurations. There
 - download and build package sources
 - binary package handling
 - package installation and removal
+- PMS 9 support
 
 ## Quick Start
 

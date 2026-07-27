@@ -274,8 +274,8 @@ mod tests {
         index.serialize(&mut cursor).unwrap();
 
         cursor.seek(SeekFrom::Start(0)).unwrap();
-        let index = ResolvedPackageIndex::deserialize(&mut cursor).unwrap();
-        assert!(index.contains_key(cpv.fqn()));
+        let deserialized = ResolvedPackageIndex::deserialize(&mut cursor).unwrap();
+        assert!(deserialized.contains_key(cpv.fqn()));
     }
 
     #[test]

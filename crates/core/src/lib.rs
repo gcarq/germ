@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::similar_names))]
+
 pub mod conf;
 pub mod consts;
 pub mod deps;

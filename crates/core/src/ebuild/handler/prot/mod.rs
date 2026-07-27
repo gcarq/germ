@@ -114,25 +114,25 @@ mod tests {
         // (raw data, expected message)
         let test_data = [
             (
-                "FN\0ver_rs\01-\0' '",
+                "FN\x00ver_rs\x001-\x00' '",
                 ChildMessage::Call(FuncCall {
                     func: func::FuncType::VerRs,
                     args: vec!["1-".to_owned(), "' '".to_owned()],
                 }),
             ),
             (
-                "FN\0ver_test\06.0\0-gt\05.0",
+                "FN\x00ver_test\x006.0\x00-gt\x005.0",
                 ChildMessage::Call(FuncCall {
                     func: func::FuncType::VerTest,
                     args: vec!["6.0".to_owned(), "-gt".to_owned(), "5.0".to_owned()],
                 }),
             ),
             (
-                "DATA\0LICENSE=PSF-2",
+                "DATA\x00LICENSE=PSF-2",
                 ChildMessage::Data("LICENSE=PSF-2".to_owned()),
             ),
             (
-                "DATA\0IUSE=static-libs tcpd usbip",
+                "DATA\x00IUSE=static-libs tcpd usbip",
                 ChildMessage::Data("IUSE=static-libs tcpd usbip".to_owned()),
             ),
         ];
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_child_message_from_bytes_err() {
-        let test_data = ["", "\0", "FN\0", "FOO\0bar\0baz"];
+        let test_data = ["", "\x00", "FN\x00", "FOO\x00bar\x00baz"];
 
         for data in test_data {
             let msg = ChildMessage::from_bytes(data.as_bytes());

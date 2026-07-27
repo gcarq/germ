@@ -85,7 +85,7 @@ mod tests {
         let ebuild = Ebuild {
             eapi: Eapi::Eight,
             cpv: &cpv,
-            repo: repo,
+            repo,
             path: PathBuf::default(),
         };
         let handler =

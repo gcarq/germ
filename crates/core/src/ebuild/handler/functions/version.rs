@@ -311,6 +311,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn test_ver_test_ok() {
         // (version1, op, version2, expected output)
         let test_cases = [

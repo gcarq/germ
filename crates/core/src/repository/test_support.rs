@@ -4,7 +4,8 @@ use std::io;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::bail;
+use anyhow::{Result, anyhow};
 
 use crate::repository::set::RepoSet;
 use crate::types::FxHashSet;
@@ -30,6 +31,11 @@ pub struct RepositoryFixture {
 }
 
 impl RepositoryFixture {
+    /// Creates a new [`RepositoryFixture`] with a temporary location and the given `repo_name`.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if the temporary directory cannot be created.
     pub fn new(repo_name: &str) -> Self {
         let temp_dir = tempfile::Builder::new()
             .tempdir()
@@ -225,7 +231,7 @@ impl RepositoryFixture {
 /// generates a `repos.conf`, and loads a [`RepoSet`].
 ///
 /// The returned struct implements [`Deref`] to [`RepoSet`] and keeps the temporary
-/// directory alive. Individual repository locations can be accessed via [`paths()`](Self::paths).
+/// directory alive.
 ///
 /// # Example
 ///
@@ -242,7 +248,7 @@ impl RepositoryFixture {
 /// let overlay = fixture.get("overlay").unwrap();
 ///
 /// // Access individual repo paths
-/// let master_path = fixture.paths().get("master").unwrap();
+/// let master_path = fixture.get_repo_path("master").unwrap();
 /// ```
 pub struct RepoSetFixture {
     repo_set: RepoSet,
@@ -267,13 +273,12 @@ impl RepoSetFixture {
         for repo in &repositories {
             let location = temp.path().join(&repo.repo_name);
             paths.insert(repo.repo_name.clone(), location);
-            if !repo.repos_conf_properties.is_empty() {
-                assert_eq!(
-                    conf_props.insert(repo.repo_name.clone(), repo.repos_conf_properties.clone()),
-                    None,
-                    "tried to insert duplicate repository {}",
-                    repo.repo_name
-                );
+            if !repo.repos_conf_properties.is_empty()
+                && conf_props
+                    .insert(repo.repo_name.clone(), repo.repos_conf_properties.clone())
+                    .is_some()
+            {
+                bail!("tried to insert duplicate repository {}", repo.repo_name);
             }
         }
 
