@@ -1,7 +1,7 @@
 use crate::repository::REPO_RE;
 use crate::types::FxHashMap;
 use crate::utils;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use ini::Ini;
 use log::{debug, warn};
 use std::fs;
@@ -160,9 +160,7 @@ mod tests {
 
     #[test]
     fn test_incomplete_sync_config() {
-        let temp = tempfile::Builder::new()
-            .tempdir()
-            .unwrap();
+        let temp = tempfile::Builder::new().tempdir().unwrap();
         let location = temp.path().join("missing");
         let path = temp.path().join("repos.conf");
         fs::write(
@@ -179,9 +177,7 @@ mod tests {
 
     #[test]
     fn test_invalid_repo_name() {
-        let temp = tempfile::Builder::new()
-            .tempdir()
-            .unwrap();
+        let temp = tempfile::Builder::new().tempdir().unwrap();
         let location = temp.path().join("missing");
         let path = temp.path().join("repos.conf");
         fs::write(

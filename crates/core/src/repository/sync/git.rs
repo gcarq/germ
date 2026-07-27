@@ -349,9 +349,7 @@ mod tests {
 
     #[test]
     fn test_parses_default_depth_values() {
-        let temp = tempfile::Builder::new()
-            .tempdir()
-            .unwrap();
+        let temp = tempfile::Builder::new().tempdir().unwrap();
         let properties = properties(&temp.path().join("repo"), "file:///tmp/origin.git");
 
         let handler = GitSyncHandler::new(&properties).unwrap();
@@ -361,9 +359,7 @@ mod tests {
 
     #[test]
     fn test_clone_from_local_origin_creates_destination() {
-        let temp = tempfile::Builder::new()
-            .tempdir()
-            .unwrap();
+        let temp = tempfile::Builder::new().tempdir().unwrap();
         let (_bare, _work, origin_url) = create_origin(temp.path(), "gentoo", "initial");
         let destination = temp.path().join("gentoo");
         let mut properties = properties(&destination, &origin_url);
@@ -379,9 +375,7 @@ mod tests {
 
     #[test]
     fn test_clone_depth_zero_uses_full_history() {
-        let temp = tempfile::Builder::new()
-            .tempdir()
-            .unwrap();
+        let temp = tempfile::Builder::new().tempdir().unwrap();
         let (_bare, _work, origin_url) = create_origin(temp.path(), "gentoo", "initial");
         let destination = temp.path().join("gentoo");
         let mut properties = properties(&destination, &origin_url);
@@ -396,9 +390,7 @@ mod tests {
 
     #[test]
     fn test_update_fetches_and_hard_resets_to_origin() {
-        let temp = tempfile::Builder::new()
-            .tempdir()
-            .unwrap();
+        let temp = tempfile::Builder::new().tempdir().unwrap();
         let (_bare, work, origin_url) = create_origin(temp.path(), "gentoo", "initial");
         let destination = temp.path().join("gentoo");
         let mut properties = properties(&destination, &origin_url);
@@ -427,9 +419,7 @@ mod tests {
 
     #[test]
     fn test_update_replaces_existing_origin_url() {
-        let temp = tempfile::Builder::new()
-            .tempdir()
-            .unwrap();
+        let temp = tempfile::Builder::new().tempdir().unwrap();
         let origin_one_root = temp.path().join("one");
         let origin_two_root = temp.path().join("two");
         fs::create_dir_all(&origin_one_root).unwrap();
