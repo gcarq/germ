@@ -86,7 +86,7 @@ mod tests {
             eapi: Eapi::Eight,
             cpv: &cpv,
             repo,
-            path: PathBuf::default(),
+            path: &PathBuf::default(),
         };
         let handler =
             EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default()).unwrap();

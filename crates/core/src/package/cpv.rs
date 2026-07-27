@@ -75,7 +75,7 @@ impl CPV {
         ebuild_path: &Path,
         repo: &Repository,
     ) -> Result<PackageMetadata> {
-        let ebuild = Ebuild::new(ebuild_path.to_path_buf(), self, repo)
+        let ebuild = Ebuild::new(ebuild_path, self, repo)
             .with_context(|| anyhow!("unable to create ebuild from '{}'", ebuild_path.display()))?;
         let mut handler =
             EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default())
@@ -90,12 +90,12 @@ impl CPV {
             .with_context(|| anyhow!("unable to create metadata from ebuild output"))
     }
 
-    /// Returns the category of the package, e.g.: `dev-lang`.
+    /// Returns the package name, e.g.: `python`.
     pub fn package(&self) -> &str {
         &self.package
     }
 
-    /// Returns the package name, e.g.: `python`.
+    /// Returns the category of the package, e.g.: `dev-lang`.
     pub fn category(&self) -> &str {
         &self.category
     }

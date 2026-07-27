@@ -9,7 +9,7 @@ use regex::Regex;
 use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
@@ -23,7 +23,7 @@ static PMS_EAPI_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// how to build it. See PMS 6 and 7.
 #[cfg_attr(test, derive(Debug))]
 pub struct Ebuild<'a> {
-    pub path: PathBuf,
+    pub path: &'a Path,
     pub eapi: Eapi,
     pub cpv: &'a CPV,
     pub repo: &'a Repository,
@@ -33,10 +33,10 @@ impl<'a> Ebuild<'a> {
     /// Creates an [`Ebuild`] from the given `path` and [`CPV`] it relates to.
     ///
     /// Returns an `Err` if the EAPI is not found or unsupported for ebuilds.
-    pub fn new(path: PathBuf, cpv: &'a CPV, repo: &'a Repository) -> Result<Self> {
+    pub fn new(path: &'a Path, cpv: &'a CPV, repo: &'a Repository) -> Result<Self> {
         trace!("Loading ebuild '{}' for '{cpv}' ...", path.display());
         let file =
-            File::open(&path).with_context(|| anyhow!("unable to open {}", path.display()))?;
+            File::open(path).with_context(|| anyhow!("unable to open {}", path.display()))?;
         let reader = BufReader::with_capacity(256, file);
         for line in reader.lines() {
             let line = line?;
@@ -73,18 +73,21 @@ impl fmt::Display for Ebuild<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
     fn test_ebuild_eq() {
+        let path = PathBuf::from("/dev/null");
         let ebuild1 = Ebuild {
-            path: PathBuf::from("/dev/null"),
+            path: &path,
             eapi: Eapi::Eight,
             cpv: &CPV::default(),
             repo: &Repository::default(),
         };
         let ebuild2 = Ebuild {
-            path: PathBuf::from("/dev/null"),
+            path: &path,
             eapi: Eapi::Eight,
             cpv: &CPV::default(),
             repo: &Repository::default(),
