@@ -1,15 +1,24 @@
 # germ
 
-germ (**G**entoo **E**build **R**epository **M**anager) is an experimental package manager for Gentoo that aims to implement the [Package Manager Specification](https://wiki.gentoo.org/wiki/Project:Package_Manager_Specification).
+germ (Gentoo Ebuild Repository Manager) is an experimental package manager for Gentoo that aims to implement the [Package Manager Specification](https://wiki.gentoo.org/wiki/Project:Package_Manager_Specification).
 
 This is a recreational project and might not be continued or finished.
 
 At this point it uses the existing portage config (`/etc/portage` and `/usr/share/portage/config`) and doesn't rely on additional configuration.
 
+## Who is this for?
+
+This project takes care of package indexing for [pkgindex](https://pkgindex.patchyard.org).
+Other than that, it is mainly for curious Gentoo users and Rust developers who enjoy experimenting with package mangager internals. If you need a reliable package manager, use Portage.
+
 ## Known issues
 
-- broken ebuild.sh path when using `germ-core` as library
-- hardcoded ebuild metadata path `.cache`
+- `germ-core` currently expects to find `./bin/ebuild.sh` relative to the working directory.
+- `germ-core` currently uses `anyhow` for error handling, that means there is no way to distinguish between errors for users.
+- Metadata is currently written to the hardcoded `.cache/metadata` path.
+- A valid Portage configuration and system paths are assumed and are currently hardcoded.
+- Only Git-based repository synchronization is supported.
+- The `install` command is just a placeholder and doesn't install anything.
 
 ## Capabilities
 
@@ -52,7 +61,7 @@ Usage: germ [OPTIONS] <COMMAND>
 
 Commands:
   info      Provides information about the system, useful for troubleshooting
-  install   Install a package (this is just a placeholder!)
+  install   Install a package
   gencache  Generate metadata cache for ebuild repositories
   sync      Sync repositories
   help      Print this message or the help of the given subcommand(s)
@@ -71,9 +80,9 @@ cargo test --workspace
 
 ## Contributing
 
-This repository is open to contributions. LLM assisted PRs will be considered, as long as the code matches the expected code quality and is reasonable in scope.
+Contributions and bug reports are welcome. Since the project is still small and unfinished, keep changes focused and explain the problem they solve. LLM assisted PRs might be considered, as long as the code matches the expected code quality.
 
-The code must pass the test suite, should follow the [Rust Style Guide](https://doc.rust-lang.org/stable/style-guide/) and shouldn't produce any `clippy` warnings.
+The code must pass the test suite `./scripts/test.sh` and should follow the [Rust Style Guide](https://doc.rust-lang.org/stable/style-guide/).
 
 ## Dependencies
 
