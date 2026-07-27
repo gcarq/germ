@@ -165,7 +165,7 @@ mod tests {
             PackageVersion::new("1.0.0", None, Some("-1")),
         ];
         for version in test_cases {
-            assert!(version.is_err(), "Expected error for: {}", version.unwrap());
+            assert!(version.is_err(), "Expected error, got: {version:?}");
         }
     }
 

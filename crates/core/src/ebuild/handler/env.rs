@@ -203,7 +203,7 @@ impl EbuildEnv {
                 // Ebuild variables, see PMS 11.1
                 ("P".to_owned(), ebuild.cpv.p()),
                 ("PF".to_owned(), ebuild.cpv.pf()),
-                ("PN".to_owned(), ebuild.cpv.pn()),
+                ("PN".to_owned(), ebuild.cpv.pn().to_owned()),
                 ("CATEGORY".to_owned(), ebuild.cpv.category().to_owned()),
                 ("PV".to_owned(), ebuild.cpv.pv()),
                 ("PR".to_owned(), ebuild.cpv.pr()),

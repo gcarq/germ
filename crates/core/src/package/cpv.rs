@@ -16,9 +16,6 @@ use std::path::Path;
 ///
 /// NOTE: `fqn` holds the fully qualified name and is also used in the [`Display`] implementation
 /// for performance reasons, so `category`, `package` and `version` must NOT be changed.
-///
-/// TODO: consider adding a `new_unchecked` constructor, that also passes the `fqn` that doesn't
-///  validate for performance reasons
 #[derive(Archive, Serialize, Deserialize, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct CPV {
@@ -128,8 +125,8 @@ impl CPV {
     }
 
     /// Returns the package name, for example `vim`.
-    pub fn pn(&self) -> String {
-        self.package.clone().into()
+    pub fn pn(&self) -> &str {
+        &self.package
     }
 
     /// Returns the package version, with no revision. For example `7.0.174`.
