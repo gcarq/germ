@@ -36,6 +36,10 @@ __ipc_call() {
         __ipc_reply=
         return 1
         ;;
+    DIE)
+        __ipc_reply=
+        exit 1
+        ;;
     *)
         printf 'protocol error: %s\n' "${__ipc_reply}" >&2
         exit 2

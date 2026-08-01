@@ -1,4 +1,5 @@
 mod env;
+mod exec;
 mod functions;
 mod ipc;
 mod prot;
@@ -11,9 +12,10 @@ use crate::ebuild::handler::functions::{debug_print, die, resolve_eclass};
 use crate::ebuild::handler::prot::func::{FuncCall, FuncType};
 use crate::ebuild::handler::prot::{ChildMessage, ParentMessage};
 use crate::makenv::MakeEnv;
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
+use exec::EbuildExecution;
 use ipc::IpcHandler;
-use log::{debug, trace};
+use log::debug;
 use std::fmt;
 use std::ops::Deref;
 
@@ -61,39 +63,28 @@ impl<'a> EbuildPhaseHandler<'a> {
             self.phase, self.ebuild.cpv
         );
 
-        let mut received_data = Vec::new();
-
         let args = Self::build_args();
-        let (mut ipc, mut process) = IpcHandler::spawn(SANDBOX_BINARY_PATH, &args, &self.env)?;
-        loop {
-            let Some(request) = ipc.recv::<ChildMessage>()? else {
-                // Got EOF, at this point the ebuild process closed its IPC channel.
-                // Wait for the process to exit and check its status.
-                let status = process.wait()?;
-                if status.success() {
-                    trace!("ebuild process (PID: {}) exited successfully", process.id());
-                    break;
-                }
-                bail!("ebuild process exited with non-zero status: {status}");
-            };
+        let (ipc, child) = IpcHandler::spawn(SANDBOX_BINARY_PATH, &args, &self.env)?;
+        let mut execution = EbuildExecution::new(ipc, child);
+        execution.run(|channel| self.handle_messages(channel))
+    }
 
+    fn handle_messages(&self, ipc: &mut IpcHandler) -> Result<Vec<String>> {
+        let mut data = Vec::new();
+        while let Some(request) = ipc.recv::<ChildMessage>()? {
             match request {
                 ChildMessage::Call(func_call) => {
-                    let response = match self.handle_request(func_call) {
-                        Ok(response) => response,
-                        Err(err) => {
-                            process
-                                .kill()
-                                .with_context(|| "unable to kill ebuild process")?;
-                            return Err(err);
-                        }
-                    };
+                    let response = self.handle_request(func_call)?;
+                    let died = matches!(response, ParentMessage::Die);
                     ipc.send(response)?;
+                    if died {
+                        return Ok(Vec::new());
+                    }
                 }
-                ChildMessage::Data(data) => received_data.push(data),
+                ChildMessage::Data(value) => data.push(value),
             }
         }
-        Ok(received_data)
+        Ok(data)
     }
 
     /// Executes a function for the given [`FuncCall`].
@@ -109,8 +100,8 @@ impl<'a> EbuildPhaseHandler<'a> {
             },
             FuncType::DebugPrint => Ok(debug_print(args)),
             FuncType::Die => match args {
-                [first, args @ ..] if first == "-n" => die(args, false),
-                args => die(args, true),
+                [first, args @ ..] if first == "-n" => Ok(die(args, false)),
+                args => Ok(die(args, true)),
             },
             FuncType::Has => match args {
                 [word, args @ ..] => match args.contains(word) {
@@ -178,5 +169,51 @@ impl<'a> EbuildPhaseHandler<'a> {
         ];
         args.extend_from_slice(&["-c", "./bin/ebuild.sh"]);
         args.into_iter().map(ToOwned::to_owned).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ebuild::handler::ipc::ChildToParentMsg;
+    use crate::types::FxHashMap;
+    use anyhow::anyhow;
+
+    struct Ready;
+
+    impl ChildToParentMsg for Ready {
+        fn from_bytes(_bytes: &[u8]) -> Result<Self> {
+            Ok(Self)
+        }
+    }
+
+    #[test]
+    fn test_abort_ipc_ordering() {
+        let args = vec![
+            "-c".into(),
+            r#"
+                trap 'if IFS= read -r <&${CHILD_READ_FD}; then exit 2; else exit 0; fi' TERM
+                printf 'ready\4' >&${CHILD_WRITE_FD} || exit 3
+                while :; do :; done
+            "#
+            .into(),
+        ];
+        let (ipc, child) =
+            IpcHandler::spawn(BASH_BINARY_PATH, &args, &FxHashMap::default()).unwrap();
+        let mut execution = EbuildExecution::new(ipc, child);
+
+        let result: Result<()> = execution.run(|channel| {
+            channel
+                .recv::<Ready>()?
+                .ok_or_else(|| anyhow!("unexpected EOF"))?;
+            Err(anyhow!("protocol failure"))
+        });
+
+        assert!(
+            result.is_err()
+                && execution
+                    .exit_status()
+                    .is_some_and(|status| status.success())
+        );
     }
 }

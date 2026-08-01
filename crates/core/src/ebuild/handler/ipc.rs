@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::mem::ManuallyDrop;
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::process::CommandExt;
 use std::process;
 use std::process::Command;
 
@@ -58,6 +59,7 @@ impl IpcHandler {
             .env("CHILD_READ_FD", child_reader.as_raw_fd().to_string())
             .env("CHILD_WRITE_FD", child_writer.as_raw_fd().to_string())
             .envs(env)
+            .process_group(0)
             .spawn()
             .context("spawn failed")?;
 
@@ -211,5 +213,26 @@ mod tests {
         assert_eq!(recv(&mut ipc), "42", "expected value from env variable");
 
         assert!(process.wait().unwrap().success());
+    }
+
+    #[test]
+    fn test_fatal_die_exits_shell_after_ipc_reply() {
+        let (mut ipc, mut process) = spawn_process(
+            r#"
+                cd "${PROJECT_ROOT}" || exit 2
+                source "./bin/functions.sh" || exit 2
+                die fatal
+                exit 0
+            "#,
+            [(
+                "PROJECT_ROOT",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../.."),
+            )],
+        );
+
+        recv(&mut ipc);
+        ipc.send(ParentTestMsg("DIE".into())).unwrap();
+
+        assert_eq!(process.wait().unwrap().code(), Some(1));
     }
 }

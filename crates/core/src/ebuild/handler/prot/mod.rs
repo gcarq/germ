@@ -68,14 +68,15 @@ impl fmt::Display for ChildMessage {
 }
 
 /// Represents a response to be sent back to the ebuild process after handling a `ChildMessage`.
-/// The response can be either `Ok` or `Err`, and may optionally include a message.
-/// `Ok` will be interpreted as a successful execution (return 0),
-/// while `Err` indicates a failure (return 1).
+/// The response can be `Ok`, `Err`, or `Die`. `Ok` and `Err` may optionally include a message.
+/// `Ok` will be interpreted as a successful execution (return 0), `Err` as a function failure
+/// (return 1), and `Die` terminates the ebuild process with status 1.
 #[derive(PartialEq)]
 #[cfg_attr(test, derive(Debug))]
 pub enum ParentMessage {
     Ok(Option<String>),
     Err(Option<String>),
+    Die,
 }
 
 impl ParentMessage {
@@ -101,6 +102,7 @@ impl fmt::Display for ParentMessage {
             Self::Ok(None) => write!(f, "OK"),
             Self::Err(Some(value)) => write!(f, "ERR {value}"),
             Self::Err(None) => write!(f, "ERR"),
+            Self::Die => write!(f, "DIE"),
         }
     }
 }
@@ -167,6 +169,7 @@ mod tests {
                 ParentMessage::Err(Some("fatal error".to_owned())),
                 "ERR fatal error".as_bytes(),
             ),
+            (ParentMessage::Die, "DIE".as_bytes()),
         ];
 
         for (msg, expected_bytes) in test_data {

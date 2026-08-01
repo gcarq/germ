@@ -2,7 +2,7 @@ pub mod version;
 
 use crate::ebuild::handler::prot::ParentMessage;
 use crate::repository::Repository;
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use log::{debug, error};
 
 /// Logs the given `args` using `debug!()`.
@@ -11,15 +11,14 @@ pub fn debug_print(args: &[String]) -> ParentMessage {
     ParentMessage::Ok(None)
 }
 
-/// Logs the given `message` to `error!()`.
-///
-/// Returns `Err` if `fatal` is true.
-pub fn die(args: &[String], fatal: bool) -> Result<ParentMessage> {
-    if fatal {
-        bail!("die: {}", args.join(" "));
-    }
+/// Logs the given `args` using `error!()`.
+pub fn die(args: &[String], fatal: bool) -> ParentMessage {
     error!("die: {}", args.join(" "));
-    Ok(ParentMessage::Err(None))
+    if fatal {
+        ParentMessage::Die
+    } else {
+        ParentMessage::Err(None)
+    }
 }
 
 /// Resolves the given eclass `name` from `repository` and returns the path as string.
@@ -57,6 +56,10 @@ mod tests {
             (
                 FuncCall::from_raw("die", &["-n", "This is a non-fatal error"]).unwrap(),
                 ParentMessage::Err(None),
+            ),
+            (
+                FuncCall::from_raw("die", &["This is a fatal error"]).unwrap(),
+                ParentMessage::Die,
             ),
             (
                 FuncCall::from_raw("has", &["foo", "foo", "bar", "baz"]).unwrap(),
