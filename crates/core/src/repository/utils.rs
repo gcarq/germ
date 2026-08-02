@@ -78,8 +78,18 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(cpv.fqn(), "dev-libs/pkg-1.0");
+        assert_eq!(cpv.fqn(), "dev-libs/pkg-1.0-r0");
         assert_eq!(cpv.pf(), "pkg-1.0-r0");
+    }
+
+    #[test]
+    fn test_cpv_from_revision_source() {
+        let cpv = cpv_from_ebuild_name("dev-libs", "example-1.0.0-r0101.ebuild")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(cpv.fqn(), "dev-libs/example-1.0.0-r0101");
+        assert_eq!(cpv.pf(), "example-1.0.0-r0101");
     }
 
     #[test]

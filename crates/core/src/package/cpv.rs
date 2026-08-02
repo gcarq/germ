@@ -9,6 +9,7 @@ use crate::repository::Repository;
 use crate::types::FxHashMap;
 use anyhow::{Context, Result, anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt;
 use std::path::Path;
 
@@ -16,7 +17,7 @@ use std::path::Path;
 ///
 /// NOTE: `fqn` holds the fully qualified name and is also used in the [`Display`] implementation
 /// for performance reasons, so `category`, `package` and `version` must NOT be changed.
-#[derive(Archive, Serialize, Deserialize, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[derive(Archive, Serialize, Deserialize, Clone, Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct CPV {
     category: Box<str>,
@@ -145,6 +146,30 @@ impl CPV {
     }
 }
 
+impl PartialEq for CPV {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for CPV {}
+
+impl Ord for CPV {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (&self.category, &self.package, &self.version).cmp(&(
+            &other.category,
+            &other.package,
+            &other.version,
+        ))
+    }
+}
+
+impl PartialOrd for CPV {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl fmt::Display for CPV {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.fqn)
@@ -250,8 +275,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(cpv.fqn(), "dev-libs/pkg-1.0");
-        assert_eq!(cpv.to_string(), "dev-libs/pkg-1.0");
+        assert_eq!(cpv.fqn(), "dev-libs/pkg-1.0-r0");
+        assert_eq!(cpv.to_string(), "dev-libs/pkg-1.0-r0");
         assert_eq!(cpv.pf(), "pkg-1.0-r0");
         assert_eq!(cpv.pvr(), "1.0-r0");
         assert_eq!(cpv.pr(), "r0");

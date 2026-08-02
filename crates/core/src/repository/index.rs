@@ -106,15 +106,24 @@ impl ResolvedPackageIndex {
 
     /// Loads the index from the given `path`.
     ///
-    /// Returns `Ok(None)` if the file doesn't exist.
-    /// Returns `Err` if the index cannot be deserialized or the file cannot be opened.
+    /// Returns `Ok(None)` if the file doesn't exist or cannot be deserialized.
+    /// Returns `Err` if the file cannot be opened.
     pub fn load_from_path(path: &Path) -> Result<Option<Self>> {
         let reader = match File::open(path) {
             Ok(file) => file,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(err) => bail!("unable to open package index at {}: {err}", path.display()),
         };
-        Ok(Some(Self::deserialize(reader)?))
+        match Self::deserialize(reader) {
+            Ok(index) => Ok(Some(index)),
+            Err(err) => {
+                warn!(
+                    "Ignoring incompatible package index at {}: {err:#}",
+                    path.display()
+                );
+                Ok(None)
+            }
+        }
     }
 
     /// Writes the index to the given `path`.
@@ -170,7 +179,8 @@ impl Deref for ResolvedPackageIndex {
 mod tests {
     use super::*;
     use crate::package::version::PackageVersion;
-    use std::io::{Cursor, Seek, SeekFrom};
+    use std::io::{Cursor, Seek, SeekFrom, Write};
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_available_package_index() {
@@ -276,6 +286,16 @@ mod tests {
         cursor.seek(SeekFrom::Start(0)).unwrap();
         let deserialized = ResolvedPackageIndex::deserialize(&mut cursor).unwrap();
         assert!(deserialized.contains_key(cpv.fqn()));
+    }
+
+    #[test]
+    fn test_resolved_package_index_invalid() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"not a resolved package index").unwrap();
+
+        let loaded = ResolvedPackageIndex::load_from_path(file.path()).unwrap();
+
+        assert!(loaded.is_none());
     }
 
     #[test]

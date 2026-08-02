@@ -3,35 +3,43 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
-/// Represents a package revision, which is an optional u64 value.
+/// Represents a package revision.
 ///
-/// An explicit revision 0 is equal to `None`.
-/// This distinction is necessary for generating the correct ebuild file name.
-#[derive(Archive, Serialize, Deserialize, Clone, Copy, Debug, Default)]
-pub struct PackageRevision(Option<u64>);
+/// Revisions with different source spellings can compare equally,
+/// and an explicit revision 0 is equal to an omitted revision.
+///
+/// For example `-r0302 == -r302`, `-r0` == None`.
+#[derive(Archive, Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PackageRevision {
+    /// Source value parsed from ebuild file name
+    source: Option<Box<str>>,
+    /// Effective revision used for comparison
+    effective: u64,
+}
 
 impl PackageRevision {
     pub fn new(revision: Option<&str>) -> Result<Self> {
-        let value = revision
+        let effective = revision
             .map(|rev| {
                 rev.parse::<u64>()
                     .with_context(|| anyhow!("revision must be a valid u64, got '{rev}'"))
             })
-            .transpose()?;
-        Ok(Self(value))
+            .transpose()?
+            .unwrap_or_default();
+        Ok(Self {
+            source: revision.map(Into::into),
+            effective,
+        })
     }
 
     /// Returns the effective revision, defaulting to zero when omitted.
-    pub const fn effective(self) -> u64 {
-        match self.0 {
-            Some(revision) => revision,
-            None => 0,
-        }
+    pub const fn effective(&self) -> u64 {
+        self.effective
     }
 
-    /// Returns the explicit revision, or `None` if it is not set.
-    pub const fn explicit(self) -> Option<u64> {
-        self.0
+    /// Returns the source revision, or `None` if omitted.
+    pub fn source(&self) -> Option<&str> {
+        self.source.as_deref()
     }
 }
 
@@ -64,21 +72,29 @@ impl Hash for PackageRevision {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
-    fn test_version_revision_ord() {
-        let rev1 = PackageRevision::new(Some("1")).unwrap();
-        let rev2 = PackageRevision::new(Some("2")).unwrap();
-        let rev0 = PackageRevision::new(Some("0")).unwrap();
-        let rev_none = PackageRevision::new(None).unwrap();
+    fn test_package_revision_semantics() {
+        let implicit = PackageRevision::new(None).unwrap();
+        let explicit_zero = PackageRevision::new(Some("0")).unwrap();
+        let padded = PackageRevision::new(Some("03")).unwrap();
+        let canonical = PackageRevision::new(Some("3")).unwrap();
+        let mut revisions = HashSet::new();
 
-        assert_eq!(rev1.effective(), 1);
-        assert_eq!(rev2.effective(), 2);
-        assert_eq!(rev0.effective(), 0);
-        assert_eq!(rev_none.effective(), 0);
+        revisions.insert(implicit.clone());
+        revisions.insert(explicit_zero.clone());
+        revisions.insert(padded.clone());
+        revisions.insert(canonical.clone());
 
-        assert_eq!(rev0, rev_none);
-        assert!(rev1 < rev2);
-        assert!(rev2 > rev1);
+        assert_eq!(implicit, explicit_zero);
+        assert_eq!(padded, canonical);
+        assert!(implicit < canonical);
+        assert_eq!(implicit.effective(), 0);
+        assert_eq!(implicit.source(), None);
+        assert_eq!(explicit_zero.source(), Some("0"));
+        assert_eq!(padded.effective(), 3);
+        assert_eq!(padded.source(), Some("03"));
+        assert_eq!(revisions.len(), 2);
     }
 }

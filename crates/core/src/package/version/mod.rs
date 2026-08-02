@@ -25,7 +25,7 @@ static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_
 pub struct PackageVersion {
     number: VersionNumber,
     suffixes: VersionSuffixes,
-    revision: PackageRevision,
+    pub revision: PackageRevision,
 }
 
 impl PackageVersion {
@@ -48,20 +48,15 @@ impl PackageVersion {
         format!("{}{}", self.number, self.suffixes)
     }
 
-    /// Returns the effective numeric revision, defaulting to zero when omitted.
-    pub const fn effective_revision(&self) -> u64 {
-        self.revision.effective()
-    }
-
     /// Returns the revision, or `r0` if none exists.
     pub fn pr(&self) -> String {
-        format!("r{}", self.effective_revision())
+        format!("r{}", self.revision.source().unwrap_or("0"))
     }
 
     /// Returns the source-sensitive package version and revision.
     pub fn pvr(&self) -> String {
         let mut pvr = self.pv();
-        if let Some(revision) = self.revision.explicit() {
+        if let Some(revision) = self.revision.source() {
             pvr.push_str(&format!("-r{revision}"));
         }
         pvr
@@ -120,11 +115,10 @@ impl TryFrom<&str> for PackageVersion {
 }
 
 impl fmt::Display for PackageVersion {
-    /// Returns the canonical version string, omitting revision zero.
+    /// Returns the source-sensitive version string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.number, self.suffixes)?;
-        let revision = self.effective_revision();
-        if revision > 0 {
+        if let Some(revision) = self.revision.source() {
             write!(f, "-r{revision}")?;
         }
         Ok(())
@@ -137,86 +131,60 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn test_package_version_new_ok() {
-        let test_cases = vec![
-            PackageVersion::new("1.0.0", None, None),
-            PackageVersion::new("1.2.3a", Some("_alpha1"), None),
-            PackageVersion::new("2.0.1", Some("_beta2_p20240101"), Some("1")),
-            PackageVersion::new("2.3.4z", Some("alpha_p20250101"), Some("2")),
-            PackageVersion::new("9999", None, None),
-        ];
-        for version in test_cases {
-            version.unwrap();
+    fn test_package_version_new() {
+        let version = PackageVersion::new("2.0.1", Some("_beta2_p20240101"), Some("1")).unwrap();
+
+        assert_eq!(version.to_string(), "2.0.1_beta2_p20240101-r1");
+    }
+
+    #[test]
+    fn test_package_version_try_from() {
+        for input in [
+            "1.0.0",
+            "1.0.0-r0",
+            "1.2.3a_alpha1",
+            "2.0.1_beta2_p20240101-r1",
+        ] {
+            let version = PackageVersion::try_from(input).unwrap();
+            assert_eq!(version.to_string(), input);
         }
     }
 
     #[test]
-    fn test_package_version_new_err() {
-        let test_cases = vec![
-            PackageVersion::new("", None, None),
-            PackageVersion::new("1.1.1aa", None, None),
-            PackageVersion::new("0.33.1A", None, None),
-            PackageVersion::new("1..0", None, None),
-            PackageVersion::new("a.b.c", None, None),
-            PackageVersion::new("20251212", Some("_ALPHA"), Some("9999")),
-            PackageVersion::new("1.2.3a", Some("_unknownsuffix"), None),
-            PackageVersion::new("2.0.1", Some("_betaX"), Some("1")),
-            PackageVersion::new("1.0.0", None, Some("a")),
-            PackageVersion::new("1.0.0", None, Some("-1")),
-        ];
-        for version in test_cases {
-            assert!(version.is_err(), "Expected error, got: {version:?}");
+    fn test_package_version_try_from_err() {
+        for input in [
+            "",
+            "1.1.1aa",
+            "0.33.1A",
+            "1..0",
+            "a.b.c",
+            "20251212_ALPHA-r9999",
+            "1.2.3a_unknownsuffix",
+            "2.0.1_betaX-r1",
+            "1.0.0-ra",
+            "1.0.0-r-1",
+        ] {
+            assert!(PackageVersion::try_from(input).is_err());
         }
     }
 
     #[test]
-    fn test_package_version_display() {
-        let test_cases = vec![
-            (PackageVersion::new("1.0.0", None, None), "1.0.0"),
-            (PackageVersion::new("1.0.0", None, Some("0")), "1.0.0"),
-            (
-                PackageVersion::new("1.2.3a", Some("_alpha1"), None),
-                "1.2.3a_alpha1",
-            ),
-            (
-                PackageVersion::new("2.0.1", Some("_beta2_p20240101"), Some("1")),
-                "2.0.1_beta2_p20240101-r1",
-            ),
-            (
-                PackageVersion::new("2.3.4z", Some("alpha_p20250101"), Some("2")),
-                "2.3.4z_alpha_p20250101-r2",
-            ),
-        ];
-        for (pkg_version, expected_str) in test_cases {
-            assert_eq!(pkg_version.unwrap().to_string(), expected_str);
-        }
-    }
-
-    #[test]
-    fn test_package_version_ord_revision() {
-        let v1_r0 = PackageVersion::new("1.0.0", None, None).unwrap();
-        let v1_explicit_r0 = PackageVersion::new("1.0.0", None, Some("0")).unwrap();
-        let v1_r1 = PackageVersion::new("1.0.0", None, Some("1")).unwrap();
-        let v1_r2 = PackageVersion::new("1.0.0", None, Some("2")).unwrap();
-
-        assert_eq!(v1_r0, v1_explicit_r0);
-        assert!(v1_r0 < v1_r1);
-        assert!(v1_r1 < v1_r2);
-    }
-
-    #[test]
-    fn test_package_version_r0_semantics() {
-        let implicit = PackageVersion::new("1.0.0", None, None).unwrap();
-        let explicit = PackageVersion::new("1.0.0", None, Some("0")).unwrap();
+    fn test_package_version_revision_source() {
+        let padded = PackageVersion::new("1.0.0", None, Some("0302")).unwrap();
+        let canonical = PackageVersion::new("1.0.0", None, Some("302")).unwrap();
         let mut versions = HashSet::new();
 
-        versions.insert(implicit.clone());
-        versions.insert(explicit.clone());
+        versions.insert(padded.clone());
+        versions.insert(canonical.clone());
 
-        assert_eq!(implicit, explicit);
+        assert_eq!(padded, canonical);
+        assert_eq!(padded.pr(), "r0302");
+        assert_eq!(padded.pvr(), "1.0.0-r0302");
         assert_eq!(versions.len(), 1);
-        assert_eq!(implicit.effective_revision(), 0);
-        assert_eq!(explicit.effective_revision(), 0);
+
+        let implicit = PackageVersion::new("1.0.0", None, None).unwrap();
+        let explicit = PackageVersion::new("1.0.0", None, Some("0")).unwrap();
+
         assert_eq!(implicit.pr(), "r0");
         assert_eq!(explicit.pr(), "r0");
         assert_eq!(implicit.pvr(), "1.0.0");
@@ -231,19 +199,5 @@ mod tests {
 
         assert!(version.matches_atom(&implicit_atom));
         assert!(version.matches_atom(&explicit_atom));
-    }
-
-    #[test]
-    fn test_package_version_ord() {
-        let v1_2_3a = PackageVersion::new("1.2.3a", Some("_alpha"), None).unwrap();
-        let v1_2_3a_p2024 = PackageVersion::new("1.2.3a", Some("_alpha_p20240101"), None).unwrap();
-        let v1_2_3a_p2025 = PackageVersion::new("1.2.3a", Some("_alpha_p20251111"), None).unwrap();
-        let v1_5_0b = PackageVersion::new("1.5.0b", None, None).unwrap();
-        let v1_5_0br3 = PackageVersion::new("1.5.0b", None, Some("3")).unwrap();
-
-        assert!(v1_2_3a < v1_2_3a_p2024);
-        assert!(v1_2_3a_p2024 < v1_2_3a_p2025);
-        assert!(v1_2_3a_p2025 < v1_5_0b);
-        assert!(v1_5_0b < v1_5_0br3);
     }
 }

@@ -259,7 +259,7 @@ impl Repository {
 
     /// Loads the resolved package index from disk.
     ///
-    /// Returns `Err` if the index cannot be deserialized or the file exists but cannot be opened.
+    /// Returns `Err` if the index file exists but cannot be opened.
     fn load_index(&mut self) -> Result<()> {
         let path = PathBuf::from(DEFAULT_CACHE_PATH)
             .join("metadata")
@@ -268,7 +268,6 @@ impl Repository {
             "Loading package index for '{self}' from {} ...",
             path.display()
         );
-        // TODO: handle corrupt or outdated index
         if let Some(index) = ResolvedPackageIndex::load_from_path(&path)? {
             let data = self.data_mut()?;
             data.resolved_package_idx = index;
