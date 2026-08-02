@@ -1,11 +1,9 @@
-use anyhow::{Context, anyhow};
-use anyhow::{Result, bail};
+use anyhow::{Context, anyhow, bail};
 use std::fmt;
 use std::str::FromStr;
 
 /// All supported ebuild functions that can be called from the ebuild process.
-#[derive(PartialEq)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug, PartialEq)]
 pub enum FuncType {
     // Internal ebuild functions
     ResolveEclass,
@@ -28,7 +26,7 @@ pub enum FuncType {
 impl FromStr for FuncType {
     type Err = anyhow::Error;
 
-    fn from_str(value: &str) -> Result<Self> {
+    fn from_str(value: &str) -> anyhow::Result<Self> {
         match value {
             "__resolve_eclass" => Ok(Self::ResolveEclass),
             "debug-print" => Ok(Self::DebugPrint),
@@ -73,7 +71,7 @@ impl FuncCall {
     /// Creates a new [`FuncCall`] from raw string data.
     ///
     /// Returns an `Err` if the function name cannot be resolved to a [`FuncType`].
-    pub fn from_raw(func: &str, args: &[&str]) -> Result<Self> {
+    pub fn from_raw(func: &str, args: &[&str]) -> anyhow::Result<Self> {
         let func = FuncType::from_str(func)
             .with_context(|| anyhow!("unable to resolve function for '{func}'"))?;
         let args = args.iter().map(ToString::to_string).collect();

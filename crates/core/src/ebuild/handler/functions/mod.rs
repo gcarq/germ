@@ -2,7 +2,7 @@ pub mod version;
 
 use crate::ebuild::handler::prot::ParentMessage;
 use crate::repository::Repository;
-use anyhow::{Result, anyhow};
+use anyhow::anyhow;
 use log::{debug, warn};
 
 /// Logs the given `args` using `debug!()`.
@@ -22,7 +22,7 @@ pub fn die(args: &[String], fatal: bool) -> ParentMessage {
 }
 
 /// Resolves the given eclass `name` from `repository` and returns the path as string.
-pub fn resolve_eclass(name: &str, repository: &Repository) -> Result<ParentMessage> {
+pub fn resolve_eclass(name: &str, repository: &Repository) -> anyhow::Result<ParentMessage> {
     let eclass = repository
         .eclasses()?
         .get(name)
@@ -41,13 +41,33 @@ mod tests {
     use super::*;
     use crate::eapi::Eapi;
     use crate::ebuild::Ebuild;
-    use crate::ebuild::handler::prot::func::FuncCall;
+    use crate::ebuild::handler::error::{ExecutionError, FuncCallError};
+    use crate::ebuild::handler::prot::func::{FuncCall, FuncType};
     use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
     use crate::makenv::MakeEnv;
     use crate::package::cpv::CPV;
     use crate::package::version::PackageVersion;
     use crate::repository::test_support::{RepoSetFixture, RepositoryFixture};
     use std::path::PathBuf;
+
+    fn with_handler(eapi: Eapi, test: impl FnOnce(&EbuildPhaseHandler)) {
+        let fixture = RepoSetFixture::new(vec![RepositoryFixture::new("repo")]).unwrap();
+        let cpv = CPV::new(
+            "app-editors",
+            "vim",
+            PackageVersion::try_from("1.2.3b_alpha4").unwrap(),
+        )
+        .unwrap();
+        let ebuild = Ebuild {
+            eapi,
+            cpv: &cpv,
+            repo: fixture.get("repo").unwrap(),
+            path: &PathBuf::default(),
+        };
+        let handler =
+            EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default()).unwrap();
+        test(&handler);
+    }
 
     #[test]
     fn test_exec_ebuild_fn_ok() {
@@ -75,26 +95,52 @@ mod tests {
             ),
         ];
 
-        let fixture = RepoSetFixture::new(vec![RepositoryFixture::new("repo")]).unwrap();
-        let repo = fixture.get("repo").unwrap();
+        with_handler(Eapi::Eight, |handler| {
+            for (func, response) in test_data {
+                assert_eq!(handler.handle_request(func).unwrap(), response);
+            }
+        });
+    }
 
-        let cpv = CPV::new(
-            "app-editors",
-            "vim",
-            PackageVersion::new("1.2.3b", Some("alpha4"), None).unwrap(),
-        )
-        .unwrap();
+    #[test]
+    fn test_func_invalid_args() {
+        with_handler(Eapi::Eight, |handler| {
+            let args = vec!["invalid".to_owned(), "-".to_owned()];
+            let error = handler
+                .handle_request(FuncCall {
+                    func: FuncType::VerRs,
+                    args: args.clone(),
+                })
+                .unwrap_err();
 
-        let ebuild = Ebuild {
-            eapi: Eapi::Eight,
-            cpv: &cpv,
-            repo,
-            path: &PathBuf::default(),
-        };
-        let handler =
-            EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default()).unwrap();
-        for (func, response) in test_data {
-            assert_eq!(handler.handle_request(func).unwrap(), response);
-        }
+            assert!(matches!(
+                error,
+                ExecutionError::FuncCall(FuncCallError::InvalidArgs {
+                    func: FuncType::VerRs,
+                    args: error_args,
+                    ..
+                }) if error_args == args
+            ));
+        });
+    }
+
+    #[test]
+    fn test_func_unsupported() {
+        with_handler(Eapi::Eight, |handler| {
+            let error = handler
+                .handle_request(FuncCall {
+                    func: FuncType::HasV,
+                    args: vec!["value".to_owned()],
+                })
+                .unwrap_err();
+
+            assert!(matches!(
+                error,
+                ExecutionError::FuncCall(FuncCallError::Unsupported {
+                    func: FuncType::HasV,
+                    eapi: Eapi::Eight,
+                })
+            ));
+        });
     }
 }

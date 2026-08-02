@@ -1,7 +1,7 @@
 use crate::ebuild::handler::prot::ParentMessage;
 use crate::package::cpv::CPV;
 use crate::package::version::PackageVersion;
-use anyhow::{Result, bail};
+use anyhow::bail;
 use std::cmp::Ordering;
 
 /// Implements the `ver_cut` function for ebuilds that extracts version components,
@@ -11,7 +11,7 @@ use std::cmp::Ordering;
 /// The `range` specifies which components to extract from the version.
 /// If `version` is `None`, the package's PV is used.
 /// Returns `Err` if the EAPI does not support `ver_cut`.
-pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> Result<ParentMessage> {
+pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> anyhow::Result<ParentMessage> {
     // Use PV as fallback if no version is provided
     let version = match version {
         Some(v) => v,
@@ -44,7 +44,7 @@ pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> Result<ParentMe
 /// If the len of `args` is odd, the last element is treated as the version string,
 /// otherwise the package's PV is used.
 /// Returns the modified version string or an `Err` if parsing fails.
-pub fn ver_rs(cpv: &CPV, args: &[String]) -> Result<ParentMessage> {
+pub fn ver_rs(cpv: &CPV, args: &[String]) -> anyhow::Result<ParentMessage> {
     if args.len() < 2 {
         bail!("ver_rs requires at least two arguments");
     }
@@ -103,7 +103,7 @@ pub fn ver_test(
     version1: Option<&str>,
     op: &str,
     version2: &str,
-) -> Result<ParentMessage> {
+) -> anyhow::Result<ParentMessage> {
     let v1 = match version1 {
         Some(v) => &PackageVersion::try_from(v)?,
         None => cpv.version(),
@@ -168,7 +168,7 @@ fn ver_split(version: &str) -> Vec<(String, String)> {
 /// `max` is the maximum valid index (inclusive) for the range.
 ///
 /// Returns `Err` if the range is invalid.
-fn parse_range(range: &str, max: usize) -> Result<(usize, usize)> {
+fn parse_range(range: &str, max: usize) -> anyhow::Result<(usize, usize)> {
     if let Some((a, b)) = range.split_once('-') {
         let start = match a.is_empty() {
             true => bail!("range must start with a number"),

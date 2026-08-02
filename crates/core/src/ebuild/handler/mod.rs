@@ -8,9 +8,10 @@ mod prot;
 use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
 use crate::ebuild::Ebuild;
 use crate::makenv::MakeEnv;
-use anyhow::{Result, bail};
+use anyhow::anyhow;
+
 use env::EbuildEnv;
-use error::ExecutionError;
+use error::{ExecutionError, FuncCallError};
 use exec::EbuildExecution;
 use functions::version::{ver_cut, ver_rs, ver_test};
 use functions::{debug_print, die, resolve_eclass};
@@ -19,8 +20,8 @@ use log::debug;
 use prot::func::{FuncCall, FuncType};
 use prot::{ChildMessage, ParentMessage};
 use std::fmt;
-use std::ops::Deref;
 
+/// Defines all implemented ebuild phases.
 pub enum EbuildPhase {
     Depend,
 }
@@ -39,6 +40,15 @@ impl fmt::Display for EbuildPhase {
     }
 }
 
+/// Maps an invalid function call to a [`FuncCallError::InvalidArgs`] error.
+fn map_invalid_args(
+    func: FuncType,
+    args: Vec<String>,
+    result: anyhow::Result<ParentMessage>,
+) -> Result<ParentMessage, ExecutionError> {
+    result.map_err(|source| FuncCallError::InvalidArgs { func, args, source }.into())
+}
+
 /// Manages the execution of an ebuild phase.
 pub struct EbuildPhaseHandler<'a> {
     ebuild: &'a Ebuild<'a>,
@@ -48,7 +58,7 @@ pub struct EbuildPhaseHandler<'a> {
 
 impl<'a> EbuildPhaseHandler<'a> {
     /// Create a new ebuild phase handler for the given `ebuild` and `phase`.
-    pub fn new(ebuild: &'a Ebuild, phase: EbuildPhase, make_env: &MakeEnv) -> Result<Self> {
+    pub fn new(ebuild: &'a Ebuild, phase: EbuildPhase, make_env: &MakeEnv) -> anyhow::Result<Self> {
         Ok(Self {
             env: EbuildEnv::new(ebuild, &phase, make_env)?,
             ebuild,
@@ -96,55 +106,71 @@ impl<'a> EbuildPhaseHandler<'a> {
     ///
     /// Returns a [`ParentMessage`] with the result of the function or an `Err` if the request
     /// is invalid or the function execution fails.
-    fn handle_request(&self, call: FuncCall) -> Result<ParentMessage> {
-        let args = call.args.deref();
-        match call.func {
-            FuncType::ResolveEclass => match args {
-                [name] => resolve_eclass(name, self.ebuild.repo),
-                _ => bail!("invalid arguments: __resolve_eclass <name>: {args:?}"),
+    fn handle_request(&self, call: FuncCall) -> Result<ParentMessage, ExecutionError> {
+        let FuncCall { func, args } = call;
+        match func {
+            FuncType::ResolveEclass => match args.as_slice() {
+                [name] => Ok(resolve_eclass(name, self.ebuild.repo)?),
+                _ => map_invalid_args(func, args, Err(anyhow!("expected one argument"))),
             },
-            FuncType::DebugPrint => Ok(debug_print(args)),
-            FuncType::Die => match args {
+            FuncType::DebugPrint => Ok(debug_print(&args)),
+            FuncType::Die => match args.as_slice() {
                 [first, args @ ..] if first == "-n" => Ok(die(args, false)),
                 args => Ok(die(args, true)),
             },
-            FuncType::Has => match args {
-                [word, args @ ..] => match args.contains(word) {
-                    true => Ok(ParentMessage::Ok(None)),
-                    false => Ok(ParentMessage::Err(None)),
-                },
-                _ => bail!("invalid arguments: has <word> <args>: {args:?}"),
-            },
-            FuncType::HasV if self.ebuild.eapi.supports_hasv() => match args {
-                [word, args @ ..] => match args.contains(word) {
-                    true => Ok(ParentMessage::Ok(Some(word.clone()))),
-                    false => Ok(ParentMessage::Err(None)),
-                },
-                _ => bail!("invalid arguments: hasv <word> <args>: {args:?}"),
-            },
-            FuncType::HasQ if self.ebuild.eapi.supports_hasq() => match args {
-                [word, args @ ..] => match args.contains(word) {
-                    true => Ok(ParentMessage::Ok(None)),
-                    false => Ok(ParentMessage::Err(None)),
-                },
-                _ => bail!("invalid arguments: hasq <word> <args>: {args:?}"),
-            },
-            FuncType::VerCut => match args {
-                [range] => ver_cut(self.ebuild.cpv, range, None),
-                [range, version] => ver_cut(self.ebuild.cpv, range, Some(version)),
-                _ => bail!("invalid arguments: ver_cut <range> [<version>]: {args:?}"),
-            },
-            FuncType::VerRs => ver_rs(self.ebuild.cpv, args),
-            FuncType::VerTest => match args {
-                [op, v2] => ver_test(self.ebuild.cpv, None, op, v2),
-                [v1, op, v2] => ver_test(self.ebuild.cpv, Some(v1), op, v2),
-                _ => bail!("invalid arguments: ver_test [<v1>] op <v2>: {args:?}"),
-            },
-            FuncType::HasV | FuncType::HasQ => bail!(
-                "unsupported function '{}' for EAPI '{}'",
-                call.func,
-                self.ebuild.eapi,
-            ),
+            FuncType::Has => {
+                let result = match args.as_slice() {
+                    [word, args @ ..] if args.contains(word) => Ok(ParentMessage::Ok(None)),
+                    [..] if !args.is_empty() => Ok(ParentMessage::Err(None)),
+                    _ => Err(anyhow!("expected a word and one or more values")),
+                };
+                map_invalid_args(func, args, result)
+            }
+            FuncType::HasV if self.ebuild.eapi.supports_hasv() => {
+                let result = match args.as_slice() {
+                    [word, args @ ..] if args.contains(word) => {
+                        Ok(ParentMessage::Ok(Some(word.clone())))
+                    }
+                    [..] if !args.is_empty() => Ok(ParentMessage::Err(None)),
+                    _ => Err(anyhow!("expected a word and one or more values")),
+                };
+                map_invalid_args(func, args, result)
+            }
+            FuncType::HasQ if self.ebuild.eapi.supports_hasq() => {
+                let result = match args.as_slice() {
+                    [word, args @ ..] if args.contains(word) => Ok(ParentMessage::Ok(None)),
+                    [..] if !args.is_empty() => Ok(ParentMessage::Err(None)),
+                    _ => Err(anyhow!("expected a word and one or more values")),
+                };
+                map_invalid_args(func, args, result)
+            }
+            FuncType::VerCut => {
+                let result = match args.as_slice() {
+                    [range] => ver_cut(self.ebuild.cpv, range, None),
+                    [range, version] => ver_cut(self.ebuild.cpv, range, Some(version)),
+                    _ => Err(anyhow!("expected a range and optional version")),
+                };
+                map_invalid_args(func, args, result)
+            }
+            FuncType::VerRs => {
+                let result = ver_rs(self.ebuild.cpv, &args);
+                map_invalid_args(func, args, result)
+            }
+            FuncType::VerTest => {
+                let result = match args.as_slice() {
+                    [op, v2] => ver_test(self.ebuild.cpv, None, op, v2),
+                    [v1, op, v2] => ver_test(self.ebuild.cpv, Some(v1), op, v2),
+                    _ => Err(anyhow!(
+                        "expected an optional version, operator, and version"
+                    )),
+                };
+                map_invalid_args(func, args, result)
+            }
+            FuncType::HasV | FuncType::HasQ => Err(FuncCallError::Unsupported {
+                func,
+                eapi: self.ebuild.eapi.clone(),
+            }
+            .into()),
         }
     }
 
@@ -187,7 +213,7 @@ mod tests {
     struct Ready;
 
     impl ChildToParentMsg for Ready {
-        fn from_bytes(_bytes: &[u8]) -> Result<Self> {
+        fn from_bytes(_bytes: &[u8]) -> anyhow::Result<Self> {
             Ok(Self)
         }
     }
