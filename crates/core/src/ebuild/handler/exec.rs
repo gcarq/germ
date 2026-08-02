@@ -77,6 +77,15 @@ impl EbuildExecution {
 
         match result {
             Ok(data) => self.complete().map(|()| data),
+            Err(err @ ExecutionError::Die(_)) => {
+                match self.complete() {
+                    Ok(()) | Err(ExecutionError::NonZeroExit(_)) => (),
+                    Err(cleanup_err) => {
+                        warn!("unable to clean up failed ebuild execution: {cleanup_err:#}");
+                    }
+                }
+                Err(err)
+            }
             Err(err) => {
                 if let Err(cleanup_err) = self.abort() {
                     warn!("unable to clean up aborted ebuild execution: {cleanup_err:#}");
@@ -254,13 +263,14 @@ mod tests {
 
     #[test]
     fn test_run_die() {
-        let mut execution = spawn_execution("while :; do :; done");
+        let mut execution = spawn_execution("IFS= read -r <&${CHILD_READ_FD}");
 
         let err = execution
-            .run::<()>(|_| Err(ExecutionError::Die("fatal error".into())))
+            .run::<()>(|_| Err(ExecutionError::Die(String::new())))
             .unwrap_err();
 
-        assert!(matches!(err, ExecutionError::Die(message) if message == "fatal error"));
+        assert!(matches!(err, ExecutionError::Die(_)));
+        assert!(execution.finalized);
     }
 
     #[test]
