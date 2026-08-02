@@ -17,8 +17,7 @@ use functions::version::{ver_cut, ver_rs, ver_test};
 use functions::{debug_print, die, resolve_eclass};
 use ipc::IpcHandler;
 use log::debug;
-use prot::func::{FuncCall, FuncType};
-use prot::{ChildMessage, ParentMessage};
+use prot::{ChildMessage, FuncCall, FuncType, ParentMessage};
 use std::fmt;
 
 /// Defines all implemented ebuild phases.
@@ -83,15 +82,15 @@ impl<'a> EbuildPhaseHandler<'a> {
 
     fn handle_messages(&self, ipc: &mut IpcHandler) -> Result<Vec<String>, ExecutionError> {
         let mut data = Vec::new();
-        while let Some(request) = ipc.recv::<ChildMessage>()? {
-            match request {
+        while let Some(bytes) = ipc.recv_bytes()? {
+            match ChildMessage::from_bytes(bytes)? {
                 ChildMessage::Call(func_call) => {
                     let response = self.handle_request(func_call)?;
                     let die_message = match &response {
                         ParentMessage::Die(message) => Some(message.clone()),
                         _ => None,
                     };
-                    ipc.send(response)?;
+                    ipc.send(&response.into_bytes())?;
                     if let Some(message) = die_message {
                         return Err(ExecutionError::Die(message));
                     }
@@ -206,17 +205,8 @@ impl<'a> EbuildPhaseHandler<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ebuild::handler::ipc::ChildToParentMsg;
     use crate::types::FxHashMap;
     use anyhow::anyhow;
-
-    struct Ready;
-
-    impl ChildToParentMsg for Ready {
-        fn from_bytes(_bytes: &[u8]) -> anyhow::Result<Self> {
-            Ok(Self)
-        }
-    }
 
     #[test]
     fn test_abort_ipc_ordering() {
@@ -235,7 +225,7 @@ mod tests {
 
         let result: Result<(), ExecutionError> = execution.run(|channel| {
             channel
-                .recv::<Ready>()?
+                .recv_bytes()?
                 .ok_or_else(|| anyhow!("unexpected EOF"))?;
             Err(ExecutionError::Internal(anyhow!("protocol failure")))
         });

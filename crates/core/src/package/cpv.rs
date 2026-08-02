@@ -77,7 +77,7 @@ impl CPV {
             .with_context(|| anyhow!("unable to create ebuild from '{}'", ebuild_path.display()))?;
         let mut handler =
             EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default())
-                .with_context(|| "unable to spawn ebuild phase handler")?;
+                .with_context(|| "unable to prepare ebuild execution")?;
         let data = handler.spawn()?;
         let data = data
             .iter()

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Context;
 
 use crate::ebuild::Ebuild;
 use crate::ebuild::handler::EbuildPhase;
@@ -174,7 +174,7 @@ impl EbuildEnv {
     ///
     /// TODO: ensure `LC_CTYPE` and `LC_COLLATE` are equivalent to POSIX locale
     /// TODO: add more variables as needed
-    pub fn new(ebuild: &Ebuild, phase: &EbuildPhase, make_env: &MakeEnv) -> Result<Self> {
+    pub fn new(ebuild: &Ebuild, phase: &EbuildPhase, make_env: &MakeEnv) -> anyhow::Result<Self> {
         let repo_paths = shlex::try_join(
             ebuild
                 .repo

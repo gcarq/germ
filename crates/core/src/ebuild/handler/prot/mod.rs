@@ -16,45 +16,140 @@
 //! Data message from for `IUSE` variable:
 //! `"DATA\0IUSE=static-libs tcpd usbip"`
 
-pub mod func;
-
-use crate::ebuild::handler::ipc::{ChildToParentMsg, ParentToChildMsg};
-use crate::ebuild::handler::prot::func::FuncCall;
-use anyhow::{Context, Result, anyhow, bail};
 use std::fmt;
+use std::str::{FromStr, Utf8Error};
+use thiserror::Error;
 
-/// Parameters delimiter in function call requests from the ebuild process.
-const PARAM_DELIM: char = '\0';
+/// Field delimiter in messages from the ebuild process.
+const FIELD_DELIMITER: char = '\0';
 
-/// End-of-Text byte for messages from the ebuild process.
-pub(super) const MSG_EOT: u8 = 0x04;
+/// Frame delimiter for messages from the ebuild process.
+pub(super) const CHILD_MESSAGE_DELIMITER: u8 = 0x04;
+
+/// Frame delimiter for messages sent to the ebuild process.
+pub(super) const PARENT_MESSAGE_DELIMITER: &[u8] = b"\n";
+
+/// Errors caused by invalid ebuild IPC messages.
+#[derive(Error, Debug)]
+pub enum ProtocolError {
+    #[error("invalid UTF-8 in IPC request")]
+    InvalidUtf8(#[from] Utf8Error),
+
+    #[error("invalid IPC request: {0}")]
+    InvalidRequest(String),
+
+    #[error("missing function identifier in IPC request")]
+    MissingFunction,
+
+    #[error("unknown ebuild function '{func}'")]
+    UnknownFunction { func: String },
+}
+
+/// All supported ebuild functions that can be called from the ebuild process.
+#[derive(Debug, PartialEq)]
+pub enum FuncType {
+    ResolveEclass,
+    DebugPrint,
+    Die,
+    Has,
+    HasV,
+    HasQ,
+    VerCut,
+    VerRs,
+    VerTest,
+}
+
+impl FromStr for FuncType {
+    type Err = ProtocolError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "__resolve_eclass" => Ok(Self::ResolveEclass),
+            "debug-print" => Ok(Self::DebugPrint),
+            "die" => Ok(Self::Die),
+            "has" => Ok(Self::Has),
+            "hasv" => Ok(Self::HasV),
+            "hasq" => Ok(Self::HasQ),
+            "ver_cut" => Ok(Self::VerCut),
+            "ver_rs" => Ok(Self::VerRs),
+            "ver_test" => Ok(Self::VerTest),
+            _ => Err(ProtocolError::UnknownFunction {
+                func: value.to_owned(),
+            }),
+        }
+    }
+}
+
+impl fmt::Display for FuncType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::ResolveEclass => "__resolve_eclass",
+            Self::DebugPrint => "debug-print",
+            Self::Die => "die",
+            Self::Has => "has",
+            Self::HasV => "hasv",
+            Self::HasQ => "hasq",
+            Self::VerCut => "ver_cut",
+            Self::VerRs => "ver_rs",
+            Self::VerTest => "ver_test",
+        };
+        f.write_str(value)
+    }
+}
+
+/// A recognized function call from the ebuild process.
+#[cfg_attr(test, derive(Debug, PartialEq))]
+pub struct FuncCall {
+    pub func: FuncType,
+    pub args: Vec<String>,
+}
+
+impl FuncCall {
+    pub(super) fn from_raw(func: &str, args: &[&str]) -> Result<Self, ProtocolError> {
+        let func = FuncType::from_str(func)?;
+        let args = args.iter().map(ToString::to_string).collect();
+        Ok(Self { func, args })
+    }
+}
+
+impl fmt::Display for FuncCall {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.func, self.args.join(" "))
+    }
+}
 
 /// Holds a message from the ebuild process, that can be either a function to execute [`FuncCall`]
 /// or some `String` data.
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum ChildMessage {
     Call(FuncCall),
     Data(String),
 }
 
-impl ChildToParentMsg for ChildMessage {
+impl ChildMessage {
     /// Creates a new [`ChildMessage`] from raw bytes received from the ebuild process
-    /// excluding the end of text delimiter [`MSG_EOT`].
-    fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let msg = str::from_utf8(bytes).with_context(|| anyhow!("invalid UTF-8 in IPC message"))?;
-        let mut parts = msg.split(PARAM_DELIM);
+    /// excluding the end of text delimiter [`CHILD_MESSAGE_DELIMITER`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the message cannot be parsed, or specifies an invalid function.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        let msg = str::from_utf8(bytes)?;
+        let mut parts = msg.split(FIELD_DELIMITER);
 
-        let msg = match parts.next() {
+        let request = match parts.next() {
             Some("FN") => {
                 let func = parts
                     .next()
-                    .ok_or_else(|| anyhow!("missing function name in IPC msg '{msg}'"))?;
+                    .filter(|func| !func.is_empty())
+                    .ok_or(ProtocolError::MissingFunction)?;
                 let args = parts.collect::<Vec<&str>>();
                 Self::Call(FuncCall::from_raw(func, &args)?)
             }
             Some("DATA") => Self::Data(parts.collect::<Vec<_>>().join(" ")),
-            _ => bail!("invalid IPC request: {msg}"),
+            _ => return Err(ProtocolError::InvalidRequest(msg.to_owned())),
         };
-        Ok(msg)
+        Ok(request)
     }
 }
 
@@ -87,10 +182,9 @@ impl ParentMessage {
             false => Self::Err(None),
         }
     }
-}
 
-impl ParentToChildMsg for ParentMessage {
-    fn into_bytes(self) -> Vec<u8> {
+    /// Encodes the response without its transport framing delimiter.
+    pub fn into_bytes(self) -> Vec<u8> {
         self.to_string().into_bytes()
     }
 }
@@ -118,14 +212,14 @@ mod tests {
             (
                 "FN\x00ver_rs\x001-\x00' '",
                 ChildMessage::Call(FuncCall {
-                    func: func::FuncType::VerRs,
+                    func: FuncType::VerRs,
                     args: vec!["1-".to_owned(), "' '".to_owned()],
                 }),
             ),
             (
                 "FN\x00ver_test\x006.0\x00-gt\x005.0",
                 ChildMessage::Call(FuncCall {
-                    func: func::FuncType::VerTest,
+                    func: FuncType::VerTest,
                     args: vec!["6.0".to_owned(), "-gt".to_owned(), "5.0".to_owned()],
                 }),
             ),
@@ -141,18 +235,40 @@ mod tests {
 
         for (data, expected_msg) in test_data {
             let msg = ChildMessage::from_bytes(data.as_bytes()).unwrap();
-            assert_eq!(msg.to_string(), expected_msg.to_string());
+            assert_eq!(msg, expected_msg);
         }
     }
 
     #[test]
-    fn test_child_message_from_bytes_err() {
-        let test_data = ["", "\x00", "FN\x00", "FOO\x00bar\x00baz"];
+    fn test_child_message_from_bytes_invalid_request() {
+        assert!(matches!(
+            ChildMessage::from_bytes(b"FOO\0bar\0baz"),
+            Err(ProtocolError::InvalidRequest(request)) if request == "FOO\0bar\0baz"
+        ));
+    }
 
-        for data in test_data {
-            let msg = ChildMessage::from_bytes(data.as_bytes());
-            assert!(msg.is_err(), "data '{data}' should be invalid");
-        }
+    #[test]
+    fn test_child_message_from_bytes_invalid_utf8() {
+        assert!(matches!(
+            ChildMessage::from_bytes(&[0xff]),
+            Err(ProtocolError::InvalidUtf8(_))
+        ));
+    }
+
+    #[test]
+    fn test_child_message_from_bytes_missing_function() {
+        assert!(matches!(
+            ChildMessage::from_bytes(b"FN\0"),
+            Err(ProtocolError::MissingFunction)
+        ));
+    }
+
+    #[test]
+    fn test_child_message_from_bytes_unknown_function() {
+        assert!(matches!(
+            ChildMessage::from_bytes(b"FN\0unknown"),
+            Err(ProtocolError::UnknownFunction { func }) if func == "unknown"
+        ));
     }
 
     #[test]

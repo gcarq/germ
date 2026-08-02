@@ -1,4 +1,6 @@
-use super::prot::func::FuncType;
+pub use super::ipc::IpcError;
+use super::prot::FuncType;
+pub use super::prot::ProtocolError;
 use crate::eapi::Eapi;
 use std::process::ExitStatus;
 use thiserror::Error;
@@ -18,11 +20,17 @@ pub enum FuncCallError {
     Unsupported { func: FuncType, eapi: Eapi },
 }
 
-/// Errors returned while executing an ebuild phase.
+/// Errors returned during ebuild execution.
 #[derive(Error, Debug)]
 pub enum ExecutionError {
     #[error(transparent)]
     FuncCall(#[from] FuncCallError),
+
+    #[error(transparent)]
+    Protocol(#[from] ProtocolError),
+
+    #[error(transparent)]
+    Ipc(#[from] IpcError),
 
     #[error("ebuild died: {0}")]
     Die(String),

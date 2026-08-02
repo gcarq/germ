@@ -42,7 +42,7 @@ mod tests {
     use crate::eapi::Eapi;
     use crate::ebuild::Ebuild;
     use crate::ebuild::handler::error::{ExecutionError, FuncCallError};
-    use crate::ebuild::handler::prot::func::{FuncCall, FuncType};
+    use crate::ebuild::handler::prot::{FuncCall, FuncType};
     use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
     use crate::makenv::MakeEnv;
     use crate::package::cpv::CPV;

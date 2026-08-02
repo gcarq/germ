@@ -1,6 +1,6 @@
-use crate::ebuild::handler::prot::MSG_EOT;
+use super::prot::{CHILD_MESSAGE_DELIMITER, PARENT_MESSAGE_DELIMITER};
 use crate::types::FxHashMap;
-use anyhow::{Context, Result};
+use nix::errno::Errno;
 use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
 use nix::unistd::pipe2;
 use std::fs::File;
@@ -9,16 +9,16 @@ use std::mem::ManuallyDrop;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
 use std::process;
-use std::process::Command;
+use thiserror::Error;
 
-/// Trait for messages sent from the parent process to the child process.
-pub trait ParentToChildMsg {
-    fn into_bytes(self) -> Vec<u8>;
-}
+/// Errors caused by ebuild IPC setup or I/O.
+#[derive(Error, Debug)]
+pub enum IpcError {
+    #[error("IPC pipe error")]
+    Pipe(#[from] Errno),
 
-/// Trait for messages sent from the child process to the parent process.
-pub trait ChildToParentMsg: Sized {
-    fn from_bytes(bytes: &[u8]) -> Result<Self>;
+    #[error("IPC I/O error")]
+    Io(#[from] std::io::Error),
 }
 
 /// Handler for IPC communication via pipes with a child process.
@@ -43,25 +43,24 @@ impl IpcHandler {
         executable: &str,
         args: &[String],
         env: &FxHashMap<String, String>,
-    ) -> Result<(Self, process::Child)> {
+    ) -> Result<(Self, process::Child), IpcError> {
         // parent -> child pipes
-        let (child_reader, parent_writer) = pipe2(OFlag::O_CLOEXEC).context("pipe failed")?;
+        let (child_reader, parent_writer) = pipe2(OFlag::O_CLOEXEC)?;
         // child -> parent pipes
-        let (parent_reader, child_writer) = pipe2(OFlag::O_CLOEXEC).context("pipe failed")?;
+        let (parent_reader, child_writer) = pipe2(OFlag::O_CLOEXEC)?;
 
         // Clear O_CLOEXEC for fds we want to pass to the child process
         fcntl(&child_reader, FcntlArg::F_SETFD(FdFlag::empty()))?;
         fcntl(&child_writer, FcntlArg::F_SETFD(FdFlag::empty()))?;
 
-        let child = Command::new(executable)
+        let child = process::Command::new(executable)
             .args(args)
             .env_clear()
             .env("CHILD_READ_FD", child_reader.as_raw_fd().to_string())
             .env("CHILD_WRITE_FD", child_writer.as_raw_fd().to_string())
             .envs(env)
             .process_group(0)
-            .spawn()
-            .context("spawn failed")?;
+            .spawn()?;
 
         // SAFETY: We take ownership of the file descriptors and ensure with `ManuallyDrop` that
         // they are not closed when `OwnedFd` goes out of scope. They will only be dropped when
@@ -79,37 +78,30 @@ impl IpcHandler {
         ))
     }
 
-    /// Sends the given [`ParentToChildMsg`] to the child process.
-    /// The data sent must not contain a newline character; one will be added automatically.
-    pub fn send<T>(&mut self, msg: T) -> Result<()>
-    where
-        T: ParentToChildMsg,
-    {
+    /// Sends encoded response bytes to the child process.
+    /// The data must not contain [`PARENT_MESSAGE_DELIMITER`], which is added automatically.
+    pub fn send(&mut self, bytes: &[u8]) -> Result<(), IpcError> {
         self.writer
-            .write_all(&msg.into_bytes())
-            .and_then(|()| self.writer.write_all(b"\n"))
-            .and_then(|()| self.writer.flush())
-            .with_context(|| "failed to write to pipe")
+            .write_all(bytes)
+            .and_then(|()| self.writer.write_all(PARENT_MESSAGE_DELIMITER))
+            .and_then(|()| self.writer.flush())?;
+        Ok(())
     }
 
-    /// Reads raw bytes from the child process until [`MSG_EOT`] is encountered.
-    /// Returns [`ChildToParentMsg`] or `Ok(None)` if EOF is reached.
-    pub fn recv<T>(&mut self) -> Result<Option<T>>
-    where
-        T: ChildToParentMsg,
-    {
+    /// Reads raw bytes from the child process until [`CHILD_MESSAGE_DELIMITER`] is encountered.
+    /// Returns `Ok(None)` if EOF is reached.
+    pub fn recv_bytes(&mut self) -> Result<Option<&[u8]>, IpcError> {
         self.buffer.clear();
         let num_bytes = self
             .reader
-            .read_until(MSG_EOT, &mut self.buffer)
-            .with_context(|| "failed to read from child process")?;
+            .read_until(CHILD_MESSAGE_DELIMITER, &mut self.buffer)?;
         // We got EOF
         if num_bytes == 0 {
             return Ok(None);
         }
         // Get rid of the EOT character
         self.buffer.truncate(self.buffer.len() - 1);
-        Ok(Some(T::from_bytes(&self.buffer)?))
+        Ok(Some(&self.buffer))
     }
 }
 
@@ -125,21 +117,6 @@ mod tests {
 
     use super::*;
 
-    struct ParentTestMsg(String);
-    impl ParentToChildMsg for ParentTestMsg {
-        fn into_bytes(self) -> Vec<u8> {
-            self.0.into_bytes()
-        }
-    }
-
-    struct ChildTestMsg(pub String);
-
-    impl ChildToParentMsg for ChildTestMsg {
-        fn from_bytes(bytes: &[u8]) -> Result<Self> {
-            Ok(Self(String::from_utf8(bytes.to_owned())?))
-        }
-    }
-
     fn spawn_process<const N: usize>(
         script: &str,
         env: [(&str, &str); N],
@@ -153,7 +130,7 @@ mod tests {
     }
 
     fn recv(ipc: &mut IpcHandler) -> String {
-        ipc.recv::<ChildTestMsg>().unwrap().unwrap().0
+        String::from_utf8(ipc.recv_bytes().unwrap().unwrap().to_owned()).unwrap()
     }
 
     #[test]
@@ -190,7 +167,7 @@ mod tests {
             ("FN\0failure", "ERR", "RESULT\0failure\0"),
         ] {
             assert_eq!(recv(&mut ipc), request);
-            ipc.send(ParentTestMsg(reply.into())).unwrap();
+            ipc.send(reply.as_bytes()).unwrap();
             assert_eq!(recv(&mut ipc), result);
         }
 
@@ -208,7 +185,7 @@ mod tests {
             [("TEST_ENV", "42")],
         );
 
-        ipc.send(ParentTestMsg("sync".into())).unwrap();
+        ipc.send(b"sync").unwrap();
         assert_eq!(recv(&mut ipc), "sync", "expected echoed line");
         assert_eq!(recv(&mut ipc), "42", "expected value from env variable");
 
@@ -231,7 +208,7 @@ mod tests {
         );
 
         recv(&mut ipc);
-        ipc.send(ParentTestMsg("DIE".into())).unwrap();
+        ipc.send(b"DIE").unwrap();
 
         assert_eq!(process.wait().unwrap().code(), Some(1));
     }
