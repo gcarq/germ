@@ -1,6 +1,6 @@
 pub use super::ipc::IpcError;
-use super::prot::FuncType;
-pub use super::prot::ProtocolError;
+use super::protocol::FuncType;
+pub use super::protocol::ProtocolError;
 use crate::eapi::Eapi;
 use std::process::ExitStatus;
 use thiserror::Error;

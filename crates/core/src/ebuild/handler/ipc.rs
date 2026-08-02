@@ -1,4 +1,4 @@
-use super::prot::{CHILD_MESSAGE_DELIMITER, PARENT_MESSAGE_DELIMITER};
+use super::protocol::{EBUILD_MESSAGE_DELIMITER, FUNCTION_REPLY_DELIMITER};
 use crate::types::FxHashMap;
 use nix::errno::Errno;
 use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
@@ -25,7 +25,7 @@ pub enum IpcError {
 /// When the `IpcHandler` is dropped, the write end of the pipe is flushed to ensure all data is
 /// sent to the child process before closing.
 ///
-/// **Example message from child to parent process:**
+/// **Example message from the ebuild process:**
 ///
 /// `FN\0__resolve_eclass\0toolchain-funcs\4`
 pub struct IpcHandler {
@@ -79,22 +79,22 @@ impl IpcHandler {
     }
 
     /// Sends encoded response bytes to the child process.
-    /// The data must not contain [`PARENT_MESSAGE_DELIMITER`], which is added automatically.
+    /// The data must not contain [`FUNCTION_REPLY_DELIMITER`], which is added automatically.
     pub fn send(&mut self, bytes: &[u8]) -> Result<(), IpcError> {
         self.writer
             .write_all(bytes)
-            .and_then(|()| self.writer.write_all(PARENT_MESSAGE_DELIMITER))
+            .and_then(|()| self.writer.write_all(FUNCTION_REPLY_DELIMITER))
             .and_then(|()| self.writer.flush())?;
         Ok(())
     }
 
-    /// Reads raw bytes from the child process until [`CHILD_MESSAGE_DELIMITER`] is encountered.
+    /// Reads raw bytes from the child process until [`EBUILD_MESSAGE_DELIMITER`] is encountered.
     /// Returns `Ok(None)` if EOF is reached.
     pub fn recv_bytes(&mut self) -> Result<Option<&[u8]>, IpcError> {
         self.buffer.clear();
         let num_bytes = self
             .reader
-            .read_until(CHILD_MESSAGE_DELIMITER, &mut self.buffer)?;
+            .read_until(EBUILD_MESSAGE_DELIMITER, &mut self.buffer)?;
         // We got EOF
         if num_bytes == 0 {
             return Ok(None);

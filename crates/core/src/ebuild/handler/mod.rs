@@ -3,7 +3,7 @@ pub mod error;
 mod exec;
 mod functions;
 mod ipc;
-mod prot;
+mod protocol;
 
 use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
 use crate::ebuild::Ebuild;
@@ -17,7 +17,7 @@ use functions::version::{ver_cut, ver_rs, ver_test};
 use functions::{debug_print, die, resolve_eclass};
 use ipc::IpcHandler;
 use log::debug;
-use prot::{ChildMessage, FuncCall, FuncType, ParentMessage};
+use protocol::{EbuildMessage, FuncCall, FuncType, FunctionReply};
 use std::fmt;
 
 /// Defines all implemented ebuild phases.
@@ -43,8 +43,8 @@ impl fmt::Display for EbuildPhase {
 fn map_invalid_args(
     func: FuncType,
     args: Vec<String>,
-    result: anyhow::Result<ParentMessage>,
-) -> Result<ParentMessage, ExecutionError> {
+    result: anyhow::Result<FunctionReply>,
+) -> Result<FunctionReply, ExecutionError> {
     result.map_err(|source| FuncCallError::InvalidArgs { func, args, source }.into())
 }
 
@@ -83,11 +83,11 @@ impl<'a> EbuildPhaseHandler<'a> {
     fn handle_messages(&self, ipc: &mut IpcHandler) -> Result<Vec<String>, ExecutionError> {
         let mut data = Vec::new();
         while let Some(bytes) = ipc.recv_bytes()? {
-            match ChildMessage::from_bytes(bytes)? {
-                ChildMessage::Call(func_call) => {
+            match EbuildMessage::from_bytes(bytes)? {
+                EbuildMessage::Call(func_call) => {
                     let response = self.handle_request(func_call)?;
                     let die_message = match &response {
-                        ParentMessage::Die(message) => Some(message.clone()),
+                        FunctionReply::Die(message) => Some(message.clone()),
                         _ => None,
                     };
                     ipc.send(&response.into_bytes())?;
@@ -95,7 +95,7 @@ impl<'a> EbuildPhaseHandler<'a> {
                         return Err(ExecutionError::Die(message));
                     }
                 }
-                ChildMessage::Data(value) => data.push(value),
+                EbuildMessage::Data(value) => data.push(value),
             }
         }
         Ok(data)
@@ -103,9 +103,9 @@ impl<'a> EbuildPhaseHandler<'a> {
 
     /// Executes a function for the given [`FuncCall`].
     ///
-    /// Returns a [`ParentMessage`] with the result of the function or an `Err` if the request
+    /// Returns a [`FunctionReply`] with the result of the function or an `Err` if the request
     /// is invalid or the function execution fails.
-    fn handle_request(&self, call: FuncCall) -> Result<ParentMessage, ExecutionError> {
+    fn handle_request(&self, call: FuncCall) -> Result<FunctionReply, ExecutionError> {
         let FuncCall { func, args } = call;
         match func {
             FuncType::ResolveEclass => match args.as_slice() {
@@ -119,8 +119,8 @@ impl<'a> EbuildPhaseHandler<'a> {
             },
             FuncType::Has => {
                 let result = match args.as_slice() {
-                    [word, args @ ..] if args.contains(word) => Ok(ParentMessage::Ok(None)),
-                    [..] if !args.is_empty() => Ok(ParentMessage::Err(None)),
+                    [word, args @ ..] if args.contains(word) => Ok(FunctionReply::Ok(None)),
+                    [..] if !args.is_empty() => Ok(FunctionReply::Err(None)),
                     _ => Err(anyhow!("expected a word and one or more values")),
                 };
                 map_invalid_args(func, args, result)
@@ -128,17 +128,17 @@ impl<'a> EbuildPhaseHandler<'a> {
             FuncType::HasV if self.ebuild.eapi.supports_hasv() => {
                 let result = match args.as_slice() {
                     [word, args @ ..] if args.contains(word) => {
-                        Ok(ParentMessage::Ok(Some(word.clone())))
+                        Ok(FunctionReply::Ok(Some(word.clone())))
                     }
-                    [..] if !args.is_empty() => Ok(ParentMessage::Err(None)),
+                    [..] if !args.is_empty() => Ok(FunctionReply::Err(None)),
                     _ => Err(anyhow!("expected a word and one or more values")),
                 };
                 map_invalid_args(func, args, result)
             }
             FuncType::HasQ if self.ebuild.eapi.supports_hasq() => {
                 let result = match args.as_slice() {
-                    [word, args @ ..] if args.contains(word) => Ok(ParentMessage::Ok(None)),
-                    [..] if !args.is_empty() => Ok(ParentMessage::Err(None)),
+                    [word, args @ ..] if args.contains(word) => Ok(FunctionReply::Ok(None)),
+                    [..] if !args.is_empty() => Ok(FunctionReply::Err(None)),
                     _ => Err(anyhow!("expected a word and one or more values")),
                 };
                 map_invalid_args(func, args, result)
@@ -206,7 +206,6 @@ impl<'a> EbuildPhaseHandler<'a> {
 mod tests {
     use super::*;
     use crate::types::FxHashMap;
-    use anyhow::anyhow;
 
     #[test]
     fn test_abort_ipc_ordering() {

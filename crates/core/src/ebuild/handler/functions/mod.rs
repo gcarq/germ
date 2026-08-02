@@ -1,28 +1,28 @@
 pub mod version;
 
-use crate::ebuild::handler::prot::ParentMessage;
+use crate::ebuild::handler::protocol::FunctionReply;
 use crate::repository::Repository;
 use anyhow::anyhow;
 use log::{debug, warn};
 
 /// Logs the given `args` using `debug!()`.
-pub fn debug_print(args: &[String]) -> ParentMessage {
+pub fn debug_print(args: &[String]) -> FunctionReply {
     debug!(target: "ebuild", "{}", args.join(" "));
-    ParentMessage::Ok(None)
+    FunctionReply::Ok(None)
 }
 
 /// Logs the given `args` using `error!()`.
-pub fn die(args: &[String], fatal: bool) -> ParentMessage {
+pub fn die(args: &[String], fatal: bool) -> FunctionReply {
     if fatal {
-        ParentMessage::Die(args.join(" "))
+        FunctionReply::Die(args.join(" "))
     } else {
         warn!("die: {}", args.join(" "));
-        ParentMessage::Err(None)
+        FunctionReply::Err(None)
     }
 }
 
 /// Resolves the given eclass `name` from `repository` and returns the path as string.
-pub fn resolve_eclass(name: &str, repository: &Repository) -> anyhow::Result<ParentMessage> {
+pub fn resolve_eclass(name: &str, repository: &Repository) -> anyhow::Result<FunctionReply> {
     let eclass = repository
         .eclasses()?
         .get(name)
@@ -33,7 +33,7 @@ pub fn resolve_eclass(name: &str, repository: &Repository) -> anyhow::Result<Par
         .to_str()
         .ok_or_else(|| anyhow!("eclass path contains invalid unicode"))?
         .to_owned();
-    Ok(ParentMessage::Ok(Some(path)))
+    Ok(FunctionReply::Ok(Some(path)))
 }
 
 #[cfg(test)]
@@ -42,7 +42,7 @@ mod tests {
     use crate::eapi::Eapi;
     use crate::ebuild::Ebuild;
     use crate::ebuild::handler::error::{ExecutionError, FuncCallError};
-    use crate::ebuild::handler::prot::{FuncCall, FuncType};
+    use crate::ebuild::handler::protocol::{FuncCall, FuncType};
     use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
     use crate::makenv::MakeEnv;
     use crate::package::cpv::CPV;
@@ -75,23 +75,23 @@ mod tests {
         let test_data = [
             (
                 FuncCall::from_raw("die", &["-n", "This is a non-fatal error"]).unwrap(),
-                ParentMessage::Err(None),
+                FunctionReply::Err(None),
             ),
             (
                 FuncCall::from_raw("die", &["This is a fatal error"]).unwrap(),
-                ParentMessage::Die("This is a fatal error".into()),
+                FunctionReply::Die("This is a fatal error".into()),
             ),
             (
                 FuncCall::from_raw("has", &["foo", "foo", "bar", "baz"]).unwrap(),
-                ParentMessage::Ok(None),
+                FunctionReply::Ok(None),
             ),
             (
                 FuncCall::from_raw("ver_rs", &["1-2", "-", "1.2.3.4"]).unwrap(),
-                ParentMessage::Ok(Some("1-2-3.4".into())),
+                FunctionReply::Ok(Some("1-2-3.4".into())),
             ),
             (
                 FuncCall::from_raw("ver_test", &["6.0", "-gt", "5.0"]).unwrap(),
-                ParentMessage::Ok(None),
+                FunctionReply::Ok(None),
             ),
         ];
 

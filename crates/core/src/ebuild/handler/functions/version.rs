@@ -1,4 +1,4 @@
-use crate::ebuild::handler::prot::ParentMessage;
+use crate::ebuild::handler::protocol::FunctionReply;
 use crate::package::cpv::CPV;
 use crate::package::version::PackageVersion;
 use anyhow::bail;
@@ -11,7 +11,7 @@ use std::cmp::Ordering;
 /// The `range` specifies which components to extract from the version.
 /// If `version` is `None`, the package's PV is used.
 /// Returns `Err` if the EAPI does not support `ver_cut`.
-pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> anyhow::Result<ParentMessage> {
+pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> anyhow::Result<FunctionReply> {
     // Use PV as fallback if no version is provided
     let version = match version {
         Some(v) => v,
@@ -26,7 +26,7 @@ pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> anyhow::Result<
     }
     let end = end * 2;
     if start >= end {
-        return Ok(ParentMessage::Ok(Some(String::new())));
+        return Ok(FunctionReply::Ok(Some(String::new())));
     }
     let flat_components = parts
         .into_iter()
@@ -34,7 +34,7 @@ pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> anyhow::Result<
         .skip(start)
         .take(end - start)
         .collect::<String>();
-    Ok(ParentMessage::Ok(Some(flat_components)))
+    Ok(FunctionReply::Ok(Some(flat_components)))
 }
 
 /// Implements the `ver_rs` function for ebuilds that replaces separators for the given ranges,
@@ -44,7 +44,7 @@ pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> anyhow::Result<
 /// If the len of `args` is odd, the last element is treated as the version string,
 /// otherwise the package's PV is used.
 /// Returns the modified version string or an `Err` if parsing fails.
-pub fn ver_rs(cpv: &CPV, args: &[String]) -> anyhow::Result<ParentMessage> {
+pub fn ver_rs(cpv: &CPV, args: &[String]) -> anyhow::Result<FunctionReply> {
     if args.len() < 2 {
         bail!("ver_rs requires at least two arguments");
     }
@@ -87,7 +87,7 @@ pub fn ver_rs(cpv: &CPV, args: &[String]) -> anyhow::Result<ParentMessage> {
             output.push_str(&comp);
             output
         });
-    Ok(ParentMessage::Ok(Some(result)))
+    Ok(FunctionReply::Ok(Some(result)))
 }
 
 /// Implements the `ver_test` function for ebuilds that checks if the relation
@@ -103,7 +103,7 @@ pub fn ver_test(
     version1: Option<&str>,
     op: &str,
     version2: &str,
-) -> anyhow::Result<ParentMessage> {
+) -> anyhow::Result<FunctionReply> {
     let v1 = match version1 {
         Some(v) => &PackageVersion::try_from(v)?,
         None => cpv.version(),
@@ -119,7 +119,7 @@ pub fn ver_test(
         "-lt" => v1.cmp(v2) == Ordering::Less,
         _ => bail!("invalid operator: '{op}'"),
     };
-    Ok(ParentMessage::from_bool(does_match))
+    Ok(FunctionReply::from_bool(does_match))
 }
 
 /// Splits the given `version` into its components,
@@ -193,7 +193,6 @@ fn parse_range(range: &str, max: usize) -> anyhow::Result<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::package::version::PackageVersion;
 
     #[test]
     fn test_ver_cut_ok() {
@@ -225,7 +224,7 @@ mod tests {
         )
         .unwrap();
         for (range, version, expected) in test_cases {
-            let response = ParentMessage::Ok(Some(expected.to_owned()));
+            let response = FunctionReply::Ok(Some(expected.to_owned()));
             assert_eq!(
                 ver_cut(&cpv, range, version).unwrap_or_else(|_| panic!(
                     "Failed for input range: {range}, version: {version:?}"
@@ -282,7 +281,7 @@ mod tests {
         )
         .unwrap();
         for (args, expected) in test_cases {
-            let response = ParentMessage::Ok(Some(expected.to_owned()));
+            let response = FunctionReply::Ok(Some(expected.to_owned()));
             let args = args.into_iter().map(String::from).collect::<Vec<_>>();
             assert_eq!(
                 ver_rs(&cpv, &args).unwrap_or_else(|_| panic!("Failed for input args: {args:?}")),
@@ -413,7 +412,7 @@ mod tests {
         )
         .unwrap();
         for (version1, op, version2, expected) in test_cases {
-            let response = ParentMessage::from_bool(expected);
+            let response = FunctionReply::from_bool(expected);
             assert_eq!(
                 ver_test(&cpv, version1, op, version2).unwrap_or_else(|_| panic!(
                     "Failed for input version1: {version1:?}, op: {op}, version2: {version2}"

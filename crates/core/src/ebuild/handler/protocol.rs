@@ -24,10 +24,10 @@ use thiserror::Error;
 const FIELD_DELIMITER: char = '\0';
 
 /// Frame delimiter for messages from the ebuild process.
-pub(super) const CHILD_MESSAGE_DELIMITER: u8 = 0x04;
+pub(super) const EBUILD_MESSAGE_DELIMITER: u8 = 0x04;
 
 /// Frame delimiter for messages sent to the ebuild process.
-pub(super) const PARENT_MESSAGE_DELIMITER: &[u8] = b"\n";
+pub(super) const FUNCTION_REPLY_DELIMITER: &[u8] = b"\n";
 
 /// Errors caused by invalid ebuild IPC messages.
 #[derive(Error, Debug)]
@@ -121,14 +121,13 @@ impl fmt::Display for FuncCall {
 /// Holds a message from the ebuild process, that can be either a function to execute [`FuncCall`]
 /// or some `String` data.
 #[cfg_attr(test, derive(Debug, PartialEq))]
-pub enum ChildMessage {
+pub enum EbuildMessage {
     Call(FuncCall),
     Data(String),
 }
 
-impl ChildMessage {
-    /// Creates a new [`ChildMessage`] from raw bytes received from the ebuild process
-    /// excluding the end of text delimiter [`CHILD_MESSAGE_DELIMITER`].
+impl EbuildMessage {
+    /// Creates a new [`EbuildMessage`] from raw bytes received from the ebuild process.
     ///
     /// # Errors
     ///
@@ -153,7 +152,7 @@ impl ChildMessage {
     }
 }
 
-impl fmt::Display for ChildMessage {
+impl fmt::Display for EbuildMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Call(func_call) => write!(f, "{func_call}"),
@@ -162,20 +161,20 @@ impl fmt::Display for ChildMessage {
     }
 }
 
-/// Represents a response to be sent back to the ebuild process after handling a `ChildMessage`.
+/// Represents a response to be sent back to the ebuild process after handling a `EbuildMessage`.
 /// The response can be `Ok`, `Err`, or `Die`. `Ok` and `Err` may optionally include a message.
 /// `Ok` will be interpreted as a successful execution (return 0), `Err` as a function failure
 /// (return 1), and `Die` terminates the ebuild process with status 1.
 #[derive(PartialEq)]
 #[cfg_attr(test, derive(Debug))]
-pub enum ParentMessage {
+pub enum FunctionReply {
     Ok(Option<String>),
     Err(Option<String>),
     Die(String),
 }
 
-impl ParentMessage {
-    /// Creates a new [`ParentMessage`] from a boolean value without a `String`.
+impl FunctionReply {
+    /// Creates a new [`FunctionReply`] from a boolean value without a `String`.
     pub const fn from_bool(value: bool) -> Self {
         match value {
             true => Self::Ok(None),
@@ -189,7 +188,7 @@ impl ParentMessage {
     }
 }
 
-impl fmt::Display for ParentMessage {
+impl fmt::Display for FunctionReply {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ok(Some(value)) => write!(f, "OK {value}"),
@@ -206,86 +205,86 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_child_message_from_bytes_ok() {
+    fn test_ebuild_message_from_bytes_ok() {
         // (raw data, expected message)
         let test_data = [
             (
                 "FN\x00ver_rs\x001-\x00' '",
-                ChildMessage::Call(FuncCall {
+                EbuildMessage::Call(FuncCall {
                     func: FuncType::VerRs,
                     args: vec!["1-".to_owned(), "' '".to_owned()],
                 }),
             ),
             (
                 "FN\x00ver_test\x006.0\x00-gt\x005.0",
-                ChildMessage::Call(FuncCall {
+                EbuildMessage::Call(FuncCall {
                     func: FuncType::VerTest,
                     args: vec!["6.0".to_owned(), "-gt".to_owned(), "5.0".to_owned()],
                 }),
             ),
             (
                 "DATA\x00LICENSE=PSF-2",
-                ChildMessage::Data("LICENSE=PSF-2".to_owned()),
+                EbuildMessage::Data("LICENSE=PSF-2".to_owned()),
             ),
             (
                 "DATA\x00IUSE=static-libs tcpd usbip",
-                ChildMessage::Data("IUSE=static-libs tcpd usbip".to_owned()),
+                EbuildMessage::Data("IUSE=static-libs tcpd usbip".to_owned()),
             ),
         ];
 
         for (data, expected_msg) in test_data {
-            let msg = ChildMessage::from_bytes(data.as_bytes()).unwrap();
+            let msg = EbuildMessage::from_bytes(data.as_bytes()).unwrap();
             assert_eq!(msg, expected_msg);
         }
     }
 
     #[test]
-    fn test_child_message_from_bytes_invalid_request() {
+    fn test_ebuild_message_from_bytes_invalid_request() {
         assert!(matches!(
-            ChildMessage::from_bytes(b"FOO\0bar\0baz"),
+            EbuildMessage::from_bytes(b"FOO\0bar\0baz"),
             Err(ProtocolError::InvalidRequest(request)) if request == "FOO\0bar\0baz"
         ));
     }
 
     #[test]
-    fn test_child_message_from_bytes_invalid_utf8() {
+    fn test_ebuild_message_from_bytes_invalid_utf8() {
         assert!(matches!(
-            ChildMessage::from_bytes(&[0xff]),
+            EbuildMessage::from_bytes(&[0xff]),
             Err(ProtocolError::InvalidUtf8(_))
         ));
     }
 
     #[test]
-    fn test_child_message_from_bytes_missing_function() {
+    fn test_ebuild_message_from_bytes_missing_function() {
         assert!(matches!(
-            ChildMessage::from_bytes(b"FN\0"),
+            EbuildMessage::from_bytes(b"FN\0"),
             Err(ProtocolError::MissingFunction)
         ));
     }
 
     #[test]
-    fn test_child_message_from_bytes_unknown_function() {
+    fn test_ebuild_message_from_bytes_unknown_function() {
         assert!(matches!(
-            ChildMessage::from_bytes(b"FN\0unknown"),
+            EbuildMessage::from_bytes(b"FN\0unknown"),
             Err(ProtocolError::UnknownFunction { func }) if func == "unknown"
         ));
     }
 
     #[test]
-    fn test_parent_message_into_bytes() {
+    fn test_function_reply_into_bytes() {
         // (message, expected bytes)
         let test_data = [
-            (ParentMessage::Ok(None), "OK".as_bytes()),
+            (FunctionReply::Ok(None), "OK".as_bytes()),
             (
-                ParentMessage::Ok(Some("1.2.3".to_owned())),
+                FunctionReply::Ok(Some("1.2.3".to_owned())),
                 "OK 1.2.3".as_bytes(),
             ),
-            (ParentMessage::Err(None), "ERR".as_bytes()),
+            (FunctionReply::Err(None), "ERR".as_bytes()),
             (
-                ParentMessage::Err(Some("fatal error".to_owned())),
+                FunctionReply::Err(Some("fatal error".to_owned())),
                 "ERR fatal error".as_bytes(),
             ),
-            (ParentMessage::Die("fatal error".into()), "DIE".as_bytes()),
+            (FunctionReply::Die("fatal error".into()), "DIE".as_bytes()),
         ];
 
         for (msg, expected_bytes) in test_data {
