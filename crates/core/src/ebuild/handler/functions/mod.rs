@@ -3,7 +3,7 @@ pub mod version;
 use crate::ebuild::handler::prot::ParentMessage;
 use crate::repository::Repository;
 use anyhow::{Result, anyhow};
-use log::{debug, error};
+use log::{debug, warn};
 
 /// Logs the given `args` using `debug!()`.
 pub fn debug_print(args: &[String]) -> ParentMessage {
@@ -13,10 +13,10 @@ pub fn debug_print(args: &[String]) -> ParentMessage {
 
 /// Logs the given `args` using `error!()`.
 pub fn die(args: &[String], fatal: bool) -> ParentMessage {
-    error!("die: {}", args.join(" "));
     if fatal {
-        ParentMessage::Die
+        ParentMessage::Die(args.join(" "))
     } else {
+        warn!("die: {}", args.join(" "));
         ParentMessage::Err(None)
     }
 }
@@ -59,7 +59,7 @@ mod tests {
             ),
             (
                 FuncCall::from_raw("die", &["This is a fatal error"]).unwrap(),
-                ParentMessage::Die,
+                ParentMessage::Die("This is a fatal error".into()),
             ),
             (
                 FuncCall::from_raw("has", &["foo", "foo", "bar", "baz"]).unwrap(),

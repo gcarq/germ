@@ -76,7 +76,7 @@ impl fmt::Display for ChildMessage {
 pub enum ParentMessage {
     Ok(Option<String>),
     Err(Option<String>),
-    Die,
+    Die(String),
 }
 
 impl ParentMessage {
@@ -102,7 +102,7 @@ impl fmt::Display for ParentMessage {
             Self::Ok(None) => write!(f, "OK"),
             Self::Err(Some(value)) => write!(f, "ERR {value}"),
             Self::Err(None) => write!(f, "ERR"),
-            Self::Die => write!(f, "DIE"),
+            Self::Die(_) => write!(f, "DIE"),
         }
     }
 }
@@ -169,7 +169,7 @@ mod tests {
                 ParentMessage::Err(Some("fatal error".to_owned())),
                 "ERR fatal error".as_bytes(),
             ),
-            (ParentMessage::Die, "DIE".as_bytes()),
+            (ParentMessage::Die("fatal error".into()), "DIE".as_bytes()),
         ];
 
         for (msg, expected_bytes) in test_data {

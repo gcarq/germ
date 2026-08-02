@@ -1,4 +1,5 @@
 mod env;
+pub mod error;
 mod exec;
 mod functions;
 mod ipc;
@@ -6,16 +7,17 @@ mod prot;
 
 use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
 use crate::ebuild::Ebuild;
-use crate::ebuild::handler::env::EbuildEnv;
-use crate::ebuild::handler::functions::version::{ver_cut, ver_rs, ver_test};
-use crate::ebuild::handler::functions::{debug_print, die, resolve_eclass};
-use crate::ebuild::handler::prot::func::{FuncCall, FuncType};
-use crate::ebuild::handler::prot::{ChildMessage, ParentMessage};
 use crate::makenv::MakeEnv;
 use anyhow::{Result, bail};
+use env::EbuildEnv;
+use error::ExecutionError;
 use exec::EbuildExecution;
+use functions::version::{ver_cut, ver_rs, ver_test};
+use functions::{debug_print, die, resolve_eclass};
 use ipc::IpcHandler;
 use log::debug;
+use prot::func::{FuncCall, FuncType};
+use prot::{ChildMessage, ParentMessage};
 use std::fmt;
 use std::ops::Deref;
 
@@ -57,7 +59,7 @@ impl<'a> EbuildPhaseHandler<'a> {
     /// Spawns the process and returns the data sent by the ebuild process.
     /// NOTE: This call blocks until the process has been finished or the
     /// IPC channel has been closed.
-    pub fn spawn(&mut self) -> Result<Vec<String>> {
+    pub fn spawn(&mut self) -> Result<Vec<String>, ExecutionError> {
         debug!(
             "Executing ebuild phase '{}' for '{}' ...",
             self.phase, self.ebuild.cpv
@@ -69,16 +71,19 @@ impl<'a> EbuildPhaseHandler<'a> {
         execution.run(|channel| self.handle_messages(channel))
     }
 
-    fn handle_messages(&self, ipc: &mut IpcHandler) -> Result<Vec<String>> {
+    fn handle_messages(&self, ipc: &mut IpcHandler) -> Result<Vec<String>, ExecutionError> {
         let mut data = Vec::new();
         while let Some(request) = ipc.recv::<ChildMessage>()? {
             match request {
                 ChildMessage::Call(func_call) => {
                     let response = self.handle_request(func_call)?;
-                    let died = matches!(response, ParentMessage::Die);
+                    let die_message = match &response {
+                        ParentMessage::Die(message) => Some(message.clone()),
+                        _ => None,
+                    };
                     ipc.send(response)?;
-                    if died {
-                        return Ok(Vec::new());
+                    if let Some(message) = die_message {
+                        return Err(ExecutionError::Die(message));
                     }
                 }
                 ChildMessage::Data(value) => data.push(value),
@@ -202,11 +207,11 @@ mod tests {
             IpcHandler::spawn(BASH_BINARY_PATH, &args, &FxHashMap::default()).unwrap();
         let mut execution = EbuildExecution::new(ipc, child);
 
-        let result: Result<()> = execution.run(|channel| {
+        let result: Result<(), ExecutionError> = execution.run(|channel| {
             channel
                 .recv::<Ready>()?
                 .ok_or_else(|| anyhow!("unexpected EOF"))?;
-            Err(anyhow!("protocol failure"))
+            Err(ExecutionError::Internal(anyhow!("protocol failure")))
         });
 
         assert!(

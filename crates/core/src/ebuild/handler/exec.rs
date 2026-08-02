@@ -1,3 +1,4 @@
+use super::error::ExecutionError;
 use super::ipc::IpcHandler;
 use anyhow::{Context, Result, bail};
 use log::warn;
@@ -63,7 +64,10 @@ impl EbuildExecution {
     /// Runs the execution with the given IPC `handler`.
     ///
     /// Data is returned only when the child exits successfully.
-    pub fn run<T>(&mut self, handler: impl FnOnce(&mut IpcHandler) -> Result<T>) -> Result<T> {
+    pub fn run<T>(
+        &mut self,
+        handler: impl FnOnce(&mut IpcHandler) -> Result<T, ExecutionError>,
+    ) -> Result<T, ExecutionError> {
         let ipc = self
             .ipc
             .as_mut()
@@ -93,14 +97,14 @@ impl EbuildExecution {
     }
 
     /// Completes the execution by reaping the child and verifying that the process group is empty.
-    fn complete(&mut self) -> Result<()> {
+    fn complete(&mut self) -> Result<(), ExecutionError> {
         let status = self.reap()?;
         let cleanup = self.verify_group_empty();
         if !status.success() {
             if let Err(cleanup_err) = cleanup {
                 warn!("unable to clean up failed ebuild execution: {cleanup_err:#}");
             }
-            bail!("ebuild process exited with non-zero status: {status}");
+            return Err(ExecutionError::NonZeroExit(status));
         }
         cleanup?;
         Ok(())
@@ -246,6 +250,26 @@ mod tests {
         execution.run(|_| Ok(())).unwrap();
 
         assert!(execution.exit_status.is_some_and(|status| status.success()));
+    }
+
+    #[test]
+    fn test_run_die() {
+        let mut execution = spawn_execution("while :; do :; done");
+
+        let err = execution
+            .run::<()>(|_| Err(ExecutionError::Die("fatal error".into())))
+            .unwrap_err();
+
+        assert!(matches!(err, ExecutionError::Die(message) if message == "fatal error"));
+    }
+
+    #[test]
+    fn test_run_non_zero_exit() {
+        let mut execution = spawn_execution("exit 7");
+
+        let err = execution.run(|_| Ok(())).unwrap_err();
+
+        assert!(matches!(err, ExecutionError::NonZeroExit(status) if status.code() == Some(7)));
     }
 
     #[test]

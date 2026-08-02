@@ -1,17 +1,19 @@
 pub mod handler;
 
-use crate::eapi::Eapi;
+use crate::eapi::{Eapi, EapiError};
+
 use crate::package::cpv::CPV;
 use crate::repository::Repository;
-use anyhow::{Context, Result, anyhow, bail};
+
 use log::trace;
 use regex::Regex;
 use std::fmt;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::LazyLock;
+use thiserror::Error;
 
 /// Regex to capture EAPI from ebuild files according to PMS 7.3.1.
 /// The regex crate doesn't support backreferences, so we can't enforce matching quotes.
@@ -32,18 +34,18 @@ pub struct Ebuild<'a> {
 impl<'a> Ebuild<'a> {
     /// Creates an [`Ebuild`] from the given `path` and [`CPV`] it relates to.
     ///
-    /// Returns an `Err` if the EAPI is not found or unsupported for ebuilds.
-    pub fn new(path: &'a Path, cpv: &'a CPV, repo: &'a Repository) -> Result<Self> {
+    /// Returns an [`EbuildError`] if the ebuild is malformed.
+    pub fn new(path: &'a Path, cpv: &'a CPV, repo: &'a Repository) -> Result<Self, EbuildError> {
         trace!("Loading ebuild '{}' for '{cpv}' ...", path.display());
-        let file =
-            File::open(path).with_context(|| anyhow!("unable to open {}", path.display()))?;
+        let file = File::open(path)?;
         let reader = BufReader::with_capacity(256, file);
         for line in reader.lines() {
             let line = line?;
             if let Some(caps) = PMS_EAPI_RE.captures(&line) {
-                let eapi = Eapi::from_str(&caps["eapi"])?;
+                let value = &caps["eapi"];
+                let eapi = Eapi::from_str(value)?;
                 if !eapi.is_supported_for_ebuilds() {
-                    bail!("EAPI '{eapi}' is not supported for ebuilds");
+                    return Err(EbuildError::UnsupportedEapi(eapi));
                 }
                 return Ok(Self {
                     path,
@@ -53,7 +55,7 @@ impl<'a> Ebuild<'a> {
                 });
             }
         }
-        bail!("EAPI not found in ebuild: {}", path.display())
+        Err(EbuildError::MissingEapi)
     }
 }
 
@@ -71,11 +73,71 @@ impl fmt::Display for Ebuild<'_> {
     }
 }
 
+/// Errors returned when loading and validating an [`Ebuild`].
+#[derive(Error, Debug)]
+pub enum EbuildError {
+    #[error("EAPI declaration not found")]
+    MissingEapi,
+
+    #[error(transparent)]
+    Eapi(#[from] EapiError),
+
+    #[error("unsupported EAPI '{0}'")]
+    UnsupportedEapi(Eapi),
+
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
+    use tempfile::NamedTempFile;
 
     use super::*;
+
+    #[test]
+    fn test_missing_eapi() {
+        let file = NamedTempFile::new().unwrap();
+        fs::write(file.path(), "DESCRIPTION=missing").unwrap();
+
+        let err = Ebuild::new(file.path(), &CPV::default(), &Repository::default()).unwrap_err();
+
+        assert!(matches!(err, EbuildError::MissingEapi));
+    }
+
+    #[test]
+    fn test_unrecognized_eapi() {
+        let file = NamedTempFile::new().unwrap();
+        fs::write(file.path(), "EAPI=abc").unwrap();
+
+        let err = Ebuild::new(file.path(), &CPV::default(), &Repository::default()).unwrap_err();
+        assert!(matches!(
+            err,
+            EbuildError::Eapi(EapiError::Unrecognized(value)) if value == "abc"
+        ));
+    }
+
+    #[test]
+    fn test_unsupported_eapi() {
+        let file = NamedTempFile::new().unwrap();
+        fs::write(file.path(), "EAPI=6").unwrap();
+
+        let err = Ebuild::new(file.path(), &CPV::default(), &Repository::default()).unwrap_err();
+
+        assert!(matches!(err, EbuildError::UnsupportedEapi(Eapi::Six)));
+    }
+
+    #[test]
+    fn test_ebuild_io_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("missing.ebuild");
+
+        let err = Ebuild::new(&path, &CPV::default(), &Repository::default()).unwrap_err();
+
+        assert!(matches!(err, EbuildError::Io(_)));
+    }
 
     #[test]
     fn test_ebuild_eq() {

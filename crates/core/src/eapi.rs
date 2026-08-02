@@ -1,13 +1,13 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, anyhow};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::path::Path;
 use std::str::FromStr;
 use std::{fmt, fs};
+use thiserror::Error;
 
 /// An EAPI can be thought of as a ‘version’ of the PMS to which a package conforms.
 /// See PMS section 2 for more details.
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Default, Debug)]
 pub enum Eapi {
     #[default]
     Zero,
@@ -26,21 +26,21 @@ impl Eapi {
     /// Creates a new instance from the EAPI file at the given `path`.
     ///
     /// Returns `Eapi::default()` if no eapi file exists.
-    pub fn from_eapi_file(path: &Path) -> Result<Self> {
+    pub fn from_eapi_file(path: &Path) -> anyhow::Result<Self> {
         if !path.exists() {
             return Ok(Eapi::default());
         }
-        fs::read_to_string(path)
+        Ok(fs::read_to_string(path)
             .with_context(|| anyhow!("unable to read eapi file {}", path.display()))?
             .lines()
             .next()
             .ok_or_else(|| anyhow!("empty eapi file {}", path.display()))?
-            .parse()
+            .parse()?)
     }
 
     /// Creates a new instance from the given EAPI `version`.
-    /// Returns an `Err` if the version is unsupported.
-    fn new(version: &str) -> Result<Self> {
+    /// Returns an [`EapiError`] if the version is not recognized.
+    fn new(version: &str) -> Result<Self, EapiError> {
         let version = match version {
             "0" => Self::Zero,
             "1" => Self::One,
@@ -52,7 +52,7 @@ impl Eapi {
             "7" => Self::Seven,
             "8" => Self::Eight,
             "9" => Self::Nine,
-            x => bail!("unsupported EAPI: '{x}'"),
+            value => return Err(EapiError::Unrecognized(value.to_owned())),
         };
         Ok(version)
     }
@@ -89,11 +89,18 @@ impl Eapi {
 }
 
 impl FromStr for Eapi {
-    type Err = anyhow::Error;
+    type Err = EapiError;
 
-    fn from_str(version: &str) -> Result<Self> {
+    fn from_str(version: &str) -> Result<Self, Self::Err> {
         Self::new(version)
     }
+}
+
+/// Errors returned when parsing an [`Eapi`].
+#[derive(Debug, Error)]
+pub enum EapiError {
+    #[error("unrecognized EAPI '{0}'")]
+    Unrecognized(String),
 }
 
 impl fmt::Display for Eapi {
@@ -122,15 +129,18 @@ mod tests {
     fn test_eapi_new_ok() {
         for version in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
             let eapi = Eapi::from_str(version);
-            assert!(eapi.is_ok(), "EAPI version '{version}' should be supported");
+            assert!(
+                eapi.is_ok(),
+                "EAPI version '{version}' should be recognized"
+            );
             assert_eq!(eapi.unwrap().to_string(), *version);
         }
     }
 
     #[test]
     fn test_eapi_new_err() {
-        let eapi = Eapi::from_str("abc");
-        assert!(eapi.is_err());
+        let result = Eapi::from_str("abc");
+        assert!(matches!(result, Err(EapiError::Unrecognized(value)) if value == "abc"));
     }
 
     #[test]
