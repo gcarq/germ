@@ -11,7 +11,7 @@ use crate::makenv::MakeEnv;
 use anyhow::anyhow;
 
 use env::EbuildEnv;
-use error::{ExecutionError, FuncCallError};
+use error::{FuncCallError, PhaseExecutionError};
 use exec::EbuildExecution;
 use functions::version::{ver_cut, ver_rs, ver_test};
 use functions::{debug_print, die, resolve_eclass};
@@ -44,7 +44,7 @@ fn map_invalid_args(
     func: FuncType,
     args: Vec<String>,
     result: anyhow::Result<FunctionReply>,
-) -> Result<FunctionReply, ExecutionError> {
+) -> Result<FunctionReply, PhaseExecutionError> {
     result.map_err(|source| FuncCallError::InvalidArgs { func, args, source }.into())
 }
 
@@ -68,7 +68,7 @@ impl<'a> EbuildPhaseHandler<'a> {
     /// Spawns the process and returns the data sent by the ebuild process.
     /// NOTE: This call blocks until the process has been finished or the
     /// IPC channel has been closed.
-    pub fn spawn(&mut self) -> Result<Vec<String>, ExecutionError> {
+    pub fn spawn(&mut self) -> Result<Vec<String>, PhaseExecutionError> {
         debug!(
             "Executing ebuild phase '{}' for '{}' ...",
             self.phase, self.ebuild.cpv
@@ -80,7 +80,7 @@ impl<'a> EbuildPhaseHandler<'a> {
         execution.run(|channel| self.handle_messages(channel))
     }
 
-    fn handle_messages(&self, ipc: &mut IpcHandler) -> Result<Vec<String>, ExecutionError> {
+    fn handle_messages(&self, ipc: &mut IpcHandler) -> Result<Vec<String>, PhaseExecutionError> {
         let mut data = Vec::new();
         while let Some(bytes) = ipc.recv_bytes()? {
             match EbuildMessage::from_bytes(bytes)? {
@@ -92,7 +92,7 @@ impl<'a> EbuildPhaseHandler<'a> {
                     };
                     ipc.send(&response.into_bytes())?;
                     if let Some(message) = die_message {
-                        return Err(ExecutionError::Die(message));
+                        return Err(PhaseExecutionError::Die(message));
                     }
                 }
                 EbuildMessage::Data(value) => data.push(value),
@@ -105,7 +105,7 @@ impl<'a> EbuildPhaseHandler<'a> {
     ///
     /// Returns a [`FunctionReply`] with the result of the function or an `Err` if the request
     /// is invalid or the function execution fails.
-    fn handle_request(&self, call: FuncCall) -> Result<FunctionReply, ExecutionError> {
+    fn handle_request(&self, call: FuncCall) -> Result<FunctionReply, PhaseExecutionError> {
         let FuncCall { func, args } = call;
         match func {
             FuncType::ResolveEclass => match args.as_slice() {
@@ -222,11 +222,11 @@ mod tests {
             IpcHandler::spawn(BASH_BINARY_PATH, &args, &FxHashMap::default()).unwrap();
         let mut execution = EbuildExecution::new(ipc, child);
 
-        let result: Result<(), ExecutionError> = execution.run(|channel| {
+        let result: Result<(), PhaseExecutionError> = execution.run(|channel| {
             channel
                 .recv_bytes()?
                 .ok_or_else(|| anyhow!("unexpected EOF"))?;
-            Err(ExecutionError::Internal(anyhow!("protocol failure")))
+            Err(PhaseExecutionError::Internal(anyhow!("protocol failure")))
         });
 
         assert!(

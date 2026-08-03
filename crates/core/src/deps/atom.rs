@@ -107,7 +107,9 @@ impl fmt::Display for AtomOperator {
 }
 
 /// Specifies the variant of an atom, which determines how packages are matched.
-#[derive(Archive, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
+#[derive(
+    Archive, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug,
+)]
 pub enum AtomVariant {
     #[default]
     Simple,
@@ -118,7 +120,9 @@ pub enum AtomVariant {
 /// This enum defines two variants to express identifier matching for e.g. `category` and `package`.
 ///
 /// [`Self::Exact`] should only match an exact name and [`Self::Any`] should match all values.
-#[derive(Archive, Serialize, Deserialize, Default, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[derive(
+    Archive, Serialize, Deserialize, Default, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug,
+)]
 pub enum AtomIdent {
     Exact(String),
     #[default]
@@ -309,11 +313,8 @@ impl fmt::Display for Atom {
 
 #[cfg(test)]
 mod tests {
-    use crate::deps::atom::AtomIdent::{Any, Exact};
-    use crate::deps::atom::{Atom, AtomOperator, AtomVariant};
-    use crate::deps::*;
-    use crate::package::slot::PackageSlot;
-    use crate::package::version::PackageVersion;
+    use super::*;
+    use super::AtomIdent::{Any, Exact};
 
     #[test]
     fn test_atom_from_str_simple() {

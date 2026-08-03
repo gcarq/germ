@@ -1,6 +1,6 @@
 pub mod version;
 
-use crate::ebuild::handler::error::{ExecutionError, FuncCallError};
+use crate::ebuild::handler::error::{FuncCallError, PhaseExecutionError};
 use crate::ebuild::handler::protocol::FunctionReply;
 use crate::repository::Repository;
 use anyhow::anyhow;
@@ -26,7 +26,7 @@ pub fn die(args: &[String], fatal: bool) -> FunctionReply {
 pub fn resolve_eclass(
     name: &str,
     repository: &Repository,
-) -> Result<FunctionReply, ExecutionError> {
+) -> Result<FunctionReply, PhaseExecutionError> {
     let Some(eclass) = repository.eclasses()?.get(name) else {
         return Err(FuncCallError::EclassNotFound {
             name: name.to_owned(),
@@ -121,7 +121,7 @@ mod tests {
 
             assert!(matches!(
                 error,
-                ExecutionError::FuncCall(FuncCallError::InvalidArgs {
+                PhaseExecutionError::FuncCall(FuncCallError::InvalidArgs {
                     func: FuncType::VerRs,
                     args: error_args,
                     ..
@@ -142,7 +142,7 @@ mod tests {
 
             assert!(matches!(
                 error,
-                ExecutionError::FuncCall(FuncCallError::Unsupported {
+                PhaseExecutionError::FuncCall(FuncCallError::Unsupported {
                     func: FuncType::HasV,
                     eapi: Eapi::Eight,
                 })

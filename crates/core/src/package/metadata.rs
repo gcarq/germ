@@ -5,11 +5,26 @@ use crate::eapi::Eapi;
 use crate::package::slot::PackageSlot;
 use crate::repository::eclass::Eclass;
 use crate::types::FxHashMap;
-use anyhow::{Result, anyhow, bail};
+use anyhow::bail;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::path::Path;
 use std::str::FromStr;
 use std::{fmt, fs, io};
+use thiserror::Error;
+
+/// Errors returned when constructing package metadata from ebuild output.
+#[derive(Debug, Error)]
+pub enum PackageMetadataError {
+    #[error("required metadata variable '{field}' is missing")]
+    Missing { field: &'static str },
+
+    #[error("invalid value for metadata variable '{field}'")]
+    Invalid {
+        field: &'static str,
+        #[source]
+        source: anyhow::Error,
+    },
+}
 
 /// Holds all metadata of a [`Package`].
 /// TODO: parse eclasses
@@ -36,40 +51,57 @@ pub struct PackageMetadata {
 }
 
 impl PackageMetadata {
-    /// Takes a `map` with all ebuild properties, also takes the `md5sum` of the ebuild file.
+    /// Builds package metadata from the given `map`.
     ///
-    /// Returns `None` if any of the required fields are missing or if the EAPI is invalid.
-    pub fn from_map(map: FxHashMap<&str, &str>) -> Result<Self> {
-        fn required<'a>(key: &str, map: &'a FxHashMap<&str, &str>) -> Result<&'a str> {
-            map.get(key)
+    /// Returns a [`PackageMetadataError`] if a required variable is missing or invalid.
+    pub fn from_map(map: FxHashMap<&str, &str>) -> Result<Self, PackageMetadataError> {
+        fn required<'a>(
+            field: &'static str,
+            map: &'a FxHashMap<&str, &str>,
+        ) -> Result<&'a str, PackageMetadataError> {
+            map.get(field)
                 .copied()
-                .ok_or_else(|| anyhow!("{key} is not set"))
+                .ok_or(PackageMetadataError::Missing { field })
+        }
+
+        const fn invalid(field: &'static str, source: anyhow::Error) -> PackageMetadataError {
+            PackageMetadataError::Invalid { field, source }
         }
 
         let metadata = Self::default()
-            .eapi(required("EAPI", &map)?)?
+            .eapi(required("EAPI", &map)?)
+            .map_err(|source| invalid("EAPI", source))?
             .description(required("DESCRIPTION", &map)?)
             .homepage(required("HOMEPAGE", &map)?)
             .src_uri(required("SRC_URI", &map)?)
             .license(required("LICENSE", &map)?)
             .keywords(required("KEYWORDS", &map)?)
             .inherit(required("INHERIT", &map)?)
-            .restrict(required("RESTRICT", &map)?)?
+            .restrict(required("RESTRICT", &map)?)
+            .map_err(|source| invalid("RESTRICT", source))?
             .defined_phases(required("DEFINED_PHASES", &map)?)
-            .iuse(required("IUSE", &map)?)?
-            .required_use(required("REQUIRED_USE", &map)?)?
-            .slot(required("SLOT", &map)?)?
-            .depend(required("DEPEND", &map)?)?
-            .bdepend(required("BDEPEND", &map)?)?
-            .idepend(required("IDEPEND", &map)?)?
-            .pdepend(required("PDEPEND", &map)?)?
-            .rdepend(required("RDEPEND", &map)?)?;
+            .iuse(required("IUSE", &map)?)
+            .map_err(|source| invalid("IUSE", source))?
+            .required_use(required("REQUIRED_USE", &map)?)
+            .map_err(|source| invalid("REQUIRED_USE", source))?
+            .slot(required("SLOT", &map)?)
+            .map_err(|source| invalid("SLOT", source))?
+            .depend(required("DEPEND", &map)?)
+            .map_err(|source| invalid("DEPEND", source))?
+            .bdepend(required("BDEPEND", &map)?)
+            .map_err(|source| invalid("BDEPEND", source))?
+            .idepend(required("IDEPEND", &map)?)
+            .map_err(|source| invalid("IDEPEND", source))?
+            .pdepend(required("PDEPEND", &map)?)
+            .map_err(|source| invalid("PDEPEND", source))?
+            .rdepend(required("RDEPEND", &map)?)
+            .map_err(|source| invalid("RDEPEND", source))?;
         Ok(metadata)
     }
 
     /// Builds [`PackageMetadata`] from the given VDB package `path`.
-    pub fn from_vdb_path(path: &Path) -> Result<Self> {
-        fn read_meta(path: &Path) -> Result<String> {
+    pub fn from_vdb_path(path: &Path) -> anyhow::Result<Self> {
+        fn read_meta(path: &Path) -> anyhow::Result<String> {
             match fs::read_to_string(path) {
                 Ok(content) => Ok(content.trim().to_string()),
                 Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(String::new()),
@@ -96,7 +128,7 @@ impl PackageMetadata {
             .rdepend(&read_meta(&path.join("RDEPEND"))?)
     }
 
-    pub fn eapi(mut self, value: &str) -> Result<Self> {
+    pub fn eapi(mut self, value: &str) -> anyhow::Result<Self> {
         self.eapi = value.parse()?;
         Ok(self)
     }
@@ -131,7 +163,7 @@ impl PackageMetadata {
         self
     }
 
-    pub fn restrict(mut self, value: &str) -> Result<Self> {
+    pub fn restrict(mut self, value: &str) -> anyhow::Result<Self> {
         self.restrict = DepExpression::parse(value)?;
         Ok(self)
     }
@@ -141,45 +173,45 @@ impl PackageMetadata {
         self
     }
 
-    pub fn iuse(mut self, value: &str) -> Result<Self> {
+    pub fn iuse(mut self, value: &str) -> anyhow::Result<Self> {
         self.iuse = value
             .split_whitespace()
             .map(PrefixedUseFlag::from_str)
-            .collect::<Result<_>>()?;
+            .collect::<anyhow::Result<_>>()?;
         Ok(self)
     }
 
-    pub fn required_use(mut self, value: &str) -> Result<Self> {
+    pub fn required_use(mut self, value: &str) -> anyhow::Result<Self> {
         self.required_use = DepExpression::parse(value)?;
         Ok(self)
     }
 
-    pub fn slot(mut self, value: &str) -> Result<Self> {
+    pub fn slot(mut self, value: &str) -> anyhow::Result<Self> {
         self.slot = value.parse()?;
         Ok(self)
     }
 
-    pub fn depend(mut self, value: &str) -> Result<Self> {
+    pub fn depend(mut self, value: &str) -> anyhow::Result<Self> {
         self.depend = DepExpression::parse(value)?;
         Ok(self)
     }
 
-    pub fn bdepend(mut self, value: &str) -> Result<Self> {
+    pub fn bdepend(mut self, value: &str) -> anyhow::Result<Self> {
         self.bdepend = DepExpression::parse(value)?;
         Ok(self)
     }
 
-    pub fn idepend(mut self, value: &str) -> Result<Self> {
+    pub fn idepend(mut self, value: &str) -> anyhow::Result<Self> {
         self.idepend = DepExpression::parse(value)?;
         Ok(self)
     }
 
-    pub fn pdepend(mut self, value: &str) -> Result<Self> {
+    pub fn pdepend(mut self, value: &str) -> anyhow::Result<Self> {
         self.pdepend = DepExpression::parse(value)?;
         Ok(self)
     }
 
-    pub fn rdepend(mut self, value: &str) -> Result<Self> {
+    pub fn rdepend(mut self, value: &str) -> anyhow::Result<Self> {
         self.rdepend = DepExpression::parse(value)?;
         Ok(self)
     }
@@ -226,9 +258,8 @@ impl fmt::Display for PackageMetadata {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_metadata_from_map_ok() {
-        let data = [
+    fn metadata_map() -> FxHashMap<&'static str, &'static str> {
+        [
             "DEPEND=",
             "RDEPEND= \tpython_single_target_python3_11? ( \t\t\tdev-lang/python:3.11 \t\t)",
             "SLOT=0",
@@ -251,9 +282,12 @@ mod tests {
         ]
         .iter()
         .filter_map(|d| d.split_once('='))
-        .collect::<FxHashMap<_, _>>();
+        .collect()
+    }
 
-        let metadata = PackageMetadata::from_map(data);
+    #[test]
+    fn test_metadata_from_map_ok() {
+        let metadata = PackageMetadata::from_map(metadata_map());
         assert!(metadata.is_ok(), "metadata should be parsed successfully");
 
         let metadata = metadata.unwrap();
@@ -298,5 +332,25 @@ mod tests {
             metadata.rdepend.to_string(),
             "python_single_target_python3_11? ( dev-lang/python:3.11 )"
         );
+    }
+
+    #[test]
+    fn test_metadata_from_map_missing() {
+        let mut data = metadata_map();
+        data.remove("SLOT");
+        assert!(matches!(
+            PackageMetadata::from_map(data).unwrap_err(),
+            PackageMetadataError::Missing { field: "SLOT" }
+        ));
+    }
+
+    #[test]
+    fn test_metadata_from_map_invalid() {
+        let mut data = metadata_map();
+        data.insert("SLOT", "invalid/slot/value");
+        assert!(matches!(
+            PackageMetadata::from_map(data).unwrap_err(),
+            PackageMetadataError::Invalid { field: "SLOT", .. }
+        ));
     }
 }

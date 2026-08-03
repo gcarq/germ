@@ -25,7 +25,7 @@ pub enum FuncCallError {
 
 /// Errors returned during ebuild execution.
 #[derive(Error, Debug)]
-pub enum ExecutionError {
+pub enum PhaseExecutionError {
     #[error(transparent)]
     FuncCall(#[from] FuncCallError),
 

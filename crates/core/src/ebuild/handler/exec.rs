@@ -1,6 +1,6 @@
-use super::error::ExecutionError;
+use super::error::PhaseExecutionError;
 use super::ipc::IpcHandler;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, bail};
 use log::warn;
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill, killpg};
@@ -66,8 +66,8 @@ impl EbuildExecution {
     /// Data is returned only when the child exits successfully.
     pub fn run<T>(
         &mut self,
-        handler: impl FnOnce(&mut IpcHandler) -> Result<T, ExecutionError>,
-    ) -> Result<T, ExecutionError> {
+        handler: impl FnOnce(&mut IpcHandler) -> Result<T, PhaseExecutionError>,
+    ) -> Result<T, PhaseExecutionError> {
         let ipc = self
             .ipc
             .as_mut()
@@ -77,9 +77,9 @@ impl EbuildExecution {
 
         match result {
             Ok(data) => self.complete().map(|()| data),
-            Err(err @ ExecutionError::Die(_)) => {
+            Err(err @ PhaseExecutionError::Die(_)) => {
                 match self.complete() {
-                    Ok(()) | Err(ExecutionError::NonZeroExit(_)) => (),
+                    Ok(()) | Err(PhaseExecutionError::NonZeroExit(_)) => (),
                     Err(cleanup_err) => {
                         warn!("unable to clean up failed ebuild execution: {cleanup_err:#}");
                     }
@@ -106,21 +106,21 @@ impl EbuildExecution {
     }
 
     /// Completes the execution by reaping the child and verifying that the process group is empty.
-    fn complete(&mut self) -> Result<(), ExecutionError> {
+    fn complete(&mut self) -> Result<(), PhaseExecutionError> {
         let status = self.reap()?;
         let cleanup = self.verify_group_empty();
         if !status.success() {
             if let Err(cleanup_err) = cleanup {
                 warn!("unable to clean up failed ebuild execution: {cleanup_err:#}");
             }
-            return Err(ExecutionError::NonZeroExit(status));
+            return Err(PhaseExecutionError::NonZeroExit(status));
         }
         cleanup?;
         Ok(())
     }
 
     /// Reaps the direct child process and returns its exit status.
-    fn reap(&mut self) -> Result<ExitStatus> {
+    fn reap(&mut self) -> anyhow::Result<ExitStatus> {
         let status = self
             .child
             .wait()
@@ -130,7 +130,7 @@ impl EbuildExecution {
     }
 
     /// Verifies the process group is empty, killing any remaining processes if needed.
-    fn verify_group_empty(&mut self) -> Result<()> {
+    fn verify_group_empty(&mut self) -> anyhow::Result<()> {
         if self.exit_status.is_none() {
             bail!("ebuild process must be reaped before verifying its process group");
         }
@@ -143,7 +143,7 @@ impl EbuildExecution {
     }
 
     /// Aborts the execution by signaling the process group and waiting for it to exit.
-    fn abort(&mut self) -> Result<()> {
+    fn abort(&mut self) -> anyhow::Result<()> {
         match kill(self.process_group, Signal::SIGTERM) {
             Ok(()) | Err(Errno::ESRCH) => (),
             Err(err) => bail!("unable to signal ebuild process: {err}"),
@@ -163,7 +163,7 @@ impl EbuildExecution {
     /// and if the process group is empty.
     ///
     /// Returns a tuple of (child_reaped, group_empty)
-    fn observe(&mut self) -> Result<(bool, bool)> {
+    fn observe(&mut self) -> anyhow::Result<(bool, bool)> {
         if self.exit_status.is_none() {
             self.exit_status = self
                 .child
@@ -175,7 +175,7 @@ impl EbuildExecution {
     }
 
     /// Kills the process group with SIGKILL and waits for it to exit.
-    fn kill_group_and_wait(&mut self) -> Result<()> {
+    fn kill_group_and_wait(&mut self) -> anyhow::Result<()> {
         match killpg(self.process_group, Signal::SIGKILL) {
             Ok(()) | Err(Errno::ESRCH) => (),
             Err(err) => bail!("unable to signal ebuild process group: {err}"),
@@ -199,7 +199,7 @@ impl EbuildExecution {
         &mut self,
         timeout: Duration,
         done: impl Fn((bool, bool)) -> bool,
-    ) -> Result<(bool, bool)> {
+    ) -> anyhow::Result<(bool, bool)> {
         let deadline = Instant::now() + timeout;
         loop {
             let observation = self.observe()?;
@@ -223,7 +223,7 @@ impl Drop for EbuildExecution {
     }
 }
 
-fn process_group_exists(pgroup: Pid) -> Result<bool> {
+fn process_group_exists(pgroup: Pid) -> anyhow::Result<bool> {
     match killpg(pgroup, None) {
         Ok(()) | Err(Errno::EPERM) => Ok(true),
         Err(Errno::ESRCH) => Ok(false),
@@ -266,10 +266,10 @@ mod tests {
         let mut execution = spawn_execution("IFS= read -r <&${CHILD_READ_FD}");
 
         let err = execution
-            .run::<()>(|_| Err(ExecutionError::Die(String::new())))
+            .run::<()>(|_| Err(PhaseExecutionError::Die(String::new())))
             .unwrap_err();
 
-        assert!(matches!(err, ExecutionError::Die(_)));
+        assert!(matches!(err, PhaseExecutionError::Die(_)));
         assert!(execution.finalized);
     }
 
@@ -279,7 +279,9 @@ mod tests {
 
         let err = execution.run(|_| Ok(())).unwrap_err();
 
-        assert!(matches!(err, ExecutionError::NonZeroExit(status) if status.code() == Some(7)));
+        assert!(
+            matches!(err, PhaseExecutionError::NonZeroExit(status) if status.code() == Some(7))
+        );
     }
 
     #[test]

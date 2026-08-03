@@ -1,17 +1,35 @@
 use crate::deps::atom::{Atom, AtomIdent};
-use crate::ebuild::Ebuild;
+use crate::ebuild::handler::error::PhaseExecutionError;
 use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
+use crate::ebuild::{Ebuild, EbuildError};
 use crate::makenv::MakeEnv;
-use crate::package::metadata::PackageMetadata;
+use crate::package::metadata::{PackageMetadata, PackageMetadataError};
 use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY_RE, PKG_RE};
 use crate::repository::Repository;
 use crate::types::FxHashMap;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::path::Path;
+use thiserror::Error;
+
+/// Errors returned when generating package metadata for a [`CPV`].
+#[derive(Debug, Error)]
+pub enum MetadataGenerationError {
+    #[error(transparent)]
+    Ebuild(#[from] EbuildError),
+
+    #[error("internal error while preparing ebuild execution")]
+    Internal(#[source] anyhow::Error),
+
+    #[error(transparent)]
+    Execution(#[from] PhaseExecutionError),
+
+    #[error(transparent)]
+    Metadata(#[from] PackageMetadataError),
+}
 
 /// Represents a simplified form of a package only with its category, name and version.
 ///
@@ -28,7 +46,7 @@ pub struct CPV {
 
 impl CPV {
     /// Creates a new [`CPV`] from the given `category`, `package` and `version`.
-    pub fn new(category: &str, package: &str, version: PackageVersion) -> Result<Self> {
+    pub fn new(category: &str, package: &str, version: PackageVersion) -> anyhow::Result<Self> {
         if !CATEGORY_RE.is_match(category) {
             bail!("invalid category name: '{category}'");
         }
@@ -65,27 +83,31 @@ impl CPV {
 
     /// Generates and returns the [`PackageMetadata`] for this CPV.
     ///
-    /// The `repo` is needed during the `depend` phase.
+    /// `repo` is needed for resolving eclass locations, etc..
     ///
-    /// Returns an `Err` if the ebuild can't be resolved or metadata is missing.
+    /// Returns a [`MetadataGenerationError`] if the ebuild metadata cannot be resolved.
     pub fn generate_metadata(
         &self,
         ebuild_path: &Path,
         repo: &Repository,
-    ) -> Result<PackageMetadata> {
-        let ebuild = Ebuild::new(ebuild_path, self, repo)
-            .with_context(|| anyhow!("unable to create ebuild from '{}'", ebuild_path.display()))?;
+    ) -> Result<PackageMetadata, MetadataGenerationError> {
+        let ebuild = Ebuild::new(ebuild_path, self, repo)?;
         let mut handler =
             EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default())
-                .with_context(|| "unable to prepare ebuild execution")?;
+                .map_err(MetadataGenerationError::Internal)?;
+
         let data = handler.spawn()?;
         let data = data
             .iter()
-            .filter_map(|d| d.split_once('=').map(|(k, v)| (k.trim(), v.trim())))
-            .collect::<FxHashMap<_, _>>();
+            .map(|line| match line.split_once('=') {
+                Some((key, value)) => Ok((key.trim(), value.trim())),
+                None => Err(MetadataGenerationError::Internal(anyhow!(
+                    "invalid metadata line: {line}"
+                ))),
+            })
+            .collect::<Result<FxHashMap<_, _>, _>>();
 
-        PackageMetadata::from_map(data)
-            .with_context(|| anyhow!("unable to create metadata from ebuild output"))
+        Ok(PackageMetadata::from_map(data?)?)
     }
 
     /// Returns the package name, e.g.: `python`.
