@@ -1,5 +1,6 @@
 pub mod version;
 
+use crate::ebuild::handler::error::{ExecutionError, FuncCallError};
 use crate::ebuild::handler::protocol::FunctionReply;
 use crate::repository::Repository;
 use anyhow::anyhow;
@@ -22,11 +23,17 @@ pub fn die(args: &[String], fatal: bool) -> FunctionReply {
 }
 
 /// Resolves the given eclass `name` from `repository` and returns the path as string.
-pub fn resolve_eclass(name: &str, repository: &Repository) -> anyhow::Result<FunctionReply> {
-    let eclass = repository
-        .eclasses()?
-        .get(name)
-        .ok_or_else(|| anyhow!("eclass {name} not found in {repository} or its masters"))?;
+pub fn resolve_eclass(
+    name: &str,
+    repository: &Repository,
+) -> Result<FunctionReply, ExecutionError> {
+    let Some(eclass) = repository.eclasses()?.get(name) else {
+        return Err(FuncCallError::EclassNotFound {
+            name: name.to_owned(),
+            repository: repository.to_string(),
+        }
+        .into());
+    };
 
     let path = eclass
         .path
@@ -41,7 +48,6 @@ mod tests {
     use super::*;
     use crate::eapi::Eapi;
     use crate::ebuild::Ebuild;
-    use crate::ebuild::handler::error::{ExecutionError, FuncCallError};
     use crate::ebuild::handler::protocol::{FuncCall, FuncType};
     use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
     use crate::makenv::MakeEnv;

@@ -16,6 +16,9 @@ pub enum FuncCallError {
         source: anyhow::Error,
     },
 
+    #[error("eclass '{name}' not found in {repository} or its masters")]
+    EclassNotFound { name: String, repository: String },
+
     #[error("function '{func}' is unsupported for EAPI '{eapi}'")]
     Unsupported { func: FuncType, eapi: Eapi },
 }

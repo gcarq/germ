@@ -91,11 +91,10 @@ pub enum EbuildError {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::NamedTempFile;
-
-    use super::*;
 
     #[test]
     fn test_missing_eapi() {

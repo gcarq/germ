@@ -113,9 +113,8 @@ impl Drop for IpcHandler {
 
 #[cfg(test)]
 mod tests {
-    use crate::consts::BASH_BINARY_PATH;
-
     use super::*;
+    use crate::consts::BASH_BINARY_PATH;
 
     fn spawn_process<const N: usize>(
         script: &str,
