@@ -45,7 +45,8 @@ static EBUILD_RE: LazyLock<Regex> =
 /// Represents a package repository with its location, name and optional sync handler.
 ///
 /// When a repository has been added but the location is not existant it's considered `NotLoaded`.
-#[cfg_attr(test, derive(Default, Debug))]
+#[derive(Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct Repository {
     pub location: PathBuf,
     pub name: String,
@@ -53,8 +54,7 @@ pub struct Repository {
     state: RepositoryState,
 }
 
-#[derive(Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug, Default)]
 #[allow(clippy::large_enum_variant)]
 enum RepositoryState {
     #[default]
@@ -62,7 +62,7 @@ enum RepositoryState {
     Loaded(RepositoryData),
 }
 
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug)]
 struct RepositoryData {
     layout: Layout,
     categories: FxHashSet<String>,

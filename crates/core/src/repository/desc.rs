@@ -4,8 +4,7 @@ use std::ops::Deref;
 use std::path::Path;
 
 /// Holds all profile descriptions as found in `profiles/profiles.desc`.
-#[derive(Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Default, Debug)]
 pub struct ProfileDescriptions(Vec<ProfileDescription>);
 
 impl ProfileDescriptions {
@@ -30,7 +29,7 @@ impl Deref for ProfileDescriptions {
 }
 
 /// Represents a profile description as found in profiles.desc file.
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug)]
 pub struct ProfileDescription {
     pub keyword: String,
     pub profile_path: String,

@@ -24,8 +24,7 @@ impl ExpressionItem for UseFlag {}
 
 /// Holds a dependency expression, which can be evaluated to check if all package requirements
 /// are satisfied.
-#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Clone)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Clone, Debug)]
 pub struct DepExpression<T: ExpressionItem> {
     arena: ExpressionArena<T>,
 }

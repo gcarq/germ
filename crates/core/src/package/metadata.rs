@@ -13,8 +13,7 @@ use std::{fmt, fs, io};
 
 /// Holds all metadata of a [`Package`].
 /// TODO: parse eclasses
-#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Clone, Default, Debug)]
 pub struct PackageMetadata {
     pub eapi: Eapi,
     pub description: String,

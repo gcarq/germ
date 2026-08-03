@@ -21,9 +21,25 @@ static PMS_EAPI_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^[ \t]*EAPI=['"]?(?<eapi>[A-Za-z0-9+_.-]*)['"]?[ \t]*([ \t]#.*)?$"#).unwrap()
 });
 
+/// Errors returned when loading and validating an [`Ebuild`].
+#[derive(Error, Debug)]
+pub enum EbuildError {
+    #[error("EAPI declaration not found")]
+    MissingEapi,
+
+    #[error(transparent)]
+    Eapi(#[from] EapiError),
+
+    #[error("unsupported EAPI '{0}'")]
+    UnsupportedEapi(Eapi),
+
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
 /// An ebuild is associated with a package and contains the metadata and instructions
 /// how to build it. See PMS 6 and 7.
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug)]
 pub struct Ebuild<'a> {
     pub path: &'a Path,
     pub eapi: Eapi,
@@ -71,22 +87,6 @@ impl fmt::Display for Ebuild<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.path.display())
     }
-}
-
-/// Errors returned when loading and validating an [`Ebuild`].
-#[derive(Error, Debug)]
-pub enum EbuildError {
-    #[error("EAPI declaration not found")]
-    MissingEapi,
-
-    #[error(transparent)]
-    Eapi(#[from] EapiError),
-
-    #[error("unsupported EAPI '{0}'")]
-    UnsupportedEapi(Eapi),
-
-    #[error(transparent)]
-    Io(#[from] io::Error),
 }
 
 #[cfg(test)]

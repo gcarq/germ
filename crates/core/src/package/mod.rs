@@ -11,8 +11,8 @@ use std::fmt;
 
 /// Represents a package within a [`Repository`] with its category, name, version and additional
 /// metadata required to install it.
-#[derive(Archive, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Default, Debug))]
+#[derive(Archive, Serialize, Deserialize, Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct Package {
     pub cpv: CPV,
     pub repo: String,

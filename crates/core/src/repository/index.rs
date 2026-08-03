@@ -13,8 +13,7 @@ use std::ops::Deref;
 use std::path::Path;
 
 /// Holds all available packages in a repository, mapping `category/package` to [`Vec<CPV>`].
-#[derive(Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Default, Debug)]
 pub struct AvailablePackageIndex(FxHashMap<String, Vec<CPV>>);
 
 impl AvailablePackageIndex {
@@ -65,8 +64,7 @@ impl Deref for AvailablePackageIndex {
 
 /// Holds all resolved packages in a repository, mapping the fully qualified name
 /// `category/package-version` to a [`Package`].
-#[derive(Archive, Serialize, Deserialize, Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Archive, Serialize, Deserialize, Default, Debug)]
 pub struct ResolvedPackageIndex {
     index: FxHashMap<String, Package>,
     #[rkyv(with = Skip)]

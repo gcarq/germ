@@ -8,8 +8,7 @@ use std::ops::Range;
 ///
 /// To support multiple root expressions, `root` is defined as [`Range`] which holds the
 /// index range in the `children` vector.
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
 pub struct ExpressionArena<T: ExpressionItem> {
     expressions: Vec<Expression<T>>,
     children: Vec<ExpressionId>,
@@ -126,8 +125,7 @@ impl<T: ExpressionItem> Default for ExpressionArena<T> {
 /// other variants defined in PMS 8.2.
 ///
 /// [`Range`] is used to reference the child expressions in the flat [`Vec`].
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
 pub enum Expression<T: ExpressionItem> {
     Item(T),
 
@@ -144,6 +142,6 @@ pub enum Expression<T: ExpressionItem> {
 
 /// This is a basic wrapper around `u16` that distinguishes between expression ids
 /// and children indices.
-#[derive(Archive, Serialize, Deserialize, Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(test, derive(Default, Debug))]
+#[derive(Archive, Serialize, Deserialize, Copy, Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct ExpressionId(u16);

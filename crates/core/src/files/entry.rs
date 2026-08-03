@@ -16,8 +16,7 @@ impl FileEntry for SysAtom {}
 impl FileEntry for Atom {}
 impl FileEntry for UseFlag {}
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Copy, Clone)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Copy, Clone, Debug)]
 pub enum Operation {
     Set,
     Unset,
@@ -33,8 +32,7 @@ impl Operation {
 }
 
 /// Defines the precedence in inheritance chains for resolving package masks.
-#[derive(Eq, Copy, Clone)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Eq, Copy, Clone, Debug)]
 pub enum Precedence {
     Profile(usize),
     Repository,
@@ -80,8 +78,7 @@ impl Hash for Precedence {
 /// Values prefixed with a hyphen are considered [`Operation::Unset`] and clear all previous entries
 /// with the same inner value.
 /// The [`Precedence`] holds the original inheritance chain necessary for lookups.
-#[derive(Eq, Ord, PartialOrd, PartialEq, Hash, Clone)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Eq, Ord, PartialOrd, PartialEq, Hash, Clone, Debug)]
 pub struct Entry<T: FileEntry> {
     pub prec: Precedence,
     pub op: Operation,

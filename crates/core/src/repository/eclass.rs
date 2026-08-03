@@ -17,8 +17,7 @@ use crate::types::FxHashSet;
 static ECLASS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][a-zA-Z0-9_.-]*$").unwrap());
 
-#[derive(Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Default, Debug)]
 pub struct Eclasses(BTreeMap<String, Eclass>);
 
 impl Eclasses {
@@ -77,8 +76,7 @@ impl Deref for Eclasses {
 
 /// Represents an eclass defined in PMS chapter 10.
 /// TODO: parse documentation
-#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct Eclass {
     pub name: String,
     #[rkyv(with = AsString)]

@@ -5,8 +5,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 /// A USE flag may be prefixed with `+` or `-` to indicate whether it is enabled or disabled.
-#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Default, Debug)]
 pub enum UseFlagPrefix {
     #[default]
     None,
@@ -26,8 +25,8 @@ impl fmt::Display for UseFlagPrefix {
 }
 
 /// A USE flag with an optional prefix.
-#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
-#[cfg_attr(test, derive(Default, Debug))]
+#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct PrefixedUseFlag {
     prefix: UseFlagPrefix,
     flag: UseFlag,

@@ -28,7 +28,7 @@ impl TryFrom<&str> for ProfileFormat {
 /// Holds the layout configuration of a [`Repository`],
 /// which defines how the repository is structured and how it resolves ebuilds,
 /// eclasses and profiles from parent repositories (masters).
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug)]
 pub struct Layout {
     // Allows overriding `profiles/repo_name`, although discouraged
     pub name: Option<String>,

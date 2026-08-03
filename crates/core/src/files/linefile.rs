@@ -11,8 +11,7 @@ use std::path::Path;
 /// Lines beginning with a hyphen clear the content of previous lines that are equal to the
 /// remainder of that line.
 /// TODO: consider saving relevant file path and line numbers for better error messages.
-#[derive(Clone)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Debug)]
 pub struct LineBasedFile<T: FileEntry>(Vec<Entry<T>>);
 
 impl<T: FileEntry> LineBasedFile<T> {

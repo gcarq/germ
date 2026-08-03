@@ -4,8 +4,7 @@ use std::ops::Deref;
 use std::path::Path;
 
 /// Holds all supported architectures from `profiles/arch.list`.
-#[derive(Default)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Default, Debug)]
 pub struct ArchList(Vec<String>);
 
 impl ArchList {
