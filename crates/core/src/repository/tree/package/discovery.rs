@@ -27,29 +27,32 @@ pub fn resolve_cpv_from_category(
                     .to_str()
                     .is_some_and(|s| s.ends_with(".ebuild"))
         })
-        .filter_map(Result::ok)
-        .filter_map(|e| {
-            e.file_name()
-                .to_str()
-                .and_then(|filename| cpv_from_ebuild_name(category, filename).transpose())
+        .filter_map(|entry| {
+            let ebuild = entry.ok()?;
+            let package = ebuild.path().parent()?.file_name()?.to_str()?;
+            let filename = ebuild.file_name().to_str()?;
+            cpv_from_fs_parts(category, package, filename).transpose()
         })
 }
 
-/// Parses a `CPV` from the given `category` and ebuild `filename`.
+/// Parses a `CPV` from the given `category`, `package` and `ebuild`.
 ///
-/// Returns `Ok(None)` if the file is not a valid ebuild.
-/// Returns `Err` if the file is a valid regex, but doesn't belong here.
-fn cpv_from_ebuild_name(category: &str, filename: &str) -> anyhow::Result<Option<CPV>> {
-    let Some(caps) = EBUILD_RE.captures(filename) else {
+/// Returns `Ok(None)` if the file is not a valid ebuild or the package name
+/// doesn't match the ebuild name.
+/// Returns `Err` if the file is a valid regex, but no valid [`CPV`].
+fn cpv_from_fs_parts(category: &str, package: &str, ebuild: &str) -> anyhow::Result<Option<CPV>> {
+    let Some(caps) = EBUILD_RE.captures(ebuild) else {
         return Ok(None);
     };
-    let package = &caps["package"];
+    if package != &caps["package"] {
+        return Ok(None);
+    }
     let version = PackageVersion::new(
         &caps["version"],
         Some(&caps["suffixes"]),
         caps.name("revision").map(|m| m.as_str()),
     )
-    .with_context(|| anyhow!("unable to parse version from ebuild: '{filename}'"))?;
+    .with_context(|| anyhow!("unable to parse version from ebuild: '{ebuild}'"))?;
     Ok(Some(CPV::new_unchecked(category, package, version)))
 }
 
@@ -61,27 +64,29 @@ mod tests {
     fn cpv_from_ebuild_path_ok() {
         // (category, file name, is_some)
         let valid_ebuilds = [
-            ("app-editors", "vim-8.2.3456.ebuild", true),
-            ("app-editors", "vim-8.2.3456-r0.ebuild", true),
-            ("app-editors", "vim-8.2.3456-r1.ebuild", true),
-            ("dev-lang", "rust-1.65.0_alpha1-r2.ebuild", true),
-            ("net-misc", "curl-7.79.1_beta2_p20220101.ebuild", true),
-            ("net-misc", "Manifest", false),
+            ("acct-user", "err", "err-0-r2.ebuild", true),
+            ("acct-user", "err-0-r2", "err-0-r2", false),
+            ("app-editors", "vim", "vim-8.2.3456.ebuild", true),
+            ("app-editors", "vim", "vim-8.2.3456-r0.ebuild", true),
+            ("app-editors", "vim", "vim-8.2.3456-r1.ebuild", true),
+            ("dev-lang", "rust", "rust-1.65.0_alpha1-r2.ebuild", true),
+            ("net-misc", "curl", "curl-7.79.1_beta2.ebuild", true),
+            ("net-misc", "curl", "Manifest", false),
         ];
-        for (category, filename, is_some) in valid_ebuilds {
-            let cpv = cpv_from_ebuild_name(category, filename);
-            assert!(cpv.is_ok(), "CPV from '{filename}' should be valid");
+        for (category, package, ebuild, is_some) in valid_ebuilds {
+            let cpv = cpv_from_fs_parts(category, package, ebuild);
+            assert!(cpv.is_ok(), "CPV from '{ebuild}' should be valid");
             assert_eq!(
-                cpv.unwrap().is_some(),
+                cpv.is_ok_and(|cpv| cpv.is_some()),
                 is_some,
-                "failure for ebuild '{filename}'",
+                "failure for {category}/{package}/{ebuild}",
             );
         }
     }
 
     #[test]
     fn test_cpv_from_explicit_r0_ebuild() {
-        let cpv = cpv_from_ebuild_name("dev-libs", "pkg-1.0-r0.ebuild")
+        let cpv = cpv_from_fs_parts("dev-libs", "pkg", "pkg-1.0-r0.ebuild")
             .unwrap()
             .unwrap();
 
@@ -91,31 +96,11 @@ mod tests {
 
     #[test]
     fn test_cpv_from_revision_source() {
-        let cpv = cpv_from_ebuild_name("dev-libs", "example-1.0.0-r0101.ebuild")
+        let cpv = cpv_from_fs_parts("dev-libs", "example", "example-1.0.0-r0101.ebuild")
             .unwrap()
             .unwrap();
 
         assert_eq!(cpv.fqn(), "dev-libs/example-1.0.0-r0101");
         assert_eq!(cpv.pf(), "example-1.0.0-r0101");
-    }
-
-    #[test]
-    fn cpv_from_ebuild_path_none() {
-        // (category, ebuild path)
-        let invalid_ebuilds = [
-            ("app-editors", "vim8.2.3456.ebuild"),
-            ("app-editors", "vim-.ebuild"),
-            ("dev-lang", "rust-1.65.0_alphaX-r2.ebuild"),
-            ("net-misc", "curl-7.79.1--r1.ebuild"),
-            ("net-misc", "curl-7.79.1_beta2_p20220101-rX.ebuild"),
-        ];
-        for (category, filename) in invalid_ebuilds {
-            let cpv = cpv_from_ebuild_name(category, filename);
-            assert!(cpv.is_ok(), "result from '{filename}' should be ok");
-            assert!(
-                cpv.unwrap().is_none(),
-                "CPV from '{filename}' should be None"
-            );
-        }
     }
 }
