@@ -76,7 +76,7 @@ impl Repository {
             categories: FxHashSet::default(),
             package_mask,
             package_unmask,
-            eclasses: Eclasses::default(),
+            eclasses: Eclasses::empty(location),
             arch_list: ArchList::from_path(&profiles.join("arch.list"))?,
             profiles_desc: ProfileDescriptions::from_path(&profiles.join("profiles.desc"))?,
             avail_package_idx: AvailablePackageIndex::default(),

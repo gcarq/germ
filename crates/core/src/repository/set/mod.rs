@@ -576,5 +576,11 @@ mod tests {
             .unwrap();
 
         assert!(shared.path.starts_with(second_path));
+
+        let child = fixture.get("child").unwrap();
+        let paths = child.eclasses.repo_paths().collect::<Vec<_>>();
+        assert_eq!(paths[0], fixture.get_repo_path("child").unwrap());
+        assert_eq!(paths[1], fixture.get_repo_path("first").unwrap());
+        assert_eq!(paths[2], second_path);
     }
 }

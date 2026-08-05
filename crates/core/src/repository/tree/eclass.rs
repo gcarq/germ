@@ -10,21 +10,41 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use walkdir::WalkDir;
 
-use crate::types::FxHashSet;
-
 /// Regex to validate eclass names according to PMS 3.1.6.
 /// NOTE: look-ahead to exclude "default" is not supported by the regex crate.
 static ECLASS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][a-zA-Z0-9_.-]*$").unwrap());
 
-#[derive(Default, Debug)]
-pub struct Eclasses(BTreeMap<String, Eclass>);
+/// Contains all known eclasses, including inherited eclasses,
+/// and their repository lookup paths.
+#[derive(Debug)]
+#[cfg_attr(test, derive(Default))]
+pub struct Eclasses {
+    entries: BTreeMap<String, Eclass>,
+    repo_paths: Vec<PathBuf>,
+}
 
 impl Eclasses {
-    /// Creates a new [`Eclasses`] collection from the given `path`.
+    /// Creates an empty [`Eclasses`] collection for the given repository `path`.
+    pub fn empty(path: &Path) -> Self {
+        Self {
+            entries: BTreeMap::default(),
+            repo_paths: vec![path.to_owned()],
+        }
+    }
+
+    /// Creates a new [`Eclasses`] collection from the given eclass `path`.
     /// Files not ending with `.eclass` are ignored.
+    ///
+    /// Returns `Err` if the parent of `path` doesn't exist.
     pub fn from_path(path: &Path) -> anyhow::Result<Self> {
-        let mut eclasses = Self(BTreeMap::new());
+        let Some(parent) = path.parent() else {
+            bail!("parent {} doesn't exist", path.display());
+        };
+        let mut eclasses = Self {
+            entries: BTreeMap::default(),
+            repo_paths: vec![parent.to_owned()],
+        };
         if !path.exists() {
             return Ok(eclasses);
         }
@@ -40,37 +60,49 @@ impl Eclasses {
             let Some(filename) = entry.file_name().to_str() else {
                 continue;
             };
-            if let Some(eclass_name) = filename.strip_suffix(".eclass") {
-                let eclass = Eclass::new(eclass_name.to_owned(), entry.path().to_path_buf())?;
-                eclasses.insert(eclass);
+            if let Some(name) = filename.strip_suffix(".eclass") {
+                eclasses.insert(Eclass::new(name.to_owned(), entry.path().to_owned())?);
             }
         }
         Ok(eclasses)
     }
 
-    /// Returns a `HashSet` containing repository paths for all known eclasses.
+    /// Returns repository paths in eclass lookup order.
     ///
-    /// This is required for the ebuild phase handler for proper sandboxing.
-    pub fn repo_paths(&self) -> FxHashSet<&Path> {
-        self.0
-            .values()
-            .filter_map(|eclass| eclass.path.parent()?.parent())
-            .collect()
+    /// The first path is the repository being processed,
+    /// followed by its masters in declared order.
+    ///
+    /// While this is an implementation detail of portage,
+    /// some overlay eclasses rely on it.
+    pub fn repo_paths(&self) -> impl Iterator<Item = &Path> {
+        self.repo_paths.iter().map(PathBuf::as_path)
     }
 
+    /// Inserts an [`Eclass`] into the collection.
     pub fn insert(&mut self, eclass: Eclass) {
-        self.0.insert(eclass.name.clone(), eclass);
+        if let Some(path) = eclass.path.parent().and_then(Path::parent)
+            && !self.repo_paths.iter().any(|known| known == path)
+        {
+            self.repo_paths.push(path.to_owned());
+        }
+        self.entries.insert(eclass.name.clone(), eclass);
     }
 
+    /// Extends the current collection with the given `other`.
     pub fn extend(&mut self, other: &Self) {
-        self.0.extend(other.0.clone());
+        for path in &other.repo_paths {
+            if !self.repo_paths.contains(path) {
+                self.repo_paths.push(path.clone());
+            }
+        }
+        self.entries.extend(other.entries.clone());
     }
 }
 
 impl Deref for Eclasses {
     type Target = BTreeMap<String, Eclass>;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.entries
     }
 }
 
