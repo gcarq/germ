@@ -13,8 +13,8 @@ use thiserror::Error;
 /// Errors returned when constructing package metadata from ebuild output.
 #[derive(Debug, Error)]
 pub enum PackageMetadataError {
-    #[error("required metadata variable '{field}' is missing")]
-    Missing { field: &'static str },
+    #[error("required metadata variable '{0}' is missing")]
+    Missing(&'static str),
 
     #[error("invalid value for metadata variable '{field}'")]
     Invalid {
@@ -59,7 +59,7 @@ impl PackageMetadata {
         ) -> Result<&'a str, PackageMetadataError> {
             map.get(field)
                 .copied()
-                .ok_or(PackageMetadataError::Missing { field })
+                .ok_or(PackageMetadataError::Missing(field))
         }
 
         const fn invalid(field: &'static str, source: anyhow::Error) -> PackageMetadataError {
@@ -338,7 +338,7 @@ mod tests {
         data.remove("SLOT");
         assert!(matches!(
             PackageMetadata::from_map(data).unwrap_err(),
-            PackageMetadataError::Missing { field: "SLOT" }
+            PackageMetadataError::Missing("SLOT")
         ));
     }
 

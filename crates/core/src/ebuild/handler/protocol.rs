@@ -41,8 +41,8 @@ pub enum ProtocolError {
     #[error("missing function identifier in IPC request")]
     MissingFunction,
 
-    #[error("unknown ebuild function '{func}'")]
-    UnknownFunction { func: String },
+    #[error("unknown ebuild function '{0}'")]
+    UnknownFunction(String),
 }
 
 /// All supported ebuild functions that can be called from the ebuild process.
@@ -73,9 +73,7 @@ impl FromStr for FuncType {
             "ver_cut" => Ok(Self::VerCut),
             "ver_rs" => Ok(Self::VerRs),
             "ver_test" => Ok(Self::VerTest),
-            _ => Err(ProtocolError::UnknownFunction {
-                func: value.to_owned(),
-            }),
+            _ => Err(ProtocolError::UnknownFunction(value.to_owned())),
         }
     }
 }
@@ -266,7 +264,7 @@ mod tests {
     fn test_ebuild_message_from_bytes_unknown_function() {
         assert!(matches!(
             EbuildMessage::from_bytes(b"FN\0unknown"),
-            Err(ProtocolError::UnknownFunction { func }) if func == "unknown"
+            Err(ProtocolError::UnknownFunction(func)) if func == "unknown"
         ));
     }
 

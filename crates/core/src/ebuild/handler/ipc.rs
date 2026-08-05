@@ -4,7 +4,7 @@ use nix::errno::Errno;
 use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
 use nix::unistd::pipe2;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::mem::ManuallyDrop;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
@@ -17,8 +17,11 @@ pub enum IpcError {
     #[error("IPC pipe error")]
     Pipe(#[from] Errno),
 
+    #[error("unable to spawn IPC process")]
+    Spawn(#[source] io::Error),
+
     #[error("IPC I/O error")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
 }
 
 /// Handler for IPC communication via pipes with a child process.
@@ -60,7 +63,8 @@ impl IpcHandler {
             .env("CHILD_WRITE_FD", child_writer.as_raw_fd().to_string())
             .envs(env)
             .process_group(0)
-            .spawn()?;
+            .spawn()
+            .map_err(IpcError::Spawn)?;
 
         // SAFETY: We take ownership of the file descriptors and ensure with `ManuallyDrop` that
         // they are not closed when `OwnedFd` goes out of scope. They will only be dropped when

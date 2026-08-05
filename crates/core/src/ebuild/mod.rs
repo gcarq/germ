@@ -5,12 +5,11 @@ use crate::eapi::{Eapi, EapiError};
 use crate::package::cpv::CPV;
 use crate::repository::Repository;
 
-use log::trace;
 use regex::Regex;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::LazyLock;
 use thiserror::Error;
@@ -33,8 +32,12 @@ pub enum EbuildError {
     #[error("unsupported EAPI '{0}'")]
     UnsupportedEapi(Eapi),
 
-    #[error(transparent)]
-    Io(#[from] io::Error),
+    #[error("unable to read ebuild {path}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
 }
 
 /// An ebuild is associated with a package and contains the metadata and instructions
@@ -52,11 +55,16 @@ impl<'a> Ebuild<'a> {
     ///
     /// Returns an [`EbuildError`] if the ebuild is malformed.
     pub fn new(path: &'a Path, cpv: &'a CPV, repo: &'a Repository) -> Result<Self, EbuildError> {
-        trace!("Loading ebuild '{}' for '{cpv}' ...", path.display());
-        let file = File::open(path)?;
+        let file = File::open(path).map_err(|e| EbuildError::Io {
+            path: path.to_owned(),
+            source: e,
+        })?;
         let reader = BufReader::with_capacity(256, file);
         for line in reader.lines() {
-            let line = line?;
+            let line = line.map_err(|e| EbuildError::Io {
+                path: path.to_owned(),
+                source: e,
+            })?;
             if let Some(caps) = PMS_EAPI_RE.captures(&line) {
                 let value = &caps["eapi"];
                 let eapi = Eapi::from_str(value)?;
@@ -135,7 +143,7 @@ mod tests {
 
         let err = Ebuild::new(&path, &CPV::default(), &Repository::default()).unwrap_err();
 
-        assert!(matches!(err, EbuildError::Io(_)));
+        assert!(matches!(err, EbuildError::Io { .. }));
     }
 
     #[test]

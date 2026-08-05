@@ -25,7 +25,7 @@ impl PackageResolutionError {
     pub(crate) fn from_metadata(cpv: &CPV, error: MetadataGenerationError) -> Self {
         let cpv = cpv.fqn().to_owned();
         match error {
-            error @ (MetadataGenerationError::Ebuild(EbuildError::Io(_))
+            error @ (MetadataGenerationError::Ebuild(EbuildError::Io { .. })
             | MetadataGenerationError::Internal(_)
             | MetadataGenerationError::Execution(
                 PhaseExecutionError::Protocol(_)

@@ -116,7 +116,7 @@ if [[ ${EBUILD_PHASE} == depend ]]; then
     # shellcheck source=/dev/null
     source "${EBUILD}" || die "error sourcing ebuild"
 
-    [[ -s ${SANDBOX_LOG} ]] && die "Sandbox violations found, exiting"
+    [[ -s ${SANDBOX_LOG} ]] && die "Sandbox violations found"
 
     # Add in dependency info from eclasses
     IUSE+="${IUSE:+ }${E_IUSE}"

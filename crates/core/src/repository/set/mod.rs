@@ -243,9 +243,7 @@ impl RepoSet {
             return Ok(());
         };
         if !visiting.insert(name.to_owned()) {
-            return Err(RepoSetError::Cycle {
-                repository: name.to_owned(),
-            });
+            return Err(RepoSetError::Cycle(name.to_owned()));
         }
 
         for master in masters {

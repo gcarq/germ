@@ -7,8 +7,8 @@ pub enum RepoSetError {
     #[error("repos.conf configuration failure")]
     Configuration(#[source] anyhow::Error),
 
-    #[error("repository inheritance cycle detected, involving '{repository}'")]
-    Cycle { repository: String },
+    #[error("repository inheritance cycle detected, involving '{0}'")]
+    Cycle(String),
 
     /// A repository operation failed while processing the set.
     #[error("operation failed for repository '{repository}'")]
