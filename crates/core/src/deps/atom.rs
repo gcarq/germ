@@ -7,8 +7,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use constcat::concat;
 use regex::{Captures, Regex};
 use rkyv::{Archive, Deserialize, Serialize};
-use std::fmt;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::str::FromStr;
 use std::sync::LazyLock;
 
@@ -313,8 +312,8 @@ impl fmt::Display for Atom {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::AtomIdent::{Any, Exact};
+    use super::*;
 
     #[test]
     fn test_atom_from_str_simple() {

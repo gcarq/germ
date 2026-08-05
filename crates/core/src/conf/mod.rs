@@ -2,12 +2,10 @@ mod masks;
 
 use crate::conf::masks::useflag::UseMasks;
 use crate::consts::DEFAULT_PORTAGE_CONF_PATH;
-use crate::files::entry::Precedence;
-use crate::files::pkguse::PackageUseEntries;
-use crate::files::{PackageEntries, UseEntries};
+use crate::files::{PackageEntries, UseEntries, entry::Precedence, pkguse::PackageUseEntries};
 use crate::makenv::MakeEnv;
 use crate::profile::Profile;
-use crate::repository::set::RepoSet;
+use crate::repository::RepoSet;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow, bail};
 use log::debug;
@@ -46,7 +44,7 @@ impl PortageConf {
             &profile,
             PackageEntries::from_path(&path.join("package.mask"), Precedence::User, true)?,
             PackageEntries::from_path(&path.join("package.unmask"), Precedence::User, true)?,
-        )?;
+        );
 
         let use_masks = UseMasks::new(
             &profile,
@@ -89,7 +87,7 @@ impl PortageConf {
     /// Sanity check to ensure the given `ARCH` is supported by at least one repository.
     fn validate_arch(arch: &str, repo_set: &RepoSet) -> Result<()> {
         for repo in repo_set.values() {
-            if repo.arch_list()?.supports(arch) {
+            if repo.arch_list.supports(arch) {
                 return Ok(());
             }
         }
@@ -107,7 +105,7 @@ impl PortageConf {
                 .display()
                 .to_string()
                 .strip_prefix(&profile_prefix)
-                && repo.is_known_profile(arch, p)?
+                && repo.is_known_profile(arch, p)
             {
                 return Ok(());
             }

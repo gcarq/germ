@@ -27,7 +27,7 @@ pub fn resolve_eclass(
     name: &str,
     repository: &Repository,
 ) -> Result<FunctionReply, PhaseExecutionError> {
-    let Some(eclass) = repository.eclasses()?.get(name) else {
+    let Some(eclass) = repository.eclasses.get(name) else {
         return Err(FuncCallError::EclassNotFound {
             name: name.to_owned(),
             repository: repository.to_string(),

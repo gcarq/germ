@@ -1,7 +1,16 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, anyhow};
 use ini::Ini;
 use log::warn;
 use std::path::Path;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum LayoutError {
+    #[error("cannot parse layout.conf: {0}")]
+    Parse(#[from] ini::Error),
+    #[error("layout.conf is invalid: {0}")]
+    Config(#[from] anyhow::Error),
+}
 
 /// Holds all supported profile formats and their capabilities.
 /// See `man portage 5` and https://www.gentoo.org/glep/glep-0082.html
@@ -29,6 +38,7 @@ impl TryFrom<&str> for ProfileFormat {
 /// which defines how the repository is structured and how it resolves ebuilds,
 /// eclasses and profiles from parent repositories (masters).
 #[derive(Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct Layout {
     // Allows overriding `profiles/repo_name`, although discouraged
     pub name: Option<String>,
@@ -41,12 +51,12 @@ impl Layout {
     /// Builds a [`Layout`] from the given `location`.
     /// Return Err if the file doesn't exist, is not a valid INI file or if
     /// required properties are missing.
-    pub fn from_path(location: &Path) -> Result<Self> {
+    pub fn from_path(location: &Path) -> Result<Self, LayoutError> {
         let conf = Ini::load_from_file(location)?;
-        Self::from_ini(&conf).with_context(|| anyhow!("cannot parse {}", location.display()))
+        Ok(Self::from_ini(&conf).with_context(|| anyhow!("cannot load {}", location.display()))?)
     }
 
-    fn from_ini(conf: &Ini) -> Result<Self> {
+    fn from_ini(conf: &Ini) -> Result<Self, LayoutError> {
         let properties = conf
             .section(None::<String>)
             .with_context(|| "no global properties defined")?;

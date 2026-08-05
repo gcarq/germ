@@ -1,7 +1,7 @@
+use super::{SyncConfig, SyncHandler};
 use crate::consts::GIT_BINARY_PATH;
-use crate::repository::sync::{SyncConfig, SyncHandler};
 use crate::types::FxHashMap;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use log::{debug, info};
 use std::collections::HashMap;
 use std::process::{Command, Output, Stdio};
@@ -23,7 +23,7 @@ fn git_command() -> Command {
 }
 
 impl SyncHandler for GitSyncHandler {
-    fn new(properties: &FxHashMap<String, String>) -> Result<Self>
+    fn new(properties: &FxHashMap<String, String>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -53,7 +53,7 @@ impl SyncHandler for GitSyncHandler {
         self.config.location.join(".git").exists()
     }
 
-    fn init(&self) -> Result<()> {
+    fn init(&self) -> anyhow::Result<()> {
         info!("Cloning from '{}'", self.config.sync_uri);
         let mut command = git_command();
         command.arg("clone");
@@ -69,7 +69,7 @@ impl SyncHandler for GitSyncHandler {
         Ok(())
     }
 
-    fn update(&self) -> Result<()> {
+    fn update(&self) -> anyhow::Result<()> {
         info!(
             "Updating git repository at {}",
             self.config.location.display()
@@ -105,7 +105,7 @@ impl SyncHandler for GitSyncHandler {
 impl GitSyncHandler {
     /// Returns a list of ancestor directories of the repository location
     /// to be used as `GIT_CEILING_DIRECTORIES`.
-    fn ceiling_directories(&self) -> Result<Vec<&str>> {
+    fn ceiling_directories(&self) -> anyhow::Result<Vec<&str>> {
         self.config
             .location
             .ancestors()
@@ -113,11 +113,11 @@ impl GitSyncHandler {
                 p.to_str()
                     .ok_or_else(|| anyhow!("invalid UTF-8 in path '{}'", p.display()))
             })
-            .collect::<Result<Vec<_>>>()
+            .collect::<anyhow::Result<Vec<_>>>()
     }
 
     /// Executes the given `command` and returns the `Output`.
-    fn execute(mut command: Command) -> Result<Output> {
+    fn execute(mut command: Command) -> anyhow::Result<Output> {
         let output = command
             .output()
             .with_context(|| format!("failed to execute {}", Self::command_repr(&command)))?;
@@ -155,7 +155,11 @@ impl GitSyncHandler {
     }
 
     /// Updates the origin to the given `sync_uri`
-    fn set_or_add_origin(&self, sync_uri: &str, env: &HashMap<String, String>) -> Result<()> {
+    fn set_or_add_origin(
+        &self,
+        sync_uri: &str,
+        env: &HashMap<String, String>,
+    ) -> anyhow::Result<()> {
         let mut set_url = git_command();
         set_url
             .arg("remote")
@@ -185,7 +189,7 @@ impl GitSyncHandler {
 
     /// Prunes unreachable objects from the repository to prevent git gc from failing due to too
     /// many loose objects.
-    fn prune_shallow_repository(&self, env: &HashMap<String, String>) -> Result<()> {
+    fn prune_shallow_repository(&self, env: &HashMap<String, String>) -> anyhow::Result<()> {
         let mut command = git_command();
         command
             .arg("-c")
@@ -199,7 +203,7 @@ impl GitSyncHandler {
     }
 
     /// Resolves the git remote branch that should be synced into the current checkout.
-    fn resolve_remote_branch(&self, env: &HashMap<String, String>) -> Result<String> {
+    fn resolve_remote_branch(&self, env: &HashMap<String, String>) -> anyhow::Result<String> {
         match self.rev_parse_abbrev_ref("@{upstream}", env) {
             Ok(branch) => Ok(branch),
             Err(upstream_err) => self
@@ -214,7 +218,7 @@ impl GitSyncHandler {
         &self,
         revision: &str,
         env: &HashMap<String, String>,
-    ) -> Result<String> {
+    ) -> anyhow::Result<String> {
         let mut command = git_command();
         command
             .arg("rev-parse")
@@ -240,7 +244,7 @@ impl GitSyncHandler {
         remote: &str,
         cmd_opts: &[String],
         env: &HashMap<String, String>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let mut command = git_command();
         command
             .arg("fetch")
@@ -254,7 +258,7 @@ impl GitSyncHandler {
     }
 
     /// Performs a hard reset of the current branch to the specified `target` revision.
-    fn reset_hard(&self, target: &str, env: &HashMap<String, String>) -> Result<()> {
+    fn reset_hard(&self, target: &str, env: &HashMap<String, String>) -> anyhow::Result<()> {
         let mut command = git_command();
         command
             .arg("reset")

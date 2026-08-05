@@ -1,7 +1,7 @@
-use crate::repository::REPO_RE;
+use crate::regex::REPO_RE;
 use crate::types::FxHashMap;
 use crate::utils;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use ini::Ini;
 use log::{debug, warn};
 use std::fs;
@@ -12,7 +12,6 @@ const UNSUPPORTED_CONF_PROPERTIES: &[&str] = &["aliases", "auto-sync", "eclass-o
 
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct RepoSetConfig {
-    pub main_repo_name: String,
     repo_confs: Vec<RepositoryConfig>,
 }
 
@@ -22,16 +21,9 @@ impl RepoSetConfig {
     ///
     /// If the location is a directory, it loads and merges all files in the directory
     /// except files starting with `.` or ending with `~`.
-    pub fn load(location: &Path) -> Result<Self> {
+    pub fn load(location: &Path) -> anyhow::Result<Self> {
         debug!("Loading repos.conf from '{}' ...", location.display());
         let conf = Self::parse_conf(location).with_context(|| "unable to parse repos.conf")?;
-
-        // For now, use "gentoo" as fallback if no DEFAULT section or main-repo property is defined
-        let main_repo_name = conf
-            .section(Some("DEFAULT"))
-            .and_then(|props| props.get("main-repo").map(ToOwned::to_owned))
-            .unwrap_or_else(|| "gentoo".into());
-        debug!("Using {main_repo_name} as main repository...");
 
         let repo_confs = conf
             .into_iter()
@@ -43,12 +35,9 @@ impl RepoSetConfig {
                 RepositoryConfig::new(&name, properties.into_iter().collect::<FxHashMap<_, _>>())
                     .with_context(|| format!("unable to build repository config for '{name}'"))
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
-        Ok(Self {
-            main_repo_name,
-            repo_confs,
-        })
+        Ok(Self { repo_confs })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &RepositoryConfig> {
@@ -56,7 +45,7 @@ impl RepoSetConfig {
     }
 
     /// Helper function to merge and parse `repos.conf` from the given `location`.
-    fn parse_conf(location: &Path) -> Result<Ini> {
+    fn parse_conf(location: &Path) -> anyhow::Result<Ini> {
         let conf = if location.metadata()?.is_file() {
             fs::read_to_string(location).with_context(|| "failed to load repos.conf")?
         } else {
@@ -66,7 +55,7 @@ impl RepoSetConfig {
                         .with_context(|| anyhow!("unable to read file '{}'", path.display())),
                     Err(err) => Err(err),
                 })
-                .collect::<Result<Vec<_>>>()?
+                .collect::<anyhow::Result<Vec<_>>>()?
                 .join("\n")
         };
         Ini::load_from_str(&conf).with_context(|| "failed to parse repos.conf")
@@ -83,16 +72,17 @@ pub struct RepositoryConfig {
     pub name: String,
     // Defines parent repositories from repos.conf, if explicitly configured
     pub masters: Option<Vec<String>>,
-    // Defines the repository priority for resolving ebuilds and eclasses
-    pub priority: isize,
     // Holds all raw properties from the repository section in repos.conf for potential future use
-    raw_properties: FxHashMap<String, String>,
+    pub(super) raw_properties: FxHashMap<String, String>,
 }
 
 impl RepositoryConfig {
     /// Builds a [`RepositoryConfig`] from the given `repo_name` and INI `properties`
     /// from repos.conf.
-    pub fn new(repo_name: &str, properties: FxHashMap<String, String>) -> Result<RepositoryConfig> {
+    pub fn new(
+        repo_name: &str,
+        properties: FxHashMap<String, String>,
+    ) -> anyhow::Result<RepositoryConfig> {
         if !REPO_RE.is_match(repo_name) {
             bail!("Invalid repository name: {repo_name}");
         }
@@ -113,7 +103,7 @@ impl RepositoryConfig {
 
         if !location.exists() && !has_sync_defined {
             bail!(
-                "Repository '{repo_name}' has no complete sync configuration and location '{}' doesn't exist",
+                "Repository '{repo_name}' has no complete sync configuration and location '{}' is inaccessible",
                 location.display()
             );
         }
@@ -138,19 +128,9 @@ impl RepositoryConfig {
             location,
             name: repo_name.to_owned(),
             masters,
-            priority: properties
-                .get("priority")
-                .map(|s| s.parse::<isize>())
-                .transpose()
-                .with_context(|| "invalid priority value")?
-                .unwrap_or(0),
             raw_properties,
         };
         Ok(config)
-    }
-
-    pub const fn raw_properties(&self) -> &FxHashMap<String, String> {
-        &self.raw_properties
     }
 }
 
@@ -192,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_repo_confs() -> Result<()> {
+    fn test_merge_repo_confs() -> anyhow::Result<()> {
         let temp = tempfile::Builder::new().tempdir()?;
         let repos_conf = temp.path().join("repos.conf");
         fs::create_dir(&repos_conf)?;

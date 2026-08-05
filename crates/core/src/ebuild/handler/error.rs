@@ -1,9 +1,13 @@
-pub use super::ipc::IpcError;
-use super::protocol::FuncType;
-pub use super::protocol::ProtocolError;
-use crate::eapi::Eapi;
 use std::process::ExitStatus;
+
 use thiserror::Error;
+
+use crate::eapi::Eapi;
+
+use super::protocol::FuncType;
+
+pub use super::ipc::IpcError;
+pub use super::protocol::ProtocolError;
 
 /// Errors returned while handling an ebuild function call.
 #[derive(Error, Debug)]

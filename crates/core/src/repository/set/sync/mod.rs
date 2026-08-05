@@ -3,9 +3,9 @@
 
 mod git;
 
-use crate::repository::sync::git::GitSyncHandler;
+use self::git::GitSyncHandler;
 use crate::types::FxHashMap;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use std::fmt;
 use std::path::PathBuf;
 
@@ -14,7 +14,7 @@ enum SyncType {
 }
 
 impl SyncType {
-    pub fn new(sync_type: &str) -> Result<Self> {
+    pub fn new(sync_type: &str) -> anyhow::Result<Self> {
         match sync_type {
             "git" => Ok(SyncType::Git),
             _ => bail!("unsupported sync-type: '{sync_type}'"),
@@ -33,7 +33,7 @@ struct SyncConfig {
 }
 
 impl SyncConfig {
-    pub fn from_ini(properties: &FxHashMap<String, String>) -> Result<Self> {
+    pub fn from_ini(properties: &FxHashMap<String, String>) -> anyhow::Result<Self> {
         let location = properties
             .get("location")
             .map(PathBuf::from)
@@ -51,7 +51,7 @@ impl SyncConfig {
 /// The `sync-type` property is used to determine which synchronization mechanism to use.
 pub fn build_sync_handler(
     properties: &FxHashMap<String, String>,
-) -> Result<Option<Box<dyn SyncHandler>>> {
+) -> anyhow::Result<Option<Box<dyn SyncHandler>>> {
     let sync_type = properties
         .get("sync-type")
         .map(|sync_type| SyncType::new(sync_type))
@@ -70,12 +70,12 @@ pub fn build_sync_handler(
 pub trait SyncHandler: fmt::Debug + Send + Sync {
     /// Creates a new instance of the `SyncHandler` based on the provided INI `properties`
     /// for this repository coming from `repos.conf`.
-    fn new(properties: &FxHashMap<String, String>) -> Result<Self>
+    fn new(properties: &FxHashMap<String, String>) -> anyhow::Result<Self>
     where
         Self: Sized;
 
     /// Conditionally syncs the repository using either `init` or `update`.
-    fn sync(&self) -> Result<()> {
+    fn sync(&self) -> anyhow::Result<()> {
         match self.is_initialized() {
             true => self.update(),
             false => self.init(),
@@ -87,10 +87,10 @@ pub trait SyncHandler: fmt::Debug + Send + Sync {
     fn is_initialized(&self) -> bool;
 
     /// Initializes and downloads the repository.
-    fn init(&self) -> Result<()>;
+    fn init(&self) -> anyhow::Result<()>;
 
     /// Updates an existing repository.
-    fn update(&self) -> Result<()>;
+    fn update(&self) -> anyhow::Result<()>;
 }
 
 #[cfg(test)]

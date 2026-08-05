@@ -3,13 +3,11 @@ use crate::deps::atom::Atom;
 use crate::deps::useflag::{PrefixedUseFlag, UseFlag};
 use crate::eapi::Eapi;
 use crate::package::slot::PackageSlot;
-use crate::repository::eclass::Eclass;
+use crate::repository::Eclass;
 use crate::types::FxHashMap;
 use anyhow::bail;
 use rkyv::{Archive, Deserialize, Serialize};
-use std::path::Path;
-use std::str::FromStr;
-use std::{fmt, fs, io};
+use std::{fmt, fs, io, path::Path, str::FromStr};
 use thiserror::Error;
 
 /// Errors returned when constructing package metadata from ebuild output.

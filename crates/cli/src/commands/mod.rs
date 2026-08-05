@@ -9,7 +9,7 @@ use crate::commands::install::install;
 use anyhow::Result;
 use clap::Subcommand;
 use germ_core::deps::atom::Atom;
-use germ_core::repository::set::RepoSet;
+use germ_core::repository::RepoSet;
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -41,7 +41,7 @@ pub fn execute(command: &Command, repo_set: &mut RepoSet) -> Result<()> {
     match command {
         Command::Info { atom } => info(atom.as_ref(), repo_set)?,
         Command::Install { atom } => install(atom, repo_set)?,
-        Command::Gencache { repo } => gencache(repo.as_ref(), repo_set)?,
+        Command::Gencache { repo } => gencache(repo.as_deref(), repo_set)?,
         Command::Sync => repo_set.maybe_sync()?,
     }
     Ok(())

@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::bail;
 use log::trace;
 use regex::Regex;
 use rkyv::with::AsString;
@@ -23,7 +23,7 @@ pub struct Eclasses(BTreeMap<String, Eclass>);
 impl Eclasses {
     /// Creates a new [`Eclasses`] collection from the given `path`.
     /// Files not ending with `.eclass` are ignored.
-    pub fn from_path(path: &Path) -> Result<Self> {
+    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
         let mut eclasses = Self(BTreeMap::new());
         if !path.exists() {
             return Ok(eclasses);
@@ -87,7 +87,7 @@ impl Eclass {
     /// Creates a new [`Eclass`] from the given `name` and `path`.
     /// The name should not contain the `.eclass` suffix.
     /// Returns `Err` if `name` is invalid.
-    pub fn new(name: String, path: PathBuf) -> Result<Self> {
+    pub fn new(name: String, path: PathBuf) -> anyhow::Result<Self> {
         trace!("Loading eclass '{name}' from '{}' ...", path.display());
         debug_assert!(
             !name.ends_with(".eclass"),

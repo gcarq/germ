@@ -1,13 +1,13 @@
-use std::collections::HashMap;
-use std::fs;
-use std::io;
-use std::ops::{Deref, DerefMut};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    fs, io,
+    ops::{Deref, DerefMut},
+    path::{Path, PathBuf},
+};
 
-use anyhow::bail;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, bail};
 
-use crate::repository::set::RepoSet;
+use super::RepoSet;
 use crate::types::FxHashSet;
 
 enum FixtureEntry {
@@ -169,12 +169,8 @@ impl RepositoryFixture {
         fs::create_dir_all(&profiles)?;
         fs::create_dir_all(&eclasses)?;
 
-        let masters_str = self
-            .masters
-            .as_ref()
-            .map(|m| m.join(" "))
-            .unwrap_or_default();
-        let mut layout = format!("name = {}\nmasters = {}\n", self.repo_name, masters_str);
+        let masters = self.masters.map(|m| m.join(" ")).unwrap_or_default();
+        let mut layout = format!("name = {}\nmasters = {}\n", self.repo_name, masters);
         if let Some(formats) = self.formats {
             layout.push_str(&format!("profile-formats = {}\n", formats.join(" ")));
         }
@@ -262,7 +258,7 @@ impl RepoSetFixture {
     /// Each repository will be written to a subdirectory named after its repo name
     /// inside a temporary directory. A `repos.conf` is generated and the [`RepoSet`]
     /// is loaded.
-    pub fn new(repositories: Vec<RepositoryFixture>) -> Result<Self> {
+    pub fn new(repositories: Vec<RepositoryFixture>) -> anyhow::Result<Self> {
         let temp = tempfile::Builder::new()
             .tempdir()
             .map_err(|e| anyhow!("failed to create temp dir: {e}"))?;

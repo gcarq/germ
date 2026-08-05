@@ -10,9 +10,7 @@ use crate::repository::Repository;
 use crate::types::FxHashMap;
 use anyhow::{anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::fmt;
-use std::path::Path;
+use std::{cmp::Ordering, fmt, path::Path};
 use thiserror::Error;
 
 /// Errors returned when generating package metadata for a [`CPV`].
@@ -22,7 +20,7 @@ pub enum MetadataGenerationError {
     Ebuild(#[from] EbuildError),
 
     #[error("internal error while preparing ebuild execution")]
-    Internal(#[source] anyhow::Error),
+    Internal(#[from] anyhow::Error),
 
     #[error(transparent)]
     Execution(#[from] PhaseExecutionError),
@@ -93,8 +91,7 @@ impl CPV {
     ) -> Result<PackageMetadata, MetadataGenerationError> {
         let ebuild = Ebuild::new(ebuild_path, self, repo)?;
         let mut handler =
-            EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default())
-                .map_err(MetadataGenerationError::Internal)?;
+            EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default())?;
 
         let data = handler.spawn()?;
         let data = data

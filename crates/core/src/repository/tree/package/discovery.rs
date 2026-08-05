@@ -1,15 +1,22 @@
 use crate::package::cpv::CPV;
 use crate::package::version::PackageVersion;
-use crate::repository::EBUILD_RE;
-use anyhow::{Context, Result, anyhow};
+use crate::regex::PV_REV;
+use anyhow::{Context, anyhow};
+use regex::Regex;
 use std::path::Path;
+use std::sync::LazyLock;
 use walkdir::WalkDir;
+
+/// Regex to validate and parse `package`, `version`, `suffixes` and the `revision`
+/// from an ebuild name.
+static EBUILD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"^{PV_REV}.ebuild$")).unwrap());
 
 /// Resolves all available [`CPV`] on-disk for the given `repo_path` and `category`.
 pub fn resolve_cpv_from_category(
     repo_path: &Path,
     category: &str,
-) -> impl Iterator<Item = Result<CPV>> {
+) -> impl Iterator<Item = anyhow::Result<CPV>> {
     WalkDir::new(repo_path.join(category))
         .min_depth(2)
         .max_depth(2)
@@ -32,7 +39,7 @@ pub fn resolve_cpv_from_category(
 ///
 /// Returns `Ok(None)` if the file is not a valid ebuild.
 /// Returns `Err` if the file is a valid regex, but doesn't belong here.
-fn cpv_from_ebuild_name(category: &str, filename: &str) -> Result<Option<CPV>> {
+fn cpv_from_ebuild_name(category: &str, filename: &str) -> anyhow::Result<Option<CPV>> {
     let Some(caps) = EBUILD_RE.captures(filename) else {
         return Ok(None);
     };

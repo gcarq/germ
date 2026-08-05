@@ -1,8 +1,10 @@
 use super::ProfileSource;
-use crate::repository::set::RepoSet;
+use crate::repository::RepoSet;
 use anyhow::{Context, Result, anyhow, bail};
-use std::path::{Path, PathBuf};
-use std::{fmt, fs};
+use std::{
+    fmt, fs,
+    path::{Path, PathBuf},
+};
 
 /// Represents a parsed entry from a profile's `parent` file.
 /// This can be in multiple formats, depending on the profile format.
@@ -40,7 +42,7 @@ impl ParentEntry {
 
     /// Resolves a parent [`ProfileSource`] with the canonical path and repository for the given `referring_profile`.
     ///
-    /// Returns `Err` if the path is invalid, the repository is not loaded, or the parent profile isn't within the repository.
+    /// Returns `Err` if the path is invalid, the repository is not available, or the parent profile isn't within the repository.
     pub fn resolve<'repo>(
         &self,
         referring_profile: &ProfileSource<'repo>,
@@ -70,7 +72,7 @@ impl ParentEntry {
                 Ok(ProfileSource { path, owning_repo })
             }
             Self::RootRelative(profile_path) => {
-                if !owning_repo.layout()?.supports_root_relative_parents() {
+                if !owning_repo.layout.supports_root_relative_parents() {
                     bail!("root-relative parent requires profile-format 'portage-2'");
                 }
                 let path =
@@ -84,15 +86,12 @@ impl ParentEntry {
                 repo_name,
                 profile_path,
             } => {
-                if !owning_repo.layout()?.supports_cross_repo_parents() {
+                if !owning_repo.layout.supports_cross_repo_parents() {
                     bail!("cross-repository parent requires profile-format 'portage-2'");
                 }
                 let parent_repo = repo_set.get(repo_name).ok_or_else(|| {
-                    anyhow!("repository '{repo_name}' not found for parent '{self}'")
+                    anyhow!("repository '{repo_name}' is not available for parent '{self}'")
                 })?;
-                if !parent_repo.is_loaded() {
-                    bail!("repository '{repo_name}' not loaded; run sync first");
-                }
                 let path =
                     Self::resolve_contained(&parent_repo.location.join("profiles"), profile_path)?;
                 Ok(ProfileSource {

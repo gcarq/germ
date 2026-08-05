@@ -12,6 +12,7 @@ anyhow = { version = "1.0.104", default-features = false, features = ["std"] }
 clap = { version = "4.6.2", default-features = false, features = ["color", "error-context", "help", "std", "usage", "derive"] }
 colored = { version = "3.1.1", default-features = false }
 constcat = { version = "0.6.1", default-features = false }
+either = { version = "1.17.0", default-features = false, features = ["std"] }
 fern = { version = "0.7.1", default-features = false }
 fxhash = { version = "0.2.1", default-features = false }
 log = { version = "0.4.33", default-features = false }

@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use colored::{Color, Colorize};
 use germ_core::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
-use germ_core::repository::set::RepoSet;
+use germ_core::repository::RepoSet;
 use log::error;
 use std::io;
 use std::path::Path;
@@ -58,7 +58,8 @@ fn run(args: Args) -> Result<()> {
         RepoSet::new(&config_path).with_context(|| "unable to process repos.conf")?;
     commands::execute(&args.command, &mut repo_set)?;
 
-    repo_set.flush(false)
+    repo_set.flush(false)?;
+    Ok(())
 }
 
 /// Sets up application logger with the given `log_level`.

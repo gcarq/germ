@@ -2,15 +2,25 @@ use crate::deps::atom::Atom;
 use crate::package::Package;
 use crate::package::cpv::CPV;
 use crate::types::FxHashMap;
-use anyhow::{Context, Result, anyhow, bail};
+
 use log::{debug, warn};
 use rkyv::rancor;
 use rkyv::with::Skip;
 use rkyv::{Archive, Deserialize, Serialize};
-use std::fs::File;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, Read, Write};
 use std::ops::Deref;
 use std::path::Path;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub(crate) enum IndexError {
+    #[error("unable to access package index")]
+    Io(#[from] io::Error),
+
+    #[error("unable to serialize or deserialize package index")]
+    Serialization(#[from] rancor::Error),
+}
 
 /// Holds all available packages in a repository, mapping `category/package` to [`Vec<CPV>`].
 #[derive(Default, Debug)]
@@ -80,12 +90,11 @@ impl ResolvedPackageIndex {
 
     /// Extends the index with the given packages.
     pub fn extend(&mut self, packages: Vec<Package>) {
-        let len = self.index.len();
-        self.index
-            .extend(packages.into_iter().map(|pkg| (pkg.cpv.fqn().into(), pkg)));
-        if self.index.len() != len {
+        if !packages.is_empty() {
             self.modified = true;
         }
+        self.index
+            .extend(packages.into_iter().map(|pkg| (pkg.cpv.fqn().into(), pkg)));
     }
 
     /// Retains only the packages that are present in the given [`AvailablePackageIndex`].
@@ -106,19 +115,23 @@ impl ResolvedPackageIndex {
     ///
     /// Returns `Ok(None)` if the file doesn't exist or cannot be deserialized.
     /// Returns `Err` if the file cannot be opened.
-    pub fn load_from_path(path: &Path) -> Result<Option<Self>> {
-        let reader = match File::open(path) {
+    pub(crate) fn load_from_path(path: &Path) -> Result<Option<Self>, IndexError> {
+        let mut reader = match File::open(path) {
             Ok(file) => file,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => bail!("unable to open package index at {}: {err}", path.display()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(IndexError::Io(error)),
         };
-        match Self::deserialize(reader) {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+        match rkyv::from_bytes::<ResolvedPackageIndex, rancor::Error>(&bytes) {
             Ok(index) => Ok(Some(index)),
-            Err(err) => {
+            Err(error) => {
+                let error = IndexError::Serialization(error);
                 warn!(
-                    "Ignoring incompatible package index at {}: {err:#}",
+                    "Discarding incompatible package index at {}: {error:#}",
                     path.display()
                 );
+                fs::remove_file(path)?;
                 Ok(None)
             }
         }
@@ -128,39 +141,13 @@ impl ResolvedPackageIndex {
     ///
     /// If the index hasn't been modified and `force` is not set, this is a no-op.
     /// Returns `Err` if the index cannot be serialized or the file cannot be created.
-    pub fn write_to_path(&self, path: &Path, force: bool) -> Result<()> {
+    pub(crate) fn write_to_path(&self, path: &Path, force: bool) -> Result<(), IndexError> {
         if !force && !self.modified {
             debug!("Index not modified, skipping write",);
             return Ok(());
         }
-        let writer = File::create(path)
-            .with_context(|| anyhow!("unable to write to '{}'", path.display()))?;
-        self.serialize(writer)
-    }
-
-    /// Deserializes an index from `reader`.
-    ///
-    /// Returns `Err` if the index cannot be deserialized.
-    pub fn deserialize<R>(mut reader: R) -> Result<Self>
-    where
-        R: io::Read,
-    {
-        let mut buf = Vec::new();
-        reader.read_to_end(&mut buf)?;
-
-        let index = rkyv::from_bytes::<ResolvedPackageIndex, rancor::Error>(&buf)
-            .with_context(|| anyhow!("unable to deserialize"))?;
-        Ok(index)
-    }
-
-    /// Serializes this index to `writer`.
-    ///
-    /// Returns `Err` if the index cannot be serialized.
-    pub fn serialize<W>(&self, mut writer: W) -> Result<()>
-    where
-        W: io::Write,
-    {
-        let bytes = rkyv::to_bytes::<rancor::Error>(self).with_context(|| "unable to serialize")?;
+        let bytes = rkyv::to_bytes::<rancor::Error>(self)?;
+        let mut writer = File::create(path)?;
         writer.write_all(&bytes)?;
         Ok(())
     }
@@ -177,8 +164,7 @@ impl Deref for ResolvedPackageIndex {
 mod tests {
     use super::*;
     use crate::package::version::PackageVersion;
-    use std::io::{Cursor, Seek, SeekFrom, Write};
-    use tempfile::NamedTempFile;
+    use tempfile::tempdir;
 
     #[test]
     fn test_available_package_index() {
@@ -262,38 +248,27 @@ mod tests {
     }
 
     #[test]
-    fn test_resolved_package_index_serialization() {
+    fn test_resolved_package_index_persistence() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("index");
         let mut index = ResolvedPackageIndex::default();
-
         let cpv = CPV::new(
             "media-libs",
             "mesa",
             PackageVersion::new("26.0.1", None, None).unwrap(),
         )
         .unwrap();
-        let pkg = Package {
+        index.insert(Package {
             cpv: cpv.clone(),
             ..Default::default()
-        };
-        index.insert(pkg);
-        assert!(index.contains_key(cpv.fqn()));
+        });
 
-        let mut cursor = Cursor::new(Vec::new());
-        index.serialize(&mut cursor).unwrap();
+        index.write_to_path(&path, false).unwrap();
+        let loaded = ResolvedPackageIndex::load_from_path(&path)
+            .unwrap()
+            .unwrap();
 
-        cursor.seek(SeekFrom::Start(0)).unwrap();
-        let deserialized = ResolvedPackageIndex::deserialize(&mut cursor).unwrap();
-        assert!(deserialized.contains_key(cpv.fqn()));
-    }
-
-    #[test]
-    fn test_resolved_package_index_invalid() {
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(b"not a resolved package index").unwrap();
-
-        let loaded = ResolvedPackageIndex::load_from_path(file.path()).unwrap();
-
-        assert!(loaded.is_none());
+        assert!(loaded.contains_key(cpv.fqn()));
     }
 
     #[test]

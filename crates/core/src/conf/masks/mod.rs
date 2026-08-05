@@ -1,14 +1,13 @@
 pub mod useflag;
 
 use crate::deps::atom::Atom;
-use crate::files::PackageEntries;
-use crate::files::entry::Entry;
+use crate::files::{PackageEntries, entry::Entry};
 use crate::package::Package;
 use crate::profile::Profile;
-use crate::repository::set::RepoSet;
+use crate::repository::RepoSet;
 use crate::types::FxHashMap;
 use crate::utils::Inherit;
-use anyhow::Result;
+
 use log::debug;
 use std::cmp::Ordering;
 
@@ -30,12 +29,12 @@ impl PackageMasks {
         profile: &Profile,
         user_mask: PackageEntries,
         user_unmask: PackageEntries,
-    ) -> Result<Self> {
+    ) -> Self {
         let mut mask = PackageEntries::default().inherit(&profile.package_mask);
         let mut unmask = PackageEntries::default().inherit(&profile.package_unmask);
         for repo in repo_set.values() {
-            mask.inherit_from(repo.package_mask()?);
-            unmask.inherit_from(repo.package_unmask()?);
+            mask.inherit_from(&repo.package_mask);
+            unmask.inherit_from(&repo.package_unmask);
         }
         mask.inherit_from(&user_mask);
         unmask.inherit_from(&user_unmask);
@@ -48,7 +47,7 @@ impl PackageMasks {
             manager.mask.len(),
             manager.unmask.len()
         );
-        Ok(manager)
+        manager
     }
 
     /// Checks if the given `package` is masked.
@@ -95,14 +94,14 @@ mod tests {
     use crate::package::version::PackageVersion;
 
     #[test]
-    fn test_is_masked() -> Result<()> {
+    fn test_is_masked() {
         let mask_lines =
             PackageEntries::from_string("dev-lang/rust\napp-editors/vim".into(), Precedence::User)
                 .unwrap();
         let unmask_lines =
             PackageEntries::from_string("=dev-lang/rust-1.50*".into(), Precedence::User).unwrap();
         let repo_set = RepoSet::default();
-        let manager = PackageMasks::new(&repo_set, &Profile::default(), mask_lines, unmask_lines)?;
+        let manager = PackageMasks::new(&repo_set, &Profile::default(), mask_lines, unmask_lines);
 
         let pkg1 = Package {
             cpv: CPV::new(
@@ -147,6 +146,5 @@ mod tests {
             ..Default::default()
         };
         assert!(!manager.is_masked(&pkg4), "{pkg4} should not be masked");
-        Ok(())
     }
 }

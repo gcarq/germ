@@ -1,11 +1,12 @@
+use std::ops::Deref;
+
 use anyhow::Context;
+use log::warn;
 
 use crate::ebuild::Ebuild;
 use crate::ebuild::handler::EbuildPhase;
 use crate::makenv::MakeEnv;
 use crate::types::FxHashMap;
-use log::warn;
-use std::ops::Deref;
 
 /// Unset selected variables so that they don't needlessly propagate down into the ebuild
 /// environment.
@@ -178,7 +179,7 @@ impl EbuildEnv {
         let repo_paths = shlex::try_join(
             ebuild
                 .repo
-                .eclasses()?
+                .eclasses
                 .repo_paths()
                 .iter()
                 .filter_map(|p| p.as_os_str().to_str()),

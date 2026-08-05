@@ -205,7 +205,7 @@ impl<'a> EbuildPhaseHandler<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::FxHashMap;
+    use crate::{ebuild::handler::error::ProtocolError, types::FxHashMap};
 
     #[test]
     fn test_abort_ipc_ordering() {
@@ -225,8 +225,8 @@ mod tests {
         let result: Result<(), PhaseExecutionError> = execution.run(|channel| {
             channel
                 .recv_bytes()?
-                .ok_or_else(|| anyhow!("unexpected EOF"))?;
-            Err(PhaseExecutionError::Internal(anyhow!("protocol failure")))
+                .ok_or_else(|| ProtocolError::InvalidRequest("".into()))?;
+            Err(PhaseExecutionError::Internal(anyhow!("test")))
         });
 
         assert!(

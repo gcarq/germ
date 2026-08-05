@@ -3,9 +3,8 @@ use colored::Colorize;
 use germ_core::conf::PortageConf;
 use germ_core::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
 use germ_core::deps::atom::Atom;
-use germ_core::repository::set::RepoSet;
-use germ_core::vdb::Vdb;
-use germ_core::vdb::package::InstalledPackage;
+use germ_core::repository::RepoSet;
+use germ_core::vdb::{Vdb, package::InstalledPackage};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 

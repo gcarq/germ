@@ -2,14 +2,14 @@ mod deprecation;
 mod parent;
 
 use crate::eapi::Eapi;
-use crate::files::entry::Precedence;
-use crate::files::pkguse::PackageUseEntries;
-use crate::files::{PackageEntries, SysPackageEntries, UseEntries};
+use crate::files::{
+    PackageEntries, SysPackageEntries, UseEntries, entry::Precedence, pkguse::PackageUseEntries,
+};
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
 use crate::profile::parent::ParentEntry;
+use crate::repository::RepoSet;
 use crate::repository::Repository;
-use crate::repository::set::RepoSet;
 use crate::utils::Inherit;
 use anyhow::{Context, Result, anyhow, bail};
 use log::warn;
@@ -29,10 +29,7 @@ impl<'repo> ProfileSource<'repo> {
             .canonicalize()
             .with_context(|| anyhow!("unable to resolve profile {}", path.display()))?;
 
-        for repository in repo_set
-            .values()
-            .filter(|repository| repository.is_loaded())
-        {
+        for repository in repo_set.values() {
             let profiles_root = repository.location.join("profiles").canonicalize()?;
             if path.starts_with(&profiles_root) {
                 return Ok(Self {
@@ -42,10 +39,7 @@ impl<'repo> ProfileSource<'repo> {
             }
         }
 
-        bail!(
-            "profile {} is not owned by a loaded configured repository",
-            path.display()
-        )
+        bail!("profile {} is not owned by a repository", path.display())
     }
 }
 
@@ -99,8 +93,7 @@ impl Profile {
     /// Returns `Err` if `location` doesn't exist, the profile directory is invalid or
     /// if the profile is not valid.
     pub fn resolve(location: &Path, repo_set: &RepoSet) -> Result<Self> {
-        let source = ProfileSource::from_path(location, repo_set)
-            .with_context(|| anyhow!("unable to resolve profile {}", location.display()))?;
+        let source = ProfileSource::from_path(location, repo_set)?;
 
         let mut parents = Vec::new();
         Self::build_parents(&source, repo_set, &mut parents)
@@ -125,7 +118,7 @@ impl Profile {
         let path = &source.path;
         let eapi = Eapi::from_eapi_file(&path.join("eapi"))?;
         let supports_file_dirs = eapi.supports_profile_file_dirs()
-            || source.owning_repo.layout()?.supports_profile_file_dirs();
+            || source.owning_repo.layout.supports_profile_file_dirs();
 
         let profile = Self {
             make_defaults: MakeEnv::from_path(&path.join("make.defaults"), false, true)?,

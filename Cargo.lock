@@ -351,6 +351,7 @@ dependencies = [
  "anyhow",
  "clap",
  "colored",
+ "either",
  "fern",
  "germ-core",
  "log",
@@ -362,6 +363,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "constcat",
+ "either",
  "fxhash",
  "log",
  "md-5",
