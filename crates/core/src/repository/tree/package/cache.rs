@@ -1,4 +1,7 @@
-use std::{fs, io, path::Path};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use redb::{Database, ReadableDatabase, TableDefinition};
 use rkyv::rancor;
@@ -7,6 +10,7 @@ use thiserror::Error;
 use crate::package::{cpv::CPV, metadata::PackageMetadata};
 use crate::types::FxHashSet;
 
+const METADATA_CACHE_FILE: &str = "germ";
 const METADATA_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("metadata");
 
 /// Errors that can occur while interacting with the metadata cache.
@@ -26,19 +30,33 @@ pub enum CacheError {
 #[derive(Debug)]
 pub struct MetadataCache {
     db: Database,
+    path: PathBuf,
 }
 
 impl MetadataCache {
     /// Creates a new [`MetadataCache`] at the given `directory`.
-    pub fn new(directory: &Path, name: &str) -> Result<Self, CacheError> {
+    pub fn new(directory: &Path) -> Result<Self, CacheError> {
         fs::create_dir_all(directory)?;
-        let db = Database::create(directory.join(name)).map_err(redb::Error::from)?;
+        let path = directory.join(METADATA_CACHE_FILE);
+        let db = Self::open(&path)?;
+        Ok(Self { db, path })
+    }
 
-        // Create the metadata table if it doesn't exist
+    /// Deletes and recreates the cache file.
+    pub fn recreate(&mut self) -> Result<(), CacheError> {
+        fs::remove_file(&self.path)?;
+        self.db = Self::open(&self.path)?;
+        Ok(())
+    }
+
+    fn open(path: &Path) -> Result<Database, CacheError> {
+        let db = Database::create(path).map_err(redb::Error::from)?;
+
+        // Create the metadata table if it doesn't exist.
         let tx = db.begin_write().map_err(redb::Error::from)?;
         tx.open_table(METADATA_TABLE).map_err(redb::Error::from)?;
         tx.commit().map_err(redb::Error::from)?;
-        Ok(Self { db })
+        Ok(db)
     }
 
     /// Inserts the given `metadata` for the specified `cpv` into the cache.
@@ -116,7 +134,7 @@ mod tests {
     fn test_metadata_cache_get_missing() {
         let temp = tempfile::tempdir().unwrap();
 
-        let cache = MetadataCache::new(temp.path(), "repo").unwrap();
+        let cache = MetadataCache::new(temp.path()).unwrap();
         let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
         assert_eq!(cache.get(&cpv).unwrap(), None);
     }
@@ -130,13 +148,26 @@ mod tests {
             ..Default::default()
         };
 
-        let cache = MetadataCache::new(temp.path(), "repo").unwrap();
+        let cache = MetadataCache::new(temp.path()).unwrap();
         cache.insert(&cpv, &metadata).unwrap();
         assert_eq!(cache.get(&cpv).unwrap(), Some(metadata.clone()));
         drop(cache);
 
-        let reopened = MetadataCache::new(temp.path(), "repo").unwrap();
+        let reopened = MetadataCache::new(temp.path()).unwrap();
         assert_eq!(reopened.get(&cpv).unwrap(), Some(metadata));
+    }
+
+    #[test]
+    fn test_metadata_cache_recreate() {
+        let temp = tempfile::tempdir().unwrap();
+        let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
+
+        let mut cache = MetadataCache::new(temp.path()).unwrap();
+        cache.insert(&cpv, &PackageMetadata::default()).unwrap();
+        cache.recreate().unwrap();
+
+        assert_eq!(cache.get(&cpv).unwrap(), None);
+        assert!(temp.path().join(METADATA_CACHE_FILE).is_file());
     }
 
     #[test]
@@ -145,7 +176,7 @@ mod tests {
         let known = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
         let unknown = CPV::new("app-misc", "bar", PackageVersion::try_from("1").unwrap()).unwrap();
 
-        let cache = MetadataCache::new(temp.path(), "repo").unwrap();
+        let cache = MetadataCache::new(temp.path()).unwrap();
         cache.insert(&known, &PackageMetadata::default()).unwrap();
         cache.insert(&unknown, &PackageMetadata::default()).unwrap();
 
@@ -158,7 +189,7 @@ mod tests {
     fn test_metadata_cache_remove() {
         let temp = tempfile::tempdir().unwrap();
 
-        let cache = MetadataCache::new(temp.path(), "repo").unwrap();
+        let cache = MetadataCache::new(temp.path()).unwrap();
         let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
         cache.insert(&cpv, &PackageMetadata::default()).unwrap();
         cache.remove(&cpv).unwrap();
@@ -169,7 +200,7 @@ mod tests {
     #[test]
     fn test_metadata_cache_discards_corrupt_metadata() {
         let temp = tempfile::tempdir().unwrap();
-        let cache = MetadataCache::new(temp.path(), "repo").unwrap();
+        let cache = MetadataCache::new(temp.path()).unwrap();
         let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
 
         let tx = cache.db.begin_write().unwrap();

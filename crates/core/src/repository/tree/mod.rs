@@ -17,7 +17,7 @@ use crate::eapi::Eapi;
 use crate::files::{PackageEntries, entry::Precedence};
 use crate::package::{Package, cpv::CPV};
 use crate::regex::REPO_RE;
-use crate::repository::tree::package::cache::MetadataCache;
+use crate::repository::tree::package::cache::{CacheError, MetadataCache};
 use crate::types::FxHashSet;
 use crate::utils::Inherit;
 use anyhow::{Context, anyhow};
@@ -69,7 +69,7 @@ impl Repository {
 
         Ok(Self {
             location: location.to_owned(),
-            metadata_cache: MetadataCache::new(&location.join("cache"), &name)?,
+            metadata_cache: MetadataCache::new(&location.join("cache"))?,
             categories: FxHashSet::default(),
             eclasses: Eclasses::empty(location),
             arch_list: ArchList::from_path(&profiles.join("arch.list"))?,
@@ -143,6 +143,11 @@ impl Repository {
     /// Returns an iterator over all errors that occured.
     pub fn build_cache(&mut self) -> impl Iterator<Item = PackageResolutionError> {
         self.packages().filter_map(Result::err)
+    }
+
+    /// Deletes and recreates the [`MetadataCache`].
+    pub fn recreate_cache(&mut self) -> Result<(), CacheError> {
+        self.metadata_cache.recreate()
     }
 
     /// Compacts the [`MetadataCache`] by removing all entries that are no longer valid,
@@ -296,7 +301,7 @@ impl Default for Repository {
         let temp_dir = tempfile::Builder::new()
             .tempdir()
             .expect("failed to create temp dir");
-        let metadata_cache = MetadataCache::new(&temp_dir.path().join("metadata"), "germ").unwrap();
+        let metadata_cache = MetadataCache::new(&temp_dir.path().join("metadata")).unwrap();
         Self {
             location: temp_dir.path().to_owned(),
             name: String::new(),
