@@ -9,7 +9,6 @@ use crate::regex::{CATEGORY_RE, PKG_RE};
 use crate::repository::Repository;
 use crate::types::FxHashMap;
 use anyhow::{anyhow, bail};
-use rkyv::{Archive, Deserialize, Serialize};
 use std::{cmp::Ordering, fmt, path::Path};
 use thiserror::Error;
 
@@ -33,7 +32,7 @@ pub enum MetadataGenerationError {
 ///
 /// NOTE: `fqn` holds the fully qualified name and is also used in the [`Display`] implementation
 /// for performance reasons, so `category`, `package` and `version` must NOT be changed.
-#[derive(Archive, Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct CPV {
     category: Box<str>,
@@ -201,11 +200,7 @@ mod tests {
 
     #[test]
     fn test_cpv_new_ok() {
-        let cpv = CPV::new(
-            "dev-lang",
-            "R",
-            PackageVersion::new("4.5.2", None, None).unwrap(),
-        );
+        let cpv = CPV::new("dev-lang", "R", PackageVersion::try_from("4.5.2").unwrap());
         assert!(cpv.is_ok());
     }
 
@@ -214,7 +209,7 @@ mod tests {
         let cpv = CPV::new(
             "app-editors",
             "memtest86-",
-            PackageVersion::new("1.0.0", None, None).unwrap(),
+            PackageVersion::try_from("1.0.0").unwrap(),
         );
         assert!(cpv.is_err());
     }
@@ -224,7 +219,7 @@ mod tests {
         let cpv = CPV::new_unchecked(
             "app-editors",
             "vim",
-            PackageVersion::new("9.1.1652", None, Some("2")).unwrap(),
+            PackageVersion::try_from("9.1.1652-r2").unwrap(),
         );
         assert_eq!(cpv.to_string(), "app-editors/vim-9.1.1652-r2");
     }
@@ -246,7 +241,7 @@ mod tests {
         let cpv = CPV::new(
             "sys-devel",
             "gcc",
-            PackageVersion::new("15.2.1", Some("p20251122"), Some("1")).unwrap(),
+            PackageVersion::try_from("15.2.1_p20251122-r1").unwrap(),
         )
         .unwrap();
         for atom in atoms {
@@ -276,7 +271,7 @@ mod tests {
         let cpv = CPV::new(
             "sys-devel",
             "gcc",
-            PackageVersion::new("15.2.1", Some("p20251122"), Some("1")).unwrap(),
+            PackageVersion::try_from("15.2.1_p20251122-r1").unwrap(),
         )
         .unwrap();
         for atom in atoms {
@@ -290,7 +285,7 @@ mod tests {
         let cpv = CPV::new(
             "dev-libs",
             "pkg",
-            PackageVersion::new("1.0", None, Some("0")).unwrap(),
+            PackageVersion::try_from("1.0-r0").unwrap(),
         )
         .unwrap();
 
@@ -306,7 +301,7 @@ mod tests {
         let cpv = CPV::new(
             "app-editors",
             "vim",
-            PackageVersion::new("7.0.174", None, Some("1")).unwrap(),
+            PackageVersion::try_from("7.0.174-r1").unwrap(),
         )
         .unwrap();
         assert_eq!(cpv.to_string(), "app-editors/vim-7.0.174-r1");

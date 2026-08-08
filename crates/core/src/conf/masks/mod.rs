@@ -107,7 +107,7 @@ mod tests {
             cpv: CPV::new(
                 "dev-lang",
                 "rust",
-                PackageVersion::new("1.50", None, Some("2")).unwrap(),
+                PackageVersion::try_from("1.50-r2").unwrap(),
             )
             .unwrap(),
             ..Default::default()
@@ -118,7 +118,7 @@ mod tests {
             cpv: CPV::new(
                 "dev-lang",
                 "rust",
-                PackageVersion::new("1.60", None, Some("1")).unwrap(),
+                PackageVersion::try_from("1.60-r1").unwrap(),
             )
             .unwrap(),
             ..Default::default()
@@ -129,7 +129,7 @@ mod tests {
             cpv: CPV::new(
                 "app-editors",
                 "vim",
-                PackageVersion::new("8.2", None, None).unwrap(),
+                PackageVersion::try_from("8.2").unwrap(),
             )
             .unwrap(),
             ..Default::default()
@@ -140,7 +140,7 @@ mod tests {
             cpv: CPV::new(
                 "app-editors",
                 "nano",
-                PackageVersion::new("5.0", None, None).unwrap(),
+                PackageVersion::try_from("5.0").unwrap(),
             )
             .unwrap(),
             ..Default::default()

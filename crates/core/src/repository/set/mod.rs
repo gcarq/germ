@@ -65,7 +65,7 @@ impl RepoSet {
     pub fn find_packages(
         &mut self,
         atom: &Atom,
-    ) -> impl Iterator<Item = Result<&Package, PackageResolutionError>> {
+    ) -> impl Iterator<Item = Result<Package, PackageResolutionError>> {
         self.select_mut(atom.repo.as_deref())
             .flat_map(|r| r.find_packages(atom))
     }
@@ -82,16 +82,6 @@ impl RepoSet {
         }
 
         self.reload_from_disk()
-    }
-
-    /// Write repository indexes and caches to disk.
-    pub fn flush(&self, force: bool) -> Result<(), RepoSetError> {
-        for repository in self.values() {
-            repository
-                .write_index(force)
-                .map_err(|source| RepoSetError::repo_failure(&repository.name, source))?;
-        }
-        Ok(())
     }
 
     pub fn get(&self, name: &str) -> Option<&Repository> {
@@ -142,8 +132,6 @@ impl RepoSet {
     /// Reloads all repository data from disk.
     pub(crate) fn reload_from_disk(&mut self) -> Result<(), RepoSetError> {
         let mut entries = FxHashMap::default();
-        let mut pending = FxHashMap::default();
-
         for config in self.config.iter() {
             let sync_handler = build_sync_handler(&config.raw_properties).map_err(|error| {
                 RepoSetError::Configuration(
@@ -157,7 +145,12 @@ impl RepoSet {
                     sync_handler,
                 },
             );
+        }
 
+        self.entries = entries;
+
+        let mut pending = FxHashMap::default();
+        for config in self.config.iter() {
             match fs::metadata(&config.location) {
                 Ok(_) => match Repository::load(&config.name, &config.location) {
                     Ok(repository) => {
@@ -209,7 +202,7 @@ impl RepoSet {
         }
 
         for (name, repository) in completed {
-            let entry = entries.get_mut(&name).ok_or_else(|| {
+            let entry = self.entries.get_mut(&name).ok_or_else(|| {
                 RepoSetError::Internal(anyhow!(
                     "replacement entry for repository '{name}' is missing"
                 ))
@@ -217,7 +210,6 @@ impl RepoSet {
             entry.repository = Some(repository);
         }
 
-        self.entries = entries;
         Ok(())
     }
 
@@ -282,10 +274,10 @@ impl RepoSet {
             }
         }
 
-        match repository.populate().and_then(|()| repository.load_index()) {
+        match repository.populate() {
             Ok(()) => {
                 debug!(
-                    "Repository '{name}' is available with {} ebuilds",
+                    "Loaded repository '{name}' with {} ebuilds",
                     repository.cpvs().count()
                 );
                 completed.insert(name.to_owned(), repository);
@@ -307,20 +299,18 @@ impl RepoSet {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{RepoSetFixture, RepositoryFixture};
+    use super::super::test_support::{RepoBuilder, repo_set};
     use super::*;
 
     #[test]
     fn test_repository_data_failure() {
-        let mut fixture = RepoSetFixture::new(vec![
-            RepositoryFixture::new("valid"),
-            RepositoryFixture::new("invalid"),
-        ])
-        .unwrap();
+        let mut fixture =
+            repo_set(vec![RepoBuilder::new("valid"), RepoBuilder::new("invalid")]).unwrap();
         fs::remove_file(
             fixture
-                .get_repo_path("invalid")
+                .get("invalid")
                 .unwrap()
+                .location
                 .join("metadata/layout.conf"),
         )
         .unwrap();
@@ -335,9 +325,7 @@ mod tests {
     fn test_sync_makes_repository_available() {
         let temp = tempfile::Builder::new().tempdir().unwrap();
         let location = temp.path().join("repository");
-        RepositoryFixture::with_location(&location, "repo")
-            .write()
-            .unwrap();
+        RepoBuilder::new("repo").write_to(&location).unwrap();
         let config = temp.path().join("repos.conf");
         fs::write(
             &config,
@@ -348,10 +336,10 @@ mod tests {
         fs::remove_dir_all(&location).unwrap();
         set.reload_from_disk().unwrap();
 
-        RepositoryFixture::with_location(&location, "repo")
+        RepoBuilder::new("repo")
             .categories(["app-misc"])
             .ebuild("app-misc", "foo", "1")
-            .write()
+            .write_to(&location)
             .unwrap();
         set.maybe_sync().unwrap();
 
@@ -382,13 +370,13 @@ mod tests {
 
     #[test]
     fn test_find_unavailable_repo() {
-        let mut fixture = RepoSetFixture::new(vec![
-            RepositoryFixture::new("repo")
+        let mut fixture = repo_set(vec![
+            RepoBuilder::new("repo")
                 .repos_conf_property("sync-type", "git")
                 .repos_conf_property("sync-uri", "https://example.invalid/repo.git"),
         ])
         .unwrap();
-        fs::remove_dir_all(fixture.get_repo_path("repo").unwrap()).unwrap();
+        fs::remove_dir_all(fixture.get("repo").unwrap().location.clone()).unwrap();
         fixture.reload_from_disk().unwrap();
 
         assert!(
@@ -401,11 +389,11 @@ mod tests {
 
     #[test]
     fn test_layout_masters_are_used() {
-        let fixture = RepoSetFixture::new(vec![
-            RepositoryFixture::new("master")
+        let fixture = repo_set(vec![
+            RepoBuilder::new("master")
                 .categories(["app-misc"])
                 .eclass("master"),
-            RepositoryFixture::new("overlay")
+            RepoBuilder::new("overlay")
                 .masters(["master"])
                 .categories(["app-misc"])
                 .ebuild("app-misc", "foo", "1"),
@@ -429,11 +417,11 @@ mod tests {
 
     #[test]
     fn test_empty_masters_override() {
-        let fixture = RepoSetFixture::new(vec![
-            RepositoryFixture::new("master")
+        let fixture = repo_set(vec![
+            RepoBuilder::new("master")
                 .categories(["app-misc"])
                 .eclass("master"),
-            RepositoryFixture::new("overlay")
+            RepoBuilder::new("overlay")
                 .masters(["master"])
                 .masters_override()
                 .ebuild("app-misc", "foo", "1"),
@@ -458,9 +446,9 @@ mod tests {
 
     #[test]
     fn test_reload_refreshes_dependent_overlays() {
-        let mut fixture = RepoSetFixture::new(vec![
-            RepositoryFixture::new("master").categories(["app-misc"]),
-            RepositoryFixture::new("overlay")
+        let mut fixture = repo_set(vec![
+            RepoBuilder::new("master").categories(["app-misc"]),
+            RepoBuilder::new("overlay")
                 .masters(["master"])
                 .ebuild("app-misc", "foo", "1")
                 .ebuild("dev-libs", "bar", "1"),
@@ -475,7 +463,7 @@ mod tests {
         );
         assert!(!overlay_before.eclasses.contains_key("refreshed"));
 
-        let master_path = fixture.get_repo_path("master").unwrap();
+        let master_path = fixture.get("master").unwrap().location.as_path();
         fs::write(
             master_path.join("profiles").join("categories"),
             "app-misc\ndev-libs\n",
@@ -495,9 +483,9 @@ mod tests {
 
     #[test]
     fn test_master_cycle() {
-        let result = RepoSetFixture::new(vec![
-            RepositoryFixture::new("first").masters(["second"]),
-            RepositoryFixture::new("second").masters(["first"]),
+        let result = repo_set(vec![
+            RepoBuilder::new("first").masters(["second"]),
+            RepoBuilder::new("second").masters(["first"]),
         ]);
 
         let Err(error) = result else {
@@ -512,9 +500,9 @@ mod tests {
 
     #[test]
     fn test_unavailable_master_cycle() {
-        let result = RepoSetFixture::new(vec![
-            RepositoryFixture::new("first").repos_conf_property("masters", "second"),
-            RepositoryFixture::new("second")
+        let result = repo_set(vec![
+            RepoBuilder::new("first").repos_conf_property("masters", "second"),
+            RepoBuilder::new("second")
                 .formats(["pms"])
                 .eapi("0")
                 .profile_entries_dir("package.mask", "app-misc/foo\n")
@@ -533,21 +521,21 @@ mod tests {
 
     #[test]
     fn test_unavailable_masters() {
-        let mut fixture = RepoSetFixture::new(vec![
-            RepositoryFixture::new("available")
+        let mut fixture = repo_set(vec![
+            RepoBuilder::new("available")
                 .categories(["app-misc"])
                 .eclass("available"),
-            RepositoryFixture::new("unavailable")
+            RepoBuilder::new("unavailable")
                 .repos_conf_property("sync-type", "git")
                 .repos_conf_property("sync-uri", "https://example.invalid/unavailable.git"),
-            RepositoryFixture::new("child")
+            RepoBuilder::new("child")
                 .masters(["missing", "available", "unavailable"])
                 .ebuild("app-misc", "foo", "1"),
         ])
         .unwrap();
 
         // Remove the unavailable repo so it simulates a non-existent location
-        let unavailable_path = fixture.get_repo_path("unavailable").unwrap();
+        let unavailable_path = fixture.get("unavailable").unwrap().location.clone();
         fs::remove_dir_all(unavailable_path).unwrap();
         fixture.reload_from_disk().unwrap();
 
@@ -560,14 +548,14 @@ mod tests {
 
     #[test]
     fn test_direct_master_order_is_preserved() {
-        let fixture = RepoSetFixture::new(vec![
-            RepositoryFixture::new("first").eclass("shared"),
-            RepositoryFixture::new("second").eclass("shared"),
-            RepositoryFixture::new("child").masters(["first", "second"]),
+        let fixture = repo_set(vec![
+            RepoBuilder::new("first").eclass("shared"),
+            RepoBuilder::new("second").eclass("shared"),
+            RepoBuilder::new("child").masters(["first", "second"]),
         ])
         .unwrap();
 
-        let second_path = fixture.get_repo_path("second").unwrap();
+        let second_path = fixture.get("second").unwrap().location.as_path();
         let shared = fixture
             .get("child")
             .unwrap()
@@ -579,8 +567,8 @@ mod tests {
 
         let child = fixture.get("child").unwrap();
         let paths = child.eclasses.repo_paths().collect::<Vec<_>>();
-        assert_eq!(paths[0], fixture.get_repo_path("child").unwrap());
-        assert_eq!(paths[1], fixture.get_repo_path("first").unwrap());
+        assert_eq!(paths[0], fixture.get("child").unwrap().location.as_path());
+        assert_eq!(paths[1], fixture.get("first").unwrap().location.as_path());
         assert_eq!(paths[2], second_path);
     }
 }

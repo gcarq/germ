@@ -10,19 +10,16 @@ pub use layout::{Layout, LayoutError};
 pub use package::PackageResolutionError;
 pub use profiles::{ArchList, ProfileError};
 
-use crate::consts::DEFAULT_CACHE_PATH;
+use self::package::{CPVIndex, resolve_cpv_from_category};
+use self::profiles::ProfileDescriptions;
 use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
 use crate::files::{PackageEntries, entry::Precedence};
 use crate::package::{Package, cpv::CPV};
 use crate::regex::REPO_RE;
+use crate::repository::tree::package::cache::MetadataCache;
 use crate::types::FxHashSet;
 use crate::utils::Inherit;
-
-use self::package::{
-    AvailablePackageIndex, IndexError, ResolvedPackageIndex, resolve_cpv_from_category,
-};
-use self::profiles::ProfileDescriptions;
 use anyhow::{Context, anyhow};
 use log::{debug, warn};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -33,7 +30,6 @@ use std::{fmt, fs};
 /// Represents an available ebuild repository.
 /// See https://projects.gentoo.org/pms/8/pms.html#x1-290004.1
 #[derive(Debug)]
-#[cfg_attr(test, derive(Default))]
 pub struct Repository {
     pub location: PathBuf,
     pub name: String,
@@ -44,8 +40,8 @@ pub struct Repository {
     pub(crate) arch_list: ArchList,
     pub(crate) categories: FxHashSet<String>,
     profiles_desc: ProfileDescriptions,
-    avail_package_idx: AvailablePackageIndex,
-    resolved_package_idx: ResolvedPackageIndex,
+    cpv_index: CPVIndex,
+    metadata_cache: MetadataCache,
 }
 
 impl Repository {
@@ -69,34 +65,40 @@ impl Repository {
         )
         .map_err(|err| ProfileError::from(err.context("unable to load package.unmask")))?;
 
+        let name = Self::resolve_repo_name(name, &layout, &profiles)?.to_owned();
+
         Ok(Self {
             location: location.to_owned(),
-            name: Self::resolve_repo_name(name, &layout, &profiles)?.to_owned(),
-            layout,
+            metadata_cache: MetadataCache::new(&location.join("cache"), &name)?,
             categories: FxHashSet::default(),
-            package_mask,
-            package_unmask,
             eclasses: Eclasses::empty(location),
             arch_list: ArchList::from_path(&profiles.join("arch.list"))?,
             profiles_desc: ProfileDescriptions::from_path(&profiles.join("profiles.desc"))?,
-            avail_package_idx: AvailablePackageIndex::default(),
-            resolved_package_idx: ResolvedPackageIndex::default(),
+            cpv_index: CPVIndex::default(),
+            package_mask,
+            package_unmask,
+            layout,
+            name,
         })
     }
 
     /// Returns all known CPVs in the repository.
     pub fn cpvs(&self) -> impl Iterator<Item = &CPV> {
-        self.avail_package_idx.values().flatten()
+        self.cpv_index.values().flatten()
     }
 
     /// Returns all known packages (including metadata) in the repository.
     ///
     /// This function will call [`Repository::build_package_index()`] and
     /// index all missing packages.
-    pub fn packages(&mut self) -> impl Iterator<Item = Result<&Package, PackageResolutionError>> {
-        let errors = self.build_package_index();
-        let packages = self.resolved_package_idx.values().map(Ok);
-        packages.chain(errors.into_iter().map(Err))
+    pub fn packages(&mut self) -> impl Iterator<Item = Result<Package, PackageResolutionError>> {
+        let cpvs = self
+            .cpv_index
+            .values()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        self.resolve_packages(&cpvs).into_iter()
     }
 
     /// Finds and returns all packages that match the given [`Atom`].
@@ -104,30 +106,16 @@ impl Repository {
     pub fn find_packages(
         &mut self,
         atom: &Atom,
-    ) -> impl Iterator<Item = Result<&Package, PackageResolutionError>> {
+    ) -> impl Iterator<Item = Result<Package, PackageResolutionError>> {
         let cpvs = self
-            .avail_package_idx
+            .cpv_index
             .find_packages(atom)
             .into_iter()
             .flatten()
             .cloned()
             .collect::<Vec<_>>();
 
-        let errors = self.build_index_for_cpvs(&cpvs);
-        cpvs.into_iter()
-            .filter_map(|cpv| self.resolved_package_idx.get(cpv.fqn()).map(Ok))
-            .chain(errors.into_iter().map(Err))
-    }
-
-    /// Builds the [`Package`] index for all known [`CPV`].
-    pub fn build_package_index(&mut self) -> Vec<PackageResolutionError> {
-        let cpvs = self
-            .avail_package_idx
-            .values()
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>();
-        self.build_index_for_cpvs(&cpvs)
+        self.resolve_packages(&cpvs).into_iter()
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
@@ -140,101 +128,6 @@ impl Repository {
             .any(|desc| desc.keyword == arch && desc.profile_path == profile_path)
     }
 
-    /// Writes [`ResolvedPackageIndex`] to disk.
-    ///
-    /// If `force` is `true`, the index will be written even if it hasn't been modified
-    /// since the last write.
-    ///
-    /// Returns `Err` if the index cannot be serialized or the file cannot be created.
-    pub fn write_index(&self, force: bool) -> Result<(), RepositoryError> {
-        let meta_dir = PathBuf::from(DEFAULT_CACHE_PATH).join("metadata");
-        fs::create_dir_all(&meta_dir).map_err(|error| {
-            RepositoryError::Data(anyhow!(error).context(format!(
-                "unable to create package index directory at {}",
-                meta_dir.display()
-            )))
-        })?;
-        debug!(
-            "Writing package index for '{self}' into {} ...",
-            meta_dir.display()
-        );
-        let path = meta_dir.join(&self.name);
-        self.write_index_to_path(&path, force)
-    }
-
-    /// Builds the [`Package`] index for the given `cpvs`.
-    fn build_index_for_cpvs(&mut self, cpvs: &[CPV]) -> Vec<PackageResolutionError> {
-        let outcomes = cpvs
-            .into_par_iter()
-            .filter(|cpv| !self.resolved_package_idx.contains_key(cpv.fqn()))
-            .map(|cpv| self.resolve_package(cpv))
-            .collect::<Vec<_>>();
-
-        outcomes
-            .into_iter()
-            .filter_map(|outcome| match outcome {
-                Ok(pkg) => {
-                    self.resolved_package_idx.insert(pkg);
-                    None
-                }
-                Err(error) => Some(error),
-            })
-            .collect()
-    }
-
-    fn write_index_to_path(&self, path: &Path, force: bool) -> Result<(), RepositoryError> {
-        self.resolved_package_idx
-            .write_to_path(path, force)
-            .map_err(|error| match error {
-                error @ IndexError::Io(_) => RepositoryError::Data(anyhow!(error).context(
-                    format!("unable to write package index at {}", path.display()),
-                )),
-                error @ IndexError::Serialization(_) => RepositoryError::Internal(
-                    anyhow!(error).context("unable to serialize package index"),
-                ),
-            })
-    }
-
-    /// Resolves the given [`CPV`] into a [`Package`] with its metadata.
-    fn resolve_package(&self, cpv: &CPV) -> Result<Package, PackageResolutionError> {
-        let ebuild_path = self
-            .location
-            .join(cpv.category())
-            .join(cpv.package())
-            .join(format!("{}.ebuild", cpv.pf()));
-        let metadata = cpv
-            .generate_metadata(&ebuild_path, self)
-            .map_err(|error| PackageResolutionError::from_metadata(cpv, error))?;
-        Ok(Package::new(cpv.clone(), self.name.clone(), metadata))
-    }
-
-    /// Loads the resolved package index from disk.
-    ///
-    /// Returns `Err` if the index file exists but cannot be opened.
-    pub(crate) fn load_index(&mut self) -> Result<(), RepositoryError> {
-        let path = PathBuf::from(DEFAULT_CACHE_PATH)
-            .join("metadata")
-            .join(&self.name);
-        self.load_index_from_path(&path)
-    }
-
-    fn load_index_from_path(&mut self, path: &Path) -> Result<(), RepositoryError> {
-        debug!(
-            "Loading package index for '{self}' from {} ...",
-            path.display()
-        );
-        if let Some(index) = ResolvedPackageIndex::load_from_path(path).map_err(|error| {
-            RepositoryError::Data(anyhow!(error).context(format!(
-                "unable to load package index at {}",
-                path.display()
-            )))
-        })? {
-            self.resolved_package_idx = index;
-            self.resolved_package_idx.retain(&self.avail_package_idx);
-        }
-        Ok(())
-    }
-
     /// Populates all categories, packages and eclasses.
     ///
     /// NOTE: The caller must ensure [`Inherit::inherit_from`] has been called before.
@@ -243,6 +136,60 @@ impl Repository {
         self.collect_categories();
         self.collect_cpvs().map_err(RepositoryError::Data)?;
         Ok(())
+    }
+
+    /// Resolves all package metadata and builds [`MetadataCache`].
+    ///
+    /// Returns an iterator over all errors that occured.
+    pub fn build_cache(&mut self) -> impl Iterator<Item = PackageResolutionError> {
+        self.packages().filter_map(Result::err)
+    }
+
+    /// Compacts the [`MetadataCache`] by removing all entries that are no longer valid,
+    /// and reclaiming disk space if possible.
+    pub fn compact_cache(&mut self) -> anyhow::Result<()> {
+        self.metadata_cache.retain(self.cpvs())?;
+        self.metadata_cache.compact()?;
+        Ok(())
+    }
+
+    /// Builds the [`Package`] index for the given `cpvs`.
+    fn resolve_packages(&mut self, cpvs: &[CPV]) -> Vec<Result<Package, PackageResolutionError>> {
+        cpvs.into_par_iter()
+            .map(|cpv| self.resolve_package(cpv))
+            .collect()
+    }
+
+    /// Resolves the given [`CPV`] into a [`Package`] with its metadata.
+    fn resolve_package(&self, cpv: &CPV) -> Result<Package, PackageResolutionError> {
+        if let Some(metadata) =
+            self.metadata_cache
+                .get(cpv)
+                .map_err(|err| PackageResolutionError::Internal {
+                    cpv: cpv.fqn().into(),
+                    source: anyhow!(err).context("unable to read metadata cache"),
+                })?
+        {
+            return Ok(Package::new(cpv.clone(), self.name.clone(), metadata));
+        }
+
+        let ebuild_path = self
+            .location
+            .join(cpv.category())
+            .join(cpv.package())
+            .join(format!("{}.ebuild", cpv.pf()));
+        let metadata = cpv
+            .generate_metadata(&ebuild_path, self)
+            .map_err(|error| PackageResolutionError::from_metadata(cpv, error))?;
+
+        self.metadata_cache.insert(cpv, &metadata).map_err(|err| {
+            PackageResolutionError::Internal {
+                cpv: cpv.fqn().into(),
+                source: anyhow!(err).context("unable to write metadata cache"),
+            }
+        })?;
+
+        Ok(Package::new(cpv.clone(), self.name.clone(), metadata))
     }
 
     /// Collects all known eclasses in the repo.
@@ -276,7 +223,7 @@ impl Repository {
             .with_context(|| {
                 format!("unable to collect packages at {}", self.location.display())
             })?;
-        self.avail_package_idx.insert_all(packages);
+        self.cpv_index.insert_all(packages);
         Ok(())
     }
 
@@ -344,23 +291,43 @@ impl fmt::Display for Repository {
 }
 
 #[cfg(test)]
+impl Default for Repository {
+    fn default() -> Self {
+        let temp_dir = tempfile::Builder::new()
+            .tempdir()
+            .expect("failed to create temp dir");
+        let metadata_cache = MetadataCache::new(&temp_dir.path().join("metadata"), "germ").unwrap();
+        Self {
+            location: temp_dir.path().to_owned(),
+            name: String::new(),
+            layout: Layout::default(),
+            categories: FxHashSet::default(),
+            package_mask: PackageEntries::default(),
+            package_unmask: PackageEntries::default(),
+            eclasses: Eclasses::default(),
+            arch_list: ArchList::default(),
+            profiles_desc: ProfileDescriptions::default(),
+            cpv_index: CPVIndex::default(),
+            metadata_cache,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    use super::super::test_support::RepositoryFixture;
-    use crate::package::version::PackageVersion;
-
-    use tempfile::tempdir;
+    use super::super::test_support::RepoBuilder;
+    use crate::package::{metadata::PackageMetadata, version::PackageVersion};
 
     #[test]
     fn test_invalid_package_versions() {
-        let location = RepositoryFixture::new("repo")
+        let mut repository = RepoBuilder::new("repo")
             .categories(["app-misc"])
             .ebuild("app-misc", "foo", "1")
             .ebuild("app-misc", "foo", "2")
-            .write()
+            .finalize()
             .unwrap();
-        let mut repository = Repository::load("repo", &location).unwrap();
         repository.populate().unwrap();
 
         let results = repository
@@ -372,69 +339,16 @@ mod tests {
     }
 
     #[test]
-    fn test_metadata_failure() {
-        let location = RepositoryFixture::new("repo")
-            .categories(["app-misc"])
-            .ebuild("app-misc", "foo", "1")
-            .ebuild("app-misc", "foo", "2")
-            .write()
-            .unwrap();
-        let mut repository = Repository::load("repo", &location).unwrap();
-        repository.populate().unwrap();
-        let valid_cpv =
-            CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
-        repository.resolved_package_idx.insert(Package::new(
-            valid_cpv,
-            "repo".into(),
-            Default::default(),
-        ));
-
-        let results = repository
-            .find_packages(&Atom::new("app-misc/foo").unwrap())
-            .collect::<Vec<_>>();
-
-        assert_eq!(results.len(), 2);
-        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
-        assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
-    }
-
-    #[test]
-    fn test_missing_package_index() {
-        let location = RepositoryFixture::new("repo").write().unwrap();
-        let mut repository = Repository::load("repo", &location).unwrap();
-        let directory = tempdir().unwrap();
-
-        repository
-            .load_index_from_path(&directory.path().join("missing"))
-            .unwrap();
-    }
-
-    #[test]
-    fn test_corrupt_package_index() {
-        let location = RepositoryFixture::new("repo").write().unwrap();
-        let mut repository = Repository::load("repo", &location).unwrap();
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("index");
-        fs::write(&path, b"corrupt index").unwrap();
-
-        repository.load_index_from_path(&path).unwrap();
-
-        assert!(!path.exists());
-    }
-
-    #[test]
-    fn test_index_io_failure() {
-        let location = RepositoryFixture::new("repo").write().unwrap();
-        let mut repository = Repository::load("repo", &location).unwrap();
-        let directory = tempdir().unwrap();
-        assert!(matches!(
-            repository.write_index_to_path(&directory.path().join("missing/index"), true),
-            Err(RepositoryError::Data(_))
-        ));
-        assert!(matches!(
-            repository.load_index_from_path(directory.path()),
-            Err(RepositoryError::Data(_))
-        ));
+    fn test_repository_resolves_cached_metadata() {
+        let repository = RepoBuilder::new("repo").finalize().unwrap();
+        let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
+        let metadata = PackageMetadata {
+            description: "cached metadata".into(),
+            ..Default::default()
+        };
+        repository.metadata_cache.insert(&cpv, &metadata).unwrap();
+        let package = repository.resolve_package(&cpv).unwrap();
+        assert_eq!(package.metadata, metadata);
     }
 
     #[test]
@@ -468,12 +382,15 @@ mod tests {
 
     #[test]
     fn test_optional_data_validation() {
-        let valid_location = RepositoryFixture::new("valid").write().unwrap();
-        let invalid_location = RepositoryFixture::new("invalid")
+        let temp = tempfile::tempdir().unwrap();
+        let valid_location = temp.path().join("valid");
+        RepoBuilder::new("valid").write_to(&valid_location).unwrap();
+        let invalid_location = temp.path().join("invalid");
+        RepoBuilder::new("invalid")
             .formats(["pms"])
             .eapi("0")
             .profile_entries_dir("package.mask", "app-misc/foo\n")
-            .write()
+            .write_to(&invalid_location)
             .unwrap();
 
         let valid = Repository::load("valid", &valid_location);
@@ -486,27 +403,24 @@ mod tests {
     #[test]
     fn test_portage_mask_directories() {
         for format in ["portage-1", "portage-2"] {
-            let location = RepositoryFixture::new("repo")
+            RepoBuilder::new("repo")
                 .formats([format])
                 .eapi("0")
                 .profile_entries_dir("package.mask", "app-misc/foo\n")
-                .write()
+                .finalize()
                 .unwrap();
-
-            Repository::load("repo", &location).unwrap();
         }
     }
 
     #[test]
     fn test_eapi_mask_directories() {
         for eapi in ["7", "8"] {
-            let location = RepositoryFixture::new("repo")
+            RepoBuilder::new("repo")
                 .formats(["pms"])
                 .eapi(eapi)
                 .profile_entries_dir("package.mask", "app-misc/foo\n")
-                .write()
+                .finalize()
                 .unwrap();
-            Repository::load("repo", &location).unwrap();
         }
     }
 }

@@ -12,6 +12,7 @@ log.workspace = true
 md-5.workspace = true
 nix.workspace = true
 rayon.workspace = true
+redb.workspace = true
 regex.workspace = true
 rkyv.workspace = true
 rust-ini.workspace = true

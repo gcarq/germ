@@ -1,3 +1,5 @@
+use crate::repository::tree::package::cache::CacheError;
+
 use super::layout::LayoutError;
 use super::profiles::ProfileError;
 use thiserror::Error;
@@ -5,6 +7,9 @@ use thiserror::Error;
 /// Defines failures while loading or accessing an available repository tree.
 #[derive(Debug, Error)]
 pub enum RepositoryError {
+    #[error("unable to process metadata caching")]
+    Cache(#[from] CacheError),
+
     /// Data cannot be loaded, it might be either missing or malformed.
     #[error("repository data failure")]
     Data(#[source] anyhow::Error),

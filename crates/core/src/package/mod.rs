@@ -6,12 +6,11 @@ pub mod version;
 use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
 use metadata::PackageMetadata;
-use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 
 /// Represents a package within a [`Repository`] with its category, name, version and additional
 /// metadata required to install it.
-#[derive(Archive, Serialize, Deserialize, Debug)]
+#[derive(Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct Package {
     pub cpv: CPV,
@@ -79,7 +78,7 @@ mod tests {
             cpv: CPV::new(
                 "sys-devel",
                 "gcc",
-                PackageVersion::new("15.2.1", Some("p20251122"), Some("1")).unwrap(),
+                PackageVersion::try_from("15.2.1_p20251122-r1").unwrap(),
             )
             .unwrap(),
             repo: "gentoo".into(),
@@ -109,7 +108,7 @@ mod tests {
             cpv: CPV::new(
                 "sys-devel",
                 "gcc",
-                PackageVersion::new("15.2.1", Some("p20251122"), Some("1")).unwrap(),
+                PackageVersion::try_from("15.2.1_p20251122-r1").unwrap(),
             )
             .unwrap(),
             repo: "gentoo".into(),
@@ -130,7 +129,7 @@ mod tests {
             cpv: CPV::new(
                 "app-editors",
                 "vim",
-                PackageVersion::new("7.0.174", None, Some("1")).unwrap(),
+                PackageVersion::try_from("7.0.174-r1").unwrap(),
             )
             .unwrap(),
             ..Default::default()

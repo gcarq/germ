@@ -220,7 +220,7 @@ mod tests {
         let cpv = CPV::new(
             "app-editors",
             "vim",
-            PackageVersion::new("1.2.3b", Some("alpha4"), None).unwrap(),
+            PackageVersion::try_from("1.2.3b_alpha4").unwrap(),
         )
         .unwrap();
         for (range, version, expected) in test_cases {
@@ -240,7 +240,7 @@ mod tests {
         let pkg = CPV::new(
             "app-editors",
             "vim",
-            PackageVersion::new("1.2.3b", Some("alpha4"), None).unwrap(),
+            PackageVersion::try_from("1.2.3b_alpha4").unwrap(),
         )
         .unwrap();
         let test_cases = ["-2", "3-2", "foo", "2-bar"];
@@ -277,7 +277,7 @@ mod tests {
         let cpv = CPV::new(
             "app-editors",
             "vim",
-            PackageVersion::new("1.2", Some("alpha4"), None).unwrap(),
+            PackageVersion::try_from("1.2_alpha4").unwrap(),
         )
         .unwrap();
         for (args, expected) in test_cases {
@@ -296,7 +296,7 @@ mod tests {
         let pkg = CPV::new(
             "app-editors",
             "vim",
-            PackageVersion::new("1.2b", Some("alpha4"), None).unwrap(),
+            PackageVersion::try_from("1.2b_alpha4").unwrap(),
         )
         .unwrap();
         let test_cases = [vec![], vec!["1"], vec!["foo", "-"]];
@@ -408,7 +408,7 @@ mod tests {
         let cpv = CPV::new(
             "sys-apps",
             "coreutils",
-            PackageVersion::new("1.0", None, None).unwrap(),
+            PackageVersion::try_from("1.0").unwrap(),
         )
         .unwrap();
         for (version1, op, version2, expected) in test_cases {
@@ -428,7 +428,7 @@ mod tests {
         let cpv = CPV::new(
             "sys-apps",
             "coreutils",
-            PackageVersion::new("1.0", None, None).unwrap(),
+            PackageVersion::try_from("1.0").unwrap(),
         )
         .unwrap();
         let test_cases = [

@@ -1,33 +1,16 @@
 use crate::deps::atom::Atom;
-use crate::package::Package;
 use crate::package::cpv::CPV;
 use crate::types::FxHashMap;
 
-use log::{debug, warn};
-use rkyv::rancor;
-use rkyv::with::Skip;
-use rkyv::{Archive, Deserialize, Serialize};
-use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use log::warn;
 use std::ops::Deref;
-use std::path::Path;
-use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub(crate) enum IndexError {
-    #[error("unable to access package index")]
-    Io(#[from] io::Error),
-
-    #[error("unable to serialize or deserialize package index")]
-    Serialization(#[from] rancor::Error),
-}
-
-/// Holds all available packages in a repository, mapping `category/package` to [`Vec<CPV>`].
+/// Holds all available packages in a repository, mapping the qualified name to [`Vec<CPV>`].
 #[derive(Default, Debug)]
-pub struct AvailablePackageIndex(FxHashMap<String, Vec<CPV>>);
+pub struct CPVIndex(FxHashMap<String, Vec<CPV>>);
 
-impl AvailablePackageIndex {
-    /// Inserts the given `cpv` into the index.
+impl CPVIndex {
+    /// Inserts the given [`CPV`] into the index.
     pub fn insert(&mut self, cpv: CPV) {
         let entry = self.0.entry(cpv.qualified_name()).or_default();
         // Its possible that a repository contains the same ebuild with and without explicit
@@ -50,14 +33,7 @@ impl AvailablePackageIndex {
         }
     }
 
-    /// Checks if the index contains the given `cpv`.
-    pub fn contains(&self, cpv: &CPV) -> bool {
-        self.0
-            .get(&cpv.qualified_name())
-            .is_some_and(|cpvs| cpvs.contains(cpv))
-    }
-
-    /// Returns all packages matching the given `atom`.
+    /// Returns all packages matching the given [`Atom`].
     pub fn find_packages(&self, atom: &Atom) -> Option<Vec<&CPV>> {
         let pkgs = self.0.get(&atom.qualified_name())?;
         let matching_pkgs = pkgs.iter().filter(|cpv| cpv.matches_atom(atom)).collect();
@@ -65,98 +41,10 @@ impl AvailablePackageIndex {
     }
 }
 
-impl Deref for AvailablePackageIndex {
+impl Deref for CPVIndex {
     type Target = FxHashMap<String, Vec<CPV>>;
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-/// Holds all resolved packages in a repository, mapping the fully qualified name
-/// `category/package-version` to a [`Package`].
-#[derive(Archive, Serialize, Deserialize, Default, Debug)]
-pub struct ResolvedPackageIndex {
-    index: FxHashMap<String, Package>,
-    #[rkyv(with = Skip)]
-    modified: bool,
-}
-
-impl ResolvedPackageIndex {
-    /// Inserts a package into the index.
-    pub fn insert(&mut self, package: Package) {
-        self.index.insert(package.cpv.fqn().into(), package);
-        self.modified = true;
-    }
-
-    /// Extends the index with the given packages.
-    pub fn extend(&mut self, packages: Vec<Package>) {
-        if !packages.is_empty() {
-            self.modified = true;
-        }
-        self.index
-            .extend(packages.into_iter().map(|pkg| (pkg.cpv.fqn().into(), pkg)));
-    }
-
-    /// Retains only the packages that are present in the given [`AvailablePackageIndex`].
-    pub fn retain(&mut self, available: &AvailablePackageIndex) {
-        let len = self.index.len();
-        self.index.retain(|_, pkg| available.contains(&pkg.cpv));
-        if self.index.len() != len {
-            self.index.shrink_to_fit();
-            self.modified = true;
-            debug!(
-                "Removed {} packages from the resolved index",
-                len - self.index.len()
-            );
-        }
-    }
-
-    /// Loads the index from the given `path`.
-    ///
-    /// Returns `Ok(None)` if the file doesn't exist or cannot be deserialized.
-    /// Returns `Err` if the file cannot be opened.
-    pub(crate) fn load_from_path(path: &Path) -> Result<Option<Self>, IndexError> {
-        let mut reader = match File::open(path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(IndexError::Io(error)),
-        };
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes)?;
-        match rkyv::from_bytes::<ResolvedPackageIndex, rancor::Error>(&bytes) {
-            Ok(index) => Ok(Some(index)),
-            Err(error) => {
-                let error = IndexError::Serialization(error);
-                warn!(
-                    "Discarding incompatible package index at {}: {error:#}",
-                    path.display()
-                );
-                fs::remove_file(path)?;
-                Ok(None)
-            }
-        }
-    }
-
-    /// Writes the index to the given `path`.
-    ///
-    /// If the index hasn't been modified and `force` is not set, this is a no-op.
-    /// Returns `Err` if the index cannot be serialized or the file cannot be created.
-    pub(crate) fn write_to_path(&self, path: &Path, force: bool) -> Result<(), IndexError> {
-        if !force && !self.modified {
-            debug!("Index not modified, skipping write",);
-            return Ok(());
-        }
-        let bytes = rkyv::to_bytes::<rancor::Error>(self)?;
-        let mut writer = File::create(path)?;
-        writer.write_all(&bytes)?;
-        Ok(())
-    }
-}
-
-impl Deref for ResolvedPackageIndex {
-    type Target = FxHashMap<String, Package>;
-    fn deref(&self) -> &Self::Target {
-        &self.index
     }
 }
 
@@ -164,22 +52,21 @@ impl Deref for ResolvedPackageIndex {
 mod tests {
     use super::*;
     use crate::package::version::PackageVersion;
-    use tempfile::tempdir;
 
     #[test]
     fn test_available_package_index() {
-        let mut index = AvailablePackageIndex::default();
+        let mut index = CPVIndex::default();
         let python_3_13 = CPV::new(
             "dev-lang",
             "python",
-            PackageVersion::new("3.13.12", None, None).unwrap(),
+            PackageVersion::try_from("3.13.12").unwrap(),
         )
         .unwrap();
         index.insert(python_3_13.clone());
         let python3_14 = CPV::new(
             "dev-lang",
             "python",
-            PackageVersion::new("3.14.3", None, None).unwrap(),
+            PackageVersion::try_from("3.14.3").unwrap(),
         )
         .unwrap();
         index.insert(python3_14.clone());
@@ -187,121 +74,38 @@ mod tests {
         let rust = CPV::new(
             "dev-lang",
             "rust",
-            PackageVersion::new("1.94.0", None, None).unwrap(),
+            PackageVersion::try_from("1.94.0").unwrap(),
         )
         .unwrap();
-        assert!(!index.contains(&rust));
+        assert!(!index.values().flatten().any(|existing| existing == &rust));
         index.insert(rust.clone());
 
         let packages = index
             .find_packages(&Atom::new("dev-lang/python").unwrap())
             .unwrap();
         assert_eq!(&packages, &[&python3_14, &python_3_13]);
-        assert!(index.contains(&rust));
+        assert!(index.values().flatten().any(|existing| existing == &rust));
     }
 
     #[test]
     fn test_available_package_index_r0_collision() {
-        let implicit = CPV::new(
-            "dev-libs",
-            "pkg",
-            PackageVersion::new("1.0", None, None).unwrap(),
-        )
-        .unwrap();
+        let implicit =
+            CPV::new("dev-libs", "pkg", PackageVersion::try_from("1.0").unwrap()).unwrap();
         let explicit = CPV::new(
             "dev-libs",
             "pkg",
-            PackageVersion::new("1.0", None, Some("0")).unwrap(),
+            PackageVersion::try_from("1.0-r0").unwrap(),
         )
         .unwrap();
         let r1 = CPV::new(
             "dev-libs",
             "pkg",
-            PackageVersion::new("1.0", None, Some("1")).unwrap(),
+            PackageVersion::try_from("1.0-r1").unwrap(),
         )
         .unwrap();
 
-        let mut index = AvailablePackageIndex::default();
+        let mut index = CPVIndex::default();
         index.insert_all(vec![explicit, implicit, r1]);
         assert_eq!(index["dev-libs/pkg"].len(), 2);
-    }
-
-    #[test]
-    fn test_resolved_package_index() {
-        let mut index = ResolvedPackageIndex::default();
-
-        let cpv = CPV::new(
-            "dev-lang",
-            "python",
-            PackageVersion::new("3.13.12", None, None).unwrap(),
-        )
-        .unwrap();
-        let pkg = Package {
-            cpv: cpv.clone(),
-            ..Default::default()
-        };
-        assert!(!index.contains_key(cpv.fqn()));
-
-        index.insert(pkg);
-        assert!(index.contains_key(cpv.fqn()));
-        assert_eq!(cpv, index.get(cpv.fqn()).unwrap().cpv);
-    }
-
-    #[test]
-    fn test_resolved_package_index_persistence() {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("index");
-        let mut index = ResolvedPackageIndex::default();
-        let cpv = CPV::new(
-            "media-libs",
-            "mesa",
-            PackageVersion::new("26.0.1", None, None).unwrap(),
-        )
-        .unwrap();
-        index.insert(Package {
-            cpv: cpv.clone(),
-            ..Default::default()
-        });
-
-        index.write_to_path(&path, false).unwrap();
-        let loaded = ResolvedPackageIndex::load_from_path(&path)
-            .unwrap()
-            .unwrap();
-
-        assert!(loaded.contains_key(cpv.fqn()));
-    }
-
-    #[test]
-    fn test_resolved_package_index_retain() {
-        let mut resolved = ResolvedPackageIndex::default();
-
-        let cpv1 = CPV::new(
-            "dev-lang",
-            "python",
-            PackageVersion::new("3.13.12", None, None).unwrap(),
-        )
-        .unwrap();
-        resolved.insert(Package {
-            cpv: cpv1.clone(),
-            ..Default::default()
-        });
-
-        let cpv2 = CPV::new(
-            "dev-lang",
-            "rust",
-            PackageVersion::new("1.94.0", None, None).unwrap(),
-        )
-        .unwrap();
-        resolved.insert(Package {
-            cpv: cpv2.clone(),
-            ..Default::default()
-        });
-
-        let mut available = AvailablePackageIndex::default();
-        available.insert(cpv1.clone());
-
-        resolved.retain(&available);
-        assert!(resolved.contains_key(cpv1.fqn()));
-        assert!(!resolved.contains_key(cpv2.fqn()));
     }
 }

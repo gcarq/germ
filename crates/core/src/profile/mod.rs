@@ -236,7 +236,7 @@ mod tests {
     use super::*;
     use crate::files::entry::Entry;
     use crate::files::pkguse::EntryUseFlags;
-    use crate::repository::test_support::{RepoSetFixture, RepositoryFixture};
+    use crate::repository::test_support::{RepoBuilder, repo_set};
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -245,17 +245,15 @@ mod tests {
     }
 
     fn assert_parent_case(format: &str, parent: &str, succeeds: bool) -> Result<()> {
-        let fixture = RepoSetFixture::new(vec![
-            RepositoryFixture::new("source")
+        let fixture = repo_set(vec![
+            RepoBuilder::new("source")
                 .formats([format])
                 .profile("base")
                 .parents("child", [parent]),
-            RepositoryFixture::new("target")
-                .formats(["pms"])
-                .profile("base"),
+            RepoBuilder::new("target").formats(["pms"]).profile("base"),
         ])?;
 
-        let source_path = fixture.get_repo_path("source").unwrap();
+        let source_path = fixture.get("source").unwrap().location.as_path();
         let selected = profile_path(source_path, "child");
 
         assert_eq!(Profile::resolve(&selected, &fixture).is_ok(), succeeds);
@@ -327,14 +325,14 @@ mod tests {
         ];
 
         for (name, format, eapi, succeeds) in cases {
-            let fixture = RepoSetFixture::new(vec![
-                RepositoryFixture::new(name)
+            let fixture = repo_set(vec![
+                RepoBuilder::new(name)
                     .formats([format])
                     .profile_eapi("selected", eapi)
                     .profile_entries_dir("selected/use.mask", "test\n"),
             ])?;
 
-            let repo_path = fixture.get_repo_path(name).unwrap();
+            let repo_path = fixture.get(name).unwrap().location.as_path();
             let selected = profile_path(repo_path, "selected");
 
             assert_eq!(Profile::resolve(&selected, &fixture).is_ok(), succeeds);
@@ -344,14 +342,14 @@ mod tests {
 
     #[test]
     fn test_packages_are_file_only() -> Result<()> {
-        let fixture = RepoSetFixture::new(vec![
-            RepositoryFixture::new("repo")
+        let fixture = repo_set(vec![
+            RepoBuilder::new("repo")
                 .formats(["portage-2"])
                 .profile_eapi("selected", "8")
                 .profile_entries_dir("selected/packages", "sys-apps/coreutils\n"),
         ])?;
 
-        let repo_path = fixture.get_repo_path("repo").unwrap();
+        let repo_path = fixture.get("repo").unwrap().location.as_path();
         let selected = profile_path(repo_path, "selected");
 
         assert!(Profile::resolve(&selected, &fixture).is_err());
@@ -370,14 +368,14 @@ mod tests {
 
     #[test]
     fn test_root_parent_escape() -> Result<()> {
-        let fixture = RepoSetFixture::new(vec![
-            RepositoryFixture::new("source")
+        let fixture = repo_set(vec![
+            RepoBuilder::new("source")
                 .formats(["portage-2"])
                 .parents("root-relative", [":../outside"])
                 .parents("ordinary-relative", ["../../outside"]),
         ])?;
 
-        let source_path = fixture.get_repo_path("source").unwrap();
+        let source_path = fixture.get("source").unwrap().location.as_path();
         fs::create_dir(source_path.join("outside"))?;
 
         assert!(Profile::resolve(&profile_path(source_path, "root-relative"), &fixture).is_err());

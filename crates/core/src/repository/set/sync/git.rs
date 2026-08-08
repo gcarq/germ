@@ -275,7 +275,7 @@ impl GitSyncHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::test_support::RepositoryFixture;
+    use crate::repository::test_support::RepoBuilder;
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -331,9 +331,9 @@ mod tests {
         run(&mut command);
         git_in(&work, &["init"]);
         git_in(&work, &["checkout", "-B", "main"]);
-        RepositoryFixture::with_location(&work, repo_name)
+        RepoBuilder::new(repo_name)
             .categories(["app-misc"])
-            .write()
+            .write_to(&work)
             .unwrap();
         fs::write(work.join("MARKER"), marker).unwrap();
         commit_all(&work, "initial");

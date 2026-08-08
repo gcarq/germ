@@ -53,11 +53,11 @@ mod tests {
     use crate::makenv::MakeEnv;
     use crate::package::cpv::CPV;
     use crate::package::version::PackageVersion;
-    use crate::repository::test_support::{RepoSetFixture, RepositoryFixture};
+    use crate::repository::test_support::{RepoBuilder, repo_set};
     use std::path::PathBuf;
 
     fn with_handler(eapi: Eapi, test: impl FnOnce(&EbuildPhaseHandler)) {
-        let fixture = RepoSetFixture::new(vec![RepositoryFixture::new("repo")]).unwrap();
+        let fixture = repo_set(vec![RepoBuilder::new("repo")]).unwrap();
         let cpv = CPV::new(
             "app-editors",
             "vim",

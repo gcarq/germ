@@ -57,8 +57,6 @@ fn run(args: Args) -> Result<()> {
     let mut repo_set =
         RepoSet::new(&config_path).with_context(|| "unable to process repos.conf")?;
     commands::execute(&args.command, &mut repo_set)?;
-
-    repo_set.flush(false)?;
     Ok(())
 }
 

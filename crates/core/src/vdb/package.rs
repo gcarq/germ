@@ -62,7 +62,7 @@ mod tests {
                 cpv: CPV::new(
                     "app-editors",
                     "vim",
-                    PackageVersion::new("7.0.174", None, Some("1")).unwrap(),
+                    PackageVersion::try_from("7.0.174-r1").unwrap(),
                 )
                 .unwrap(),
                 repo: "gentoo".into(),

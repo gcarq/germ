@@ -1,24 +1,61 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashSet},
     fs, io,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
 
-use anyhow::{anyhow, bail};
+use anyhow::{Context, bail};
 
-use super::RepoSet;
+use super::{RepoSet, Repository};
 use crate::types::FxHashSet;
+
+/// Owns a temporary directory together with a value that depends on it.
+pub struct Temp<T> {
+    value: T,
+    _temp_dir: tempfile::TempDir,
+}
+
+impl<T> Temp<T> {
+    fn new(value: T, temp_dir: tempfile::TempDir) -> Self {
+        Self {
+            value,
+            _temp_dir: temp_dir,
+        }
+    }
+}
+
+impl<T> Deref for Temp<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<T> DerefMut for Temp<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
+    }
+}
 
 enum FixtureEntry {
     File { path: PathBuf, contents: String },
     Directory { path: PathBuf, contents: String },
 }
 
+fn write_file(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, contents)
+}
+
 #[derive(Default)]
-pub struct RepositoryFixture {
-    pub(crate) location: PathBuf,
-    pub(crate) repo_name: String,
+pub struct RepoBuilder {
+    repo_name: String,
+    repos_conf: BTreeMap<String, String>,
     masters: Option<Vec<String>>,
     formats: Option<Vec<String>>,
     eapi: Option<String>,
@@ -27,30 +64,12 @@ pub struct RepositoryFixture {
     categories: FxHashSet<String>,
     eclasses: Vec<String>,
     ebuilds: Vec<(String, String, String)>,
-    pub(crate) repos_conf_properties: HashMap<String, String>,
 }
 
-impl RepositoryFixture {
-    /// Creates a new [`RepositoryFixture`] with a temporary location and the given `repo_name`.
-    ///
-    /// # Panics
-    ///
-    /// Will panic if the temporary directory cannot be created.
-    pub fn new(repo_name: &str) -> Self {
-        let temp_dir = tempfile::Builder::new()
-            .tempdir()
-            .expect("failed to create temp dir");
+impl RepoBuilder {
+    /// Creates a new [`RepositoryBuilder`] definition with the given `repo_name`.
+    pub fn new(repo_name: impl Into<String>) -> Self {
         Self {
-            location: temp_dir.path().join("repo").join(repo_name),
-            repo_name: repo_name.into(),
-            ..Default::default()
-        }
-    }
-
-    /// Sets the location for standalone use (outside of [`RepoSetFixture`]).
-    pub fn with_location(location: impl Into<PathBuf>, repo_name: &str) -> Self {
-        Self {
-            location: location.into(),
             repo_name: repo_name.into(),
             ..Default::default()
         }
@@ -58,27 +77,18 @@ impl RepositoryFixture {
 
     /// Sets the `masters` property in repos.conf.
     /// Use [`masters_override`](Self::masters_override) to explicitly set an empty value.
-    pub fn masters<I, S>(mut self, masters: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
+    pub fn masters(mut self, masters: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.masters = Some(masters.into_iter().map(Into::into).collect());
         self
     }
 
     /// Explicitly sets an empty `masters` property in repos.conf, overriding any layout.conf masters.
     pub fn masters_override(mut self) -> Self {
-        self.repos_conf_properties
-            .insert("masters".into(), String::new());
+        self.repos_conf.insert("masters".into(), String::new());
         self
     }
 
-    pub fn formats<I, S>(mut self, formats: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
+    pub fn formats(mut self, formats: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.formats = Some(formats.into_iter().map(Into::into).collect());
         self
     }
@@ -98,11 +108,11 @@ impl RepositoryFixture {
         self.profile_file(profile.as_ref().join("eapi"), format!("{}\n", eapi.into()))
     }
 
-    pub fn parents<I, S>(self, profile: impl AsRef<Path>, parents: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
+    pub fn parents(
+        self,
+        profile: impl AsRef<Path>,
+        parents: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
         let parents = parents.into_iter().map(Into::into).collect::<Vec<_>>();
         self.profile_file(profile.as_ref().join("parent"), parents.join("\n"))
     }
@@ -129,11 +139,7 @@ impl RepositoryFixture {
         self
     }
 
-    pub fn categories<I, S>(mut self, categories: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
+    pub fn categories(mut self, categories: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.categories = categories.into_iter().map(Into::into).collect();
         self
     }
@@ -157,36 +163,41 @@ impl RepositoryFixture {
 
     /// Adds a custom property to the repos.conf section for this repository.
     pub fn repos_conf_property(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.repos_conf_properties.insert(key.into(), value.into());
+        self.repos_conf.insert(key.into(), value.into());
         self
     }
 
-    pub fn write(self) -> io::Result<PathBuf> {
-        let metadata = self.location.join("metadata");
-        let profiles = self.location.join("profiles");
-        let eclasses = self.location.join("eclass");
+    /// Writes the repository tree to `location`.
+    pub fn write_to(self, location: impl AsRef<Path>) -> io::Result<()> {
+        let location = location.as_ref();
+        let metadata = location.join("metadata");
+        let profiles = location.join("profiles");
+        let eclasses = location.join("eclass");
         fs::create_dir_all(&metadata)?;
         fs::create_dir_all(&profiles)?;
         fs::create_dir_all(&eclasses)?;
 
-        let masters = self.masters.map(|m| m.join(" ")).unwrap_or_default();
-        let mut layout = format!("name = {}\nmasters = {}\n", self.repo_name, masters);
+        let mut layout = format!(
+            "name = {}\nmasters = {}\n",
+            self.repo_name,
+            self.masters.map(|m| m.join(" ")).unwrap_or_default()
+        );
         if let Some(formats) = self.formats {
             layout.push_str(&format!("profile-formats = {}\n", formats.join(" ")));
         }
-        fs::write(metadata.join("layout.conf"), layout)?;
-        fs::write(profiles.join("repo_name"), format!("{}\n", self.repo_name))?;
+        write_file(metadata.join("layout.conf"), layout)?;
+        write_file(profiles.join("repo_name"), format!("{}\n", self.repo_name))?;
         if let Some(eapi) = self.eapi {
-            fs::write(profiles.join("eapi"), format!("{eapi}\n"))?;
+            write_file(profiles.join("eapi"), format!("{eapi}\n"))?;
         }
-        fs::write(
+        write_file(
             profiles.join("profiles.desc"),
             "amd64 default/linux stable\n",
         )?;
-        fs::write(profiles.join("arch.list"), "amd64\n")?;
+        write_file(profiles.join("arch.list"), "amd64\n")?;
         let mut categories = self.categories.into_iter().collect::<Vec<_>>();
         categories.sort_unstable();
-        fs::write(profiles.join("categories"), categories.join("\n"))?;
+        write_file(profiles.join("categories"), categories.join("\n"))?;
 
         for profile in self.profiles {
             fs::create_dir_all(profiles.join(profile))?;
@@ -195,137 +206,69 @@ impl RepositoryFixture {
         for entry in self.entries {
             match entry {
                 FixtureEntry::File { path, contents } => {
-                    let path = self.location.join(path);
-                    if let Some(parent) = path.parent() {
-                        fs::create_dir_all(parent)?;
-                    }
-                    fs::write(path, contents)?;
+                    let path = location.join(path);
+                    write_file(path, contents)?;
                 }
                 FixtureEntry::Directory { path, contents } => {
-                    let path = self.location.join(path);
-                    fs::create_dir_all(&path)?;
-                    fs::write(path.join("entries"), contents)?;
+                    let path = location.join(path);
+                    write_file(path.join("entries"), contents)?;
                 }
             }
         }
 
         for eclass in self.eclasses {
-            fs::write(eclasses.join(format!("{eclass}.eclass")), "")?;
+            write_file(eclasses.join(format!("{eclass}.eclass")), "")?;
         }
 
         for (category, package, version) in self.ebuilds {
-            let package_dir = self.location.join(&category).join(&package);
-            fs::create_dir_all(&package_dir)?;
-            fs::write(package_dir.join(format!("{package}-{version}.ebuild")), "")?;
+            let package_dir = location.join(&category).join(&package);
+            write_file(package_dir.join(format!("{package}-{version}.ebuild")), "")?;
         }
 
-        Ok(self.location)
+        Ok(())
+    }
+
+    /// Writes and loads a repository in an owned temporary directory.
+    pub fn finalize(self) -> anyhow::Result<Temp<Repository>> {
+        let temp_dir = tempfile::tempdir().context("failed to create temp dir")?;
+        let repo_name = self.repo_name.clone();
+        let location = temp_dir.path().join(&repo_name);
+
+        self.write_to(&location)
+            .with_context(|| format!("failed to write repository '{repo_name}'"))?;
+        let repository = Repository::load(&repo_name, &location)?;
+        Ok(Temp::new(repository, temp_dir))
     }
 }
 
-/// A test fixture that creates a temporary directory, writes multiple repositories,
-/// generates a `repos.conf`, and loads a [`RepoSet`].
+/// Creates a temporary [`RepoSet`] from repository definitions.
 ///
-/// The returned struct implements [`Deref`] to [`RepoSet`] and keeps the temporary
-/// directory alive.
-///
-/// # Example
-///
-/// ```
-/// let fixture = RepoSetFixture::new(vec![
-///     RepositoryFixture::new("master")
-///         .categories(["app-misc"])
-///         .eclass("my_eclass"),
-///     RepositoryFixture::new("overlay")
-///         .masters(["master"]),
-/// ]).unwrap();
-///
-/// // Use as RepoSet
-/// let overlay = fixture.get("overlay").unwrap();
-///
-/// // Access individual repo paths
-/// let master_path = fixture.get_repo_path("master").unwrap();
-/// ```
-pub struct RepoSetFixture {
-    repo_set: RepoSet,
-    _temp: tempfile::TempDir,
-    paths: HashMap<String, PathBuf>,
-}
+/// The returned [`Temp`] keeps the repositories' temporary filesystem alive.
+pub fn repo_set(repos: impl IntoIterator<Item = RepoBuilder>) -> anyhow::Result<Temp<RepoSet>> {
+    let temp = tempfile::tempdir().context("failed to create temp dir")?;
+    let mut names = HashSet::new();
+    let mut conf = String::new();
 
-impl RepoSetFixture {
-    /// Creates a new [`RepoSetFixture`] from the given [`RepositoryFixture`] instances.
-    ///
-    /// Each repository will be written to a subdirectory named after its repo name
-    /// inside a temporary directory. A `repos.conf` is generated and the [`RepoSet`]
-    /// is loaded.
-    pub fn new(repositories: Vec<RepositoryFixture>) -> anyhow::Result<Self> {
-        let temp = tempfile::Builder::new()
-            .tempdir()
-            .map_err(|e| anyhow!("failed to create temp dir: {e}"))?;
-
-        // Collect paths and repos.conf properties before consuming the fixtures
-        let mut paths = HashMap::new();
-        let mut conf_props: HashMap<String, HashMap<String, String>> = HashMap::new();
-        for repo in &repositories {
-            let location = temp.path().join(&repo.repo_name);
-            paths.insert(repo.repo_name.clone(), location);
-            if !repo.repos_conf_properties.is_empty()
-                && conf_props
-                    .insert(repo.repo_name.clone(), repo.repos_conf_properties.clone())
-                    .is_some()
-            {
-                bail!("tried to insert duplicate repository {}", repo.repo_name);
-            }
+    for repo in repos {
+        let name = repo.repo_name.clone();
+        if !names.insert(name.clone()) {
+            bail!("tried to insert duplicate repository {name}");
         }
 
-        // Assign locations and write each repository
-        for mut repo in repositories {
-            let repo_name = repo.repo_name.clone();
-            repo.location = paths[&repo_name].clone();
-            repo.write()
-                .map_err(|e| anyhow!("failed to write repository '{repo_name}': {e}"))?;
+        let location = temp.path().join(&name);
+        conf.push_str(&format!("[{name}]\nlocation = {}\n", location.display()));
+        for (key, value) in &repo.repos_conf {
+            conf.push_str(&format!("{key} = {value}\n"));
         }
+        conf.push('\n');
 
-        // Build and write repos.conf
-        let mut conf = String::new();
-        for (name, location) in &paths {
-            conf.push_str(&format!("[{name}]\nlocation = {}\n", location.display()));
-            if let Some(props) = conf_props.get(name) {
-                for (key, value) in props {
-                    conf.push_str(&format!("{key} = {value}\n"));
-                }
-            }
-            conf.push('\n');
-        }
-
-        let repos_conf = temp.path().join("repos.conf");
-        fs::write(&repos_conf, conf).map_err(|e| anyhow!("failed to write repos.conf: {e}"))?;
-
-        let repo_set = RepoSet::new(&repos_conf)?;
-
-        Ok(Self {
-            repo_set,
-            _temp: temp,
-            paths,
-        })
+        repo.write_to(&location)
+            .with_context(|| format!("failed to write repository '{name}'"))?;
     }
 
-    /// Returns the `Path` for the given `repo_name`
-    pub fn get_repo_path(&self, repo_name: &str) -> Option<&Path> {
-        self.paths.get(repo_name).map(PathBuf::as_path)
-    }
-}
+    let repos_conf = temp.path().join("repos.conf");
+    write_file(&repos_conf, conf).context("failed to write repos.conf")?;
+    let repo_set = RepoSet::new(&repos_conf)?;
 
-impl Deref for RepoSetFixture {
-    type Target = RepoSet;
-
-    fn deref(&self) -> &Self::Target {
-        &self.repo_set
-    }
-}
-
-impl DerefMut for RepoSetFixture {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.repo_set
-    }
+    Ok(Temp::new(repo_set, temp))
 }

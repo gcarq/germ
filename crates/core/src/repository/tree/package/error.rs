@@ -13,7 +13,7 @@ pub enum PackageResolutionError {
         source: MetadataGenerationError,
     },
 
-    #[error("{cpv}: internal package resolution error")]
+    #[error("unable to process {cpv}")]
     Internal {
         cpv: String,
         #[source]
