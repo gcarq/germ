@@ -1,18 +1,28 @@
-use crate::deps::atom::Atom;
+use crate::deps::atom::{Atom, AtomIdent};
 use crate::package::cpv::CPV;
 use crate::types::FxHashMap;
 
+use either::Either;
 use log::warn;
-use std::ops::Deref;
 
-/// Holds all available packages in a repository, mapping the qualified name to [`Vec<CPV>`].
+type PackagesByName = FxHashMap<Box<str>, Vec<CPV>>;
+
+/// Holds all available packages in a repository, grouped by category and package name.
 #[derive(Default, Debug)]
-pub struct CPVIndex(FxHashMap<String, Vec<CPV>>);
+pub struct CPVIndex(FxHashMap<Box<str>, PackagesByName>);
 
 impl CPVIndex {
     /// Inserts the given [`CPV`] into the index.
     pub fn insert(&mut self, cpv: CPV) {
-        let entry = self.0.entry(cpv.qualified_name()).or_default();
+        let packages = match self.0.get_mut(cpv.category()) {
+            Some(packages) => packages,
+            None => self.0.entry(cpv.category().into()).or_default(),
+        };
+        let entry = match packages.get_mut(cpv.package()) {
+            Some(entry) => entry,
+            None => packages.entry(cpv.package().into()).or_default(),
+        };
+
         // Its possible that a repository contains the same ebuild with and without explicit
         // revision 0.
         if let Some(index) = entry.iter().position(|existing| existing == &cpv) {
@@ -33,22 +43,50 @@ impl CPVIndex {
         }
     }
 
-    /// Returns all packages matching the given [`Atom`].
-    pub fn find_packages(&self, atom: &Atom) -> Vec<CPV> {
-        let Some(pkgs) = self.0.get(&atom.qualified_name()) else {
-            return Vec::new();
-        };
-        pkgs.iter()
-            .filter(|cpv| cpv.matches_atom(atom))
-            .cloned()
-            .collect()
+    /// Returns all indexed [`CPV`] values.
+    pub fn iter(&self) -> impl Iterator<Item = &CPV> {
+        self.0
+            .values()
+            .flat_map(|packages| packages.values())
+            .flat_map(|cpvs| cpvs.iter())
     }
-}
 
-impl Deref for CPVIndex {
-    type Target = FxHashMap<String, Vec<CPV>>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    /// Returns all packages matching the given [`Atom`].
+    ///
+    /// Wildcards for atom category and package are supported, see [`AtomIdent::Any`].
+    pub fn find_packages(&self, atom: &Atom) -> impl Iterator<Item = &CPV> {
+        let matches = move |cpv: &&CPV| cpv.matches_atom(atom);
+
+        match (&atom.category, &atom.package) {
+            (AtomIdent::Exact(category), AtomIdent::Exact(package)) => Either::Left(
+                self.0
+                    .get(category.as_str())
+                    .into_iter()
+                    .filter_map(|pkgs| pkgs.get(package.as_str()))
+                    .flat_map(|cpvs| cpvs.iter())
+                    .filter(matches),
+            ),
+            (AtomIdent::Exact(category), AtomIdent::Any) => Either::Right(Either::Left(
+                self.0
+                    .get(category.as_str())
+                    .into_iter()
+                    .flat_map(|pkgs| pkgs.values())
+                    .flat_map(|cpvs| cpvs.iter())
+                    .filter(matches),
+            )),
+            (AtomIdent::Any, AtomIdent::Exact(package)) => {
+                Either::Right(Either::Right(Either::Left(
+                    self.0
+                        .values()
+                        .filter_map(|pkgs| pkgs.get(package.as_str()))
+                        .flat_map(|cpvs| cpvs.iter())
+                        .filter(matches),
+                )))
+            }
+            (AtomIdent::Any, AtomIdent::Any) => {
+                Either::Right(Either::Right(Either::Right(self.iter())))
+            }
+        }
     }
 }
 
@@ -81,12 +119,51 @@ mod tests {
             PackageVersion::try_from("1.94.0").unwrap(),
         )
         .unwrap();
-        assert!(!index.values().flatten().any(|existing| existing == &rust));
+        assert!(!index.iter().any(|existing| existing == &rust));
         index.insert(rust.clone());
 
-        let packages = index.find_packages(&Atom::new("dev-lang/python").unwrap());
+        let packages = index
+            .find_packages(&Atom::new("dev-lang/python").unwrap())
+            .cloned()
+            .collect::<Vec<_>>();
         assert_eq!(packages, vec![python3_14, python_3_13]);
-        assert!(index.values().flatten().any(|existing| existing == &rust));
+        assert!(index.iter().any(|existing| existing == &rust));
+    }
+
+    #[test]
+    fn test_available_package_index_wildcards() {
+        let mut index = CPVIndex::default();
+        index.insert(
+            CPV::new(
+                "dev-lang",
+                "python",
+                PackageVersion::try_from("3.14.3").unwrap(),
+            )
+            .unwrap(),
+        );
+        index.insert(
+            CPV::new(
+                "dev-lang",
+                "rust",
+                PackageVersion::try_from("1.94.0").unwrap(),
+            )
+            .unwrap(),
+        );
+        index.insert(
+            CPV::new(
+                "dev-libs",
+                "libfoo",
+                PackageVersion::try_from("1.0.0").unwrap(),
+            )
+            .unwrap(),
+        );
+
+        let atom = Atom::new("dev-lang/*").unwrap();
+        assert_eq!(index.find_packages(&atom).count(), 2);
+        let atom = Atom::new("*/rust").unwrap();
+        assert_eq!(index.find_packages(&atom).count(), 1);
+        let atom = Atom::new("*/*").unwrap();
+        assert_eq!(index.find_packages(&atom).count(), 3);
     }
 
     #[test]
@@ -108,6 +185,8 @@ mod tests {
 
         let mut index = CPVIndex::default();
         index.insert_all(vec![explicit, implicit, r1]);
-        assert_eq!(index["dev-libs/pkg"].len(), 2);
+
+        let atom = Atom::new("dev-libs/pkg").unwrap();
+        assert_eq!(index.find_packages(&atom).count(), 2);
     }
 }

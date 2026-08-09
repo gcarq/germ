@@ -86,30 +86,22 @@ impl Repository {
 
     /// Returns all known CPVs in the repository.
     pub fn cpvs(&self) -> impl Iterator<Item = &CPV> {
-        self.cpv_index.values().flatten()
+        self.cpv_index.iter()
     }
 
     /// Returns all known packages (including metadata) in the repository.
     pub fn packages(
         &mut self,
     ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
-        let cpvs = self
-            .cpv_index
-            .values()
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>();
-        self.resolve_packages(&cpvs)
+        self.resolve_packages(self.cpv_index.iter())
     }
 
     /// Finds and returns all packages that match the given [`Atom`].
-    /// TODO: optimize this function
     pub fn find_packages(
         &mut self,
         atom: &Atom,
     ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
-        let cpvs = self.cpv_index.find_packages(atom);
-        self.resolve_packages(&cpvs)
+        self.resolve_packages(self.cpv_index.find_packages(atom))
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
@@ -170,14 +162,14 @@ impl Repository {
     }
 
     /// Builds the [`Package`] index for the given `cpvs`.
-    fn resolve_packages(
-        &mut self,
-        cpvs: &[CPV],
+    fn resolve_packages<'a>(
+        &self,
+        cpvs: impl Iterator<Item = &'a CPV>,
     ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
-        let mut resolved = Vec::with_capacity(cpvs.len());
+        let mut resolved = Vec::with_capacity(cpvs.size_hint().0);
         let mut missing = Vec::new();
 
-        for cpv in cpvs.iter() {
+        for cpv in cpvs {
             match self.metadata_cache.get(cpv)? {
                 Some(metadata) => {
                     resolved.push(Ok(Package::new(cpv.clone(), self.name.clone(), metadata)));
@@ -328,7 +320,9 @@ impl Default for Repository {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::iter;
+
+use super::*;
 
     use super::super::test_support::RepoBuilder;
     use crate::package::{metadata::PackageMetadata, version::PackageVersion};
@@ -353,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_repository_resolves_cached_metadata() {
-        let mut repository = RepoBuilder::new("repo").finalize().unwrap();
+        let repository = RepoBuilder::new("repo").finalize().unwrap();
         let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
         let metadata = PackageMetadata {
             description: "cached metadata".into(),
@@ -364,7 +358,7 @@ mod tests {
             .insert_batch([(&cpv, &metadata)])
             .unwrap();
         let package = repository
-            .resolve_packages(&[cpv])
+            .resolve_packages(iter::once(&cpv))
             .unwrap()
             .into_iter()
             .next()
