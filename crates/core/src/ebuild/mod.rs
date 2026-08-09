@@ -2,14 +2,20 @@ pub mod handler;
 
 use crate::eapi::{Eapi, EapiError};
 
+use crate::ebuild::handler::error::MetadataGenerationError;
+use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
+use crate::makenv::MakeEnv;
 use crate::package::cpv::CPV;
+use crate::package::metadata::PackageMetadata;
 use crate::repository::Repository;
+use crate::types::FxHashMap;
 
+use anyhow::anyhow;
 use regex::Regex;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
 use thiserror::Error;
@@ -44,7 +50,7 @@ pub enum EbuildError {
 /// how to build it. See PMS 6 and 7.
 #[derive(Debug)]
 pub struct Ebuild<'a> {
-    pub path: &'a Path,
+    pub path: PathBuf,
     pub eapi: Eapi,
     pub cpv: &'a CPV,
     pub repo: &'a Repository,
@@ -54,16 +60,23 @@ impl<'a> Ebuild<'a> {
     /// Creates an [`Ebuild`] from the given `path` and [`CPV`] it relates to.
     ///
     /// Returns an [`EbuildError`] if the ebuild is malformed.
-    pub fn new(path: &'a Path, cpv: &'a CPV, repo: &'a Repository) -> Result<Self, EbuildError> {
-        let file = File::open(path).map_err(|e| EbuildError::Io {
-            path: path.to_owned(),
-            source: e,
+    pub fn new(cpv: &'a CPV, repo: &'a Repository) -> Result<Self, EbuildError> {
+        let path = repo
+            .location
+            .join(cpv.category())
+            .join(cpv.package())
+            .join(format!("{}.ebuild", cpv.pf()));
+
+        let file = File::open(&path).map_err(|source| EbuildError::Io {
+            path: path.clone(),
+            source,
         })?;
         let reader = BufReader::with_capacity(256, file);
+
         for line in reader.lines() {
-            let line = line.map_err(|e| EbuildError::Io {
-                path: path.to_owned(),
-                source: e,
+            let line = line.map_err(|source| EbuildError::Io {
+                path: path.clone(),
+                source,
             })?;
             if let Some(caps) = PMS_EAPI_RE.captures(&line) {
                 let value = &caps["eapi"];
@@ -80,6 +93,26 @@ impl<'a> Ebuild<'a> {
             }
         }
         Err(EbuildError::MissingEapi)
+    }
+
+    /// Generates and returns the [`PackageMetadata`] for this ebuild.
+    ///
+    /// Returns a [`MetadataGenerationError`] if it cannot be resolved.
+    pub fn generate_metadata(&self) -> Result<PackageMetadata, MetadataGenerationError> {
+        let mut handler = EbuildPhaseHandler::new(self, EbuildPhase::Depend, &MakeEnv::default())?;
+
+        let data = handler.spawn()?;
+        let data = data
+            .iter()
+            .map(|line| match line.split_once('=') {
+                Some((key, value)) => Ok((key.trim(), value.trim())),
+                None => Err(MetadataGenerationError::Internal(anyhow!(
+                    "invalid metadata line: {line}"
+                ))),
+            })
+            .collect::<Result<FxHashMap<_, _>, _>>();
+
+        Ok(PackageMetadata::from_map(data?)?)
     }
 }
 
@@ -99,27 +132,31 @@ impl fmt::Display for Ebuild<'_> {
 
 #[cfg(test)]
 mod tests {
+    use crate::repository::test_support::RepoBuilder;
+
     use super::*;
-    use std::fs;
+    use crate::package::version::PackageVersion;
     use std::path::PathBuf;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn test_missing_eapi() {
-        let file = NamedTempFile::new().unwrap();
-        fs::write(file.path(), "DESCRIPTION=missing").unwrap();
-
-        let err = Ebuild::new(file.path(), &CPV::default(), &Repository::default()).unwrap_err();
-
+        let repo = RepoBuilder::new("repo")
+            .ebuild("cat", "pkg", "1", "DESCRIPTION=missing")
+            .finalize()
+            .unwrap();
+        let cpv = CPV::new("cat", "pkg", PackageVersion::try_from("1").unwrap()).unwrap();
+        let err = Ebuild::new(&cpv, &repo).unwrap_err();
         assert!(matches!(err, EbuildError::MissingEapi));
     }
 
     #[test]
     fn test_unrecognized_eapi() {
-        let file = NamedTempFile::new().unwrap();
-        fs::write(file.path(), "EAPI=abc").unwrap();
-
-        let err = Ebuild::new(file.path(), &CPV::default(), &Repository::default()).unwrap_err();
+        let repo = RepoBuilder::new("repo")
+            .ebuild("cat", "pkg", "1", "EAPI=abc")
+            .finalize()
+            .unwrap();
+        let cpv = CPV::new("cat", "pkg", PackageVersion::try_from("1").unwrap()).unwrap();
+        let err = Ebuild::new(&cpv, &repo).unwrap_err();
         assert!(matches!(
             err,
             EbuildError::Eapi(EapiError::Unrecognized(value)) if value == "abc"
@@ -128,21 +165,19 @@ mod tests {
 
     #[test]
     fn test_unsupported_eapi() {
-        let file = NamedTempFile::new().unwrap();
-        fs::write(file.path(), "EAPI=6").unwrap();
-
-        let err = Ebuild::new(file.path(), &CPV::default(), &Repository::default()).unwrap_err();
-
+        let repo = RepoBuilder::new("repo")
+            .ebuild("cat", "pkg", "1", "EAPI=6")
+            .finalize()
+            .unwrap();
+        let cpv = CPV::new("cat", "pkg", PackageVersion::try_from("1").unwrap()).unwrap();
+        let err = Ebuild::new(&cpv, &repo).unwrap_err();
         assert!(matches!(err, EbuildError::UnsupportedEapi(Eapi::Six)));
     }
 
     #[test]
     fn test_ebuild_io_error() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("missing.ebuild");
-
-        let err = Ebuild::new(&path, &CPV::default(), &Repository::default()).unwrap_err();
-
+        let repo = RepoBuilder::new("repo").finalize().unwrap();
+        let err = Ebuild::new(&CPV::default(), &repo).unwrap_err();
         assert!(matches!(err, EbuildError::Io { .. }));
     }
 
@@ -150,13 +185,13 @@ mod tests {
     fn test_ebuild_eq() {
         let path = PathBuf::from("/dev/null");
         let ebuild1 = Ebuild {
-            path: &path,
+            path: path.clone(),
             eapi: Eapi::Eight,
             cpv: &CPV::default(),
             repo: &Repository::default(),
         };
         let ebuild2 = Ebuild {
-            path: &path,
+            path: path.clone(),
             eapi: Eapi::Eight,
             cpv: &CPV::default(),
             repo: &Repository::default(),

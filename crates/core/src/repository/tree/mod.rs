@@ -14,6 +14,7 @@ use self::package::{CPVIndex, resolve_cpv_from_category};
 use self::profiles::ProfileDescriptions;
 use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
+use crate::ebuild::Ebuild;
 use crate::files::{PackageEntries, entry::Precedence};
 use crate::package::{Package, cpv::CPV};
 use crate::regex::REPO_RE;
@@ -22,7 +23,7 @@ use crate::types::FxHashSet;
 use crate::utils::Inherit;
 use anyhow::{Context, anyhow};
 use log::{debug, warn};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::{fmt, fs};
@@ -88,17 +89,16 @@ impl Repository {
     }
 
     /// Returns all known packages (including metadata) in the repository.
-    ///
-    /// This function will call [`Repository::build_package_index()`] and
-    /// index all missing packages.
-    pub fn packages(&mut self) -> impl Iterator<Item = Result<Package, PackageResolutionError>> {
+    pub fn packages(
+        &mut self,
+    ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
         let cpvs = self
             .cpv_index
             .values()
             .flatten()
             .cloned()
             .collect::<Vec<_>>();
-        self.resolve_packages(&cpvs).into_iter()
+        self.resolve_packages(&cpvs)
     }
 
     /// Finds and returns all packages that match the given [`Atom`].
@@ -106,16 +106,9 @@ impl Repository {
     pub fn find_packages(
         &mut self,
         atom: &Atom,
-    ) -> impl Iterator<Item = Result<Package, PackageResolutionError>> {
-        let cpvs = self
-            .cpv_index
-            .find_packages(atom)
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>();
-
-        self.resolve_packages(&cpvs).into_iter()
+    ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
+        let cpvs = self.cpv_index.find_packages(atom);
+        self.resolve_packages(&cpvs)
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
@@ -139,10 +132,12 @@ impl Repository {
     }
 
     /// Resolves all package metadata and builds [`MetadataCache`].
-    ///
-    /// Returns an iterator over all errors that occured.
-    pub fn build_cache(&mut self) -> impl Iterator<Item = PackageResolutionError> {
-        self.packages().filter_map(Result::err)
+    pub fn build_cache(&mut self) -> Result<Vec<PackageResolutionError>, RepositoryError> {
+        Ok(self
+            .packages()?
+            .into_iter()
+            .filter_map(Result::err)
+            .collect())
     }
 
     /// Deletes and recreates the [`MetadataCache`].
@@ -158,43 +153,56 @@ impl Repository {
         Ok(())
     }
 
-    /// Builds the [`Package`] index for the given `cpvs`.
-    fn resolve_packages(&mut self, cpvs: &[CPV]) -> Vec<Result<Package, PackageResolutionError>> {
-        cpvs.into_par_iter()
-            .map(|cpv| self.resolve_package(cpv))
-            .collect()
+    /// Resolves the [`Package`] for the given [`CPV`].
+    fn resolve_package(&self, cpv: &CPV) -> Result<Package, PackageResolutionError> {
+        let ebuild = match Ebuild::new(cpv, self) {
+            Ok(ebuild) => ebuild,
+            Err(error) => {
+                return Err(PackageResolutionError::new(cpv.fqn(), error.into()));
+            }
+        };
+
+        match ebuild.generate_metadata() {
+            Ok(metadata) => Ok(Package::new(cpv.clone(), self.name.clone(), metadata)),
+            Err(source) => Err(PackageResolutionError::new(cpv.fqn(), source)),
+        }
     }
 
-    /// Resolves the given [`CPV`] into a [`Package`] with its metadata.
-    fn resolve_package(&self, cpv: &CPV) -> Result<Package, PackageResolutionError> {
-        if let Some(metadata) =
-            self.metadata_cache
-                .get(cpv)
-                .map_err(|err| PackageResolutionError::Internal {
-                    cpv: cpv.fqn().into(),
-                    source: anyhow!(err).context("unable to read metadata cache"),
-                })?
-        {
-            return Ok(Package::new(cpv.clone(), self.name.clone(), metadata));
+    /// Builds the [`Package`] index for the given `cpvs`.
+    fn resolve_packages(
+        &mut self,
+        cpvs: &[CPV],
+    ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
+        let repository = self.name.clone();
+        let mut resolved = Vec::with_capacity(cpvs.len());
+        let mut missing = Vec::new();
+
+        for cpv in cpvs.iter() {
+            match self.metadata_cache.get(cpv)? {
+                Some(metadata) => {
+                    resolved.push(Ok(Package::new(cpv.clone(), repository.clone(), metadata)));
+                }
+                None => missing.push(cpv),
+            }
         }
 
-        let ebuild_path = self
-            .location
-            .join(cpv.category())
-            .join(cpv.package())
-            .join(format!("{}.ebuild", cpv.pf()));
-        let metadata = cpv
-            .generate_metadata(&ebuild_path, self)
-            .map_err(|error| PackageResolutionError::from_metadata(cpv, error))?;
+        let generated = missing
+            .par_iter()
+            .map(|cpv| match self.resolve_package(cpv) {
+                Ok(package) => Ok(Ok(package)),
+                Err(error) => error.promote().map(Err),
+            })
+            .collect::<Result<Vec<_>, RepositoryError>>()?;
 
-        self.metadata_cache.insert(cpv, &metadata).map_err(|err| {
-            PackageResolutionError::Internal {
-                cpv: cpv.fqn().into(),
-                source: anyhow!(err).context("unable to write metadata cache"),
-            }
-        })?;
+        self.metadata_cache.insert_batch(
+            generated
+                .iter()
+                .filter_map(|result| result.as_ref().ok())
+                .map(|package| (&package.cpv, &package.metadata)),
+        )?;
 
-        Ok(Package::new(cpv.clone(), self.name.clone(), metadata))
+        resolved.extend(generated);
+        Ok(resolved)
     }
 
     /// Collects all known eclasses in the repo.
@@ -329,15 +337,15 @@ mod tests {
     fn test_invalid_package_versions() {
         let mut repository = RepoBuilder::new("repo")
             .categories(["app-misc"])
-            .ebuild("app-misc", "foo", "1")
-            .ebuild("app-misc", "foo", "2")
+            .ebuild("app-misc", "foo", "1", "")
+            .ebuild("app-misc", "foo", "2", "")
             .finalize()
             .unwrap();
         repository.populate().unwrap();
 
         let results = repository
             .find_packages(&Atom::new("app-misc/foo").unwrap())
-            .collect::<Vec<_>>();
+            .unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(Result::is_err));
@@ -345,14 +353,23 @@ mod tests {
 
     #[test]
     fn test_repository_resolves_cached_metadata() {
-        let repository = RepoBuilder::new("repo").finalize().unwrap();
+        let mut repository = RepoBuilder::new("repo").finalize().unwrap();
         let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
         let metadata = PackageMetadata {
             description: "cached metadata".into(),
             ..Default::default()
         };
-        repository.metadata_cache.insert(&cpv, &metadata).unwrap();
-        let package = repository.resolve_package(&cpv).unwrap();
+        repository
+            .metadata_cache
+            .insert_batch([(&cpv, &metadata)])
+            .unwrap();
+        let package = repository
+            .resolve_packages(&[cpv])
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .unwrap();
         assert_eq!(package.metadata, metadata);
     }
 

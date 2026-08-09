@@ -226,7 +226,7 @@ mod tests {
             channel
                 .recv_bytes()?
                 .ok_or_else(|| ProtocolError::InvalidRequest("".into()))?;
-            Err(PhaseExecutionError::Internal(anyhow!("test")))
+            Err(PhaseExecutionError::Invariant(anyhow!("test")))
         });
 
         assert!(

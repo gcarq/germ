@@ -65,9 +65,12 @@ impl RepoSet {
     pub fn find_packages(
         &mut self,
         atom: &Atom,
-    ) -> impl Iterator<Item = Result<Package, PackageResolutionError>> {
-        self.select_mut(atom.repo.as_deref())
-            .flat_map(|r| r.find_packages(atom))
+    ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
+        let mut results = Vec::new();
+        for repository in self.select_mut(atom.repo.as_deref()) {
+            results.extend(repository.find_packages(atom)?);
+        }
+        Ok(results)
     }
 
     /// Attempts to synchronize all repositories and reloads repo data from disk.
@@ -338,7 +341,7 @@ mod tests {
 
         RepoBuilder::new("repo")
             .categories(["app-misc"])
-            .ebuild("app-misc", "foo", "1")
+            .ebuild("app-misc", "foo", "1", "")
             .write_to(&location)
             .unwrap();
         set.maybe_sync().unwrap();
@@ -382,8 +385,8 @@ mod tests {
         assert!(
             fixture
                 .find_packages(&Atom::new("app-misc/foo::repo").unwrap())
-                .next()
-                .is_none()
+                .unwrap()
+                .is_empty()
         );
     }
 
@@ -396,7 +399,7 @@ mod tests {
             RepoBuilder::new("overlay")
                 .masters(["master"])
                 .categories(["app-misc"])
-                .ebuild("app-misc", "foo", "1"),
+                .ebuild("app-misc", "foo", "1", ""),
         ])
         .unwrap();
 
@@ -424,7 +427,7 @@ mod tests {
             RepoBuilder::new("overlay")
                 .masters(["master"])
                 .masters_override()
-                .ebuild("app-misc", "foo", "1"),
+                .ebuild("app-misc", "foo", "1", ""),
         ])
         .unwrap();
 
@@ -450,8 +453,8 @@ mod tests {
             RepoBuilder::new("master").categories(["app-misc"]),
             RepoBuilder::new("overlay")
                 .masters(["master"])
-                .ebuild("app-misc", "foo", "1")
-                .ebuild("dev-libs", "bar", "1"),
+                .ebuild("app-misc", "foo", "1", "")
+                .ebuild("dev-libs", "bar", "1", ""),
         ])
         .unwrap();
 
@@ -530,7 +533,7 @@ mod tests {
                 .repos_conf_property("sync-uri", "https://example.invalid/unavailable.git"),
             RepoBuilder::new("child")
                 .masters(["missing", "available", "unavailable"])
-                .ebuild("app-misc", "foo", "1"),
+                .ebuild("app-misc", "foo", "1", ""),
         ])
         .unwrap();
 

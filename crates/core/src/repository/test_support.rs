@@ -63,7 +63,7 @@ pub struct RepoBuilder {
     entries: Vec<FixtureEntry>,
     categories: FxHashSet<String>,
     eclasses: Vec<String>,
-    ebuilds: Vec<(String, String, String)>,
+    ebuilds: Vec<(String, String, String, String)>,
 }
 
 impl RepoBuilder {
@@ -149,15 +149,20 @@ impl RepoBuilder {
         self
     }
 
-    /// Adds a minimal ebuild file to the fixture.
+    /// Adds an ebuild file with the given content to the fixture.
     pub fn ebuild(
         mut self,
         category: impl Into<String>,
         package: impl Into<String>,
         version: impl Into<String>,
+        content: impl Into<String>,
     ) -> Self {
-        self.ebuilds
-            .push((category.into(), package.into(), version.into()));
+        self.ebuilds.push((
+            category.into(),
+            package.into(),
+            version.into(),
+            content.into(),
+        ));
         self
     }
 
@@ -220,9 +225,12 @@ impl RepoBuilder {
             write_file(eclasses.join(format!("{eclass}.eclass")), "")?;
         }
 
-        for (category, package, version) in self.ebuilds {
+        for (category, package, version, content) in self.ebuilds {
             let package_dir = location.join(&category).join(&package);
-            write_file(package_dir.join(format!("{package}-{version}.ebuild")), "")?;
+            write_file(
+                package_dir.join(format!("{package}-{version}.ebuild")),
+                content,
+            )?;
         }
 
         Ok(())

@@ -59,16 +59,21 @@ impl MetadataCache {
         Ok(db)
     }
 
-    /// Inserts the given `metadata` for the specified `cpv` into the cache.
-    pub fn insert(&self, cpv: &CPV, metadata: &PackageMetadata) -> Result<(), CacheError> {
-        let key = cpv.fqn();
-        let bytes = rkyv::to_bytes::<rancor::BoxedError>(metadata)?;
-
+    /// Inserts the given `entries` into the cache.
+    pub fn insert_batch<'a>(
+        &self,
+        entries: impl IntoIterator<Item = (&'a CPV, &'a PackageMetadata)>,
+    ) -> Result<(), CacheError> {
         let tx = self.db.begin_write().map_err(redb::Error::from)?;
-        tx.open_table(METADATA_TABLE)
-            .map_err(redb::Error::from)?
-            .insert(key, bytes.as_slice())
-            .map_err(redb::Error::from)?;
+        {
+            let mut table = tx.open_table(METADATA_TABLE).map_err(redb::Error::from)?;
+            for (cpv, metadata) in entries {
+                let bytes = rkyv::to_bytes::<rancor::BoxedError>(metadata)?;
+                table
+                    .insert(cpv.fqn(), bytes.as_slice())
+                    .map_err(redb::Error::from)?;
+            }
+        }
         tx.commit().map_err(redb::Error::from)?;
         Ok(())
     }
@@ -149,7 +154,7 @@ mod tests {
         };
 
         let cache = MetadataCache::new(temp.path()).unwrap();
-        cache.insert(&cpv, &metadata).unwrap();
+        cache.insert_batch([(&cpv, &metadata)]).unwrap();
         assert_eq!(cache.get(&cpv).unwrap(), Some(metadata.clone()));
         drop(cache);
 
@@ -163,7 +168,9 @@ mod tests {
         let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
 
         let mut cache = MetadataCache::new(temp.path()).unwrap();
-        cache.insert(&cpv, &PackageMetadata::default()).unwrap();
+        cache
+            .insert_batch([(&cpv, &PackageMetadata::default())])
+            .unwrap();
         cache.recreate().unwrap();
 
         assert_eq!(cache.get(&cpv).unwrap(), None);
@@ -177,9 +184,12 @@ mod tests {
         let unknown = CPV::new("app-misc", "bar", PackageVersion::try_from("1").unwrap()).unwrap();
 
         let cache = MetadataCache::new(temp.path()).unwrap();
-        cache.insert(&known, &PackageMetadata::default()).unwrap();
-        cache.insert(&unknown, &PackageMetadata::default()).unwrap();
-
+        cache
+            .insert_batch([
+                (&known, &PackageMetadata::default()),
+                (&unknown, &PackageMetadata::default()),
+            ])
+            .unwrap();
         cache.retain([&known]).unwrap();
         assert!(cache.get(&known).unwrap().is_some());
         assert_eq!(cache.get(&unknown).unwrap(), None);
@@ -191,7 +201,9 @@ mod tests {
 
         let cache = MetadataCache::new(temp.path()).unwrap();
         let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
-        cache.insert(&cpv, &PackageMetadata::default()).unwrap();
+        cache
+            .insert_batch([(&cpv, &PackageMetadata::default())])
+            .unwrap();
         cache.remove(&cpv).unwrap();
 
         assert_eq!(cache.get(&cpv).unwrap(), None);

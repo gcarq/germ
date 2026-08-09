@@ -34,10 +34,14 @@ impl CPVIndex {
     }
 
     /// Returns all packages matching the given [`Atom`].
-    pub fn find_packages(&self, atom: &Atom) -> Option<Vec<&CPV>> {
-        let pkgs = self.0.get(&atom.qualified_name())?;
-        let matching_pkgs = pkgs.iter().filter(|cpv| cpv.matches_atom(atom)).collect();
-        Some(matching_pkgs)
+    pub fn find_packages(&self, atom: &Atom) -> Vec<CPV> {
+        let Some(pkgs) = self.0.get(&atom.qualified_name()) else {
+            return Vec::new();
+        };
+        pkgs.iter()
+            .filter(|cpv| cpv.matches_atom(atom))
+            .cloned()
+            .collect()
     }
 }
 
@@ -80,10 +84,8 @@ mod tests {
         assert!(!index.values().flatten().any(|existing| existing == &rust));
         index.insert(rust.clone());
 
-        let packages = index
-            .find_packages(&Atom::new("dev-lang/python").unwrap())
-            .unwrap();
-        assert_eq!(&packages, &[&python3_14, &python_3_13]);
+        let packages = index.find_packages(&Atom::new("dev-lang/python").unwrap());
+        assert_eq!(packages, vec![python3_14, python_3_13]);
         assert!(index.values().flatten().any(|existing| existing == &rust));
     }
 

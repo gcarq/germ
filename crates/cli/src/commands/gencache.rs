@@ -1,5 +1,5 @@
 use anyhow::Context;
-use germ_core::repository::{PackageResolutionError, RepoSet};
+use germ_core::repository::RepoSet;
 use log::{info, warn};
 
 /// Generates metadata cache for repositories.
@@ -15,16 +15,14 @@ pub fn gencache(
         let name = repo.name.clone();
         if force {
             repo.recreate_cache()
-                .with_context(|| format!("unable recreate cache for {name}"))?;
+                .with_context(|| format!("unable to recreate cache for {name}"))?;
         }
         info!("Generating metadata cache for {name}...");
-        for error in repo.build_cache() {
-            match error {
-                err @ PackageResolutionError::Metadata { .. } => warn!("{name}: {err}"),
-                err @ PackageResolutionError::Internal { .. } => {
-                    return Err(err).context(format!("unable to process repo {name}"));
-                }
-            }
+        for error in repo
+            .build_cache()
+            .with_context(|| format!("unable to process repo {name}"))?
+        {
+            warn!("{name}: {error}");
         }
     }
     Ok(())

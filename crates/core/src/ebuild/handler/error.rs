@@ -3,6 +3,8 @@ use std::process::ExitStatus;
 use thiserror::Error;
 
 use crate::eapi::Eapi;
+use crate::ebuild::EbuildError;
+use crate::package::metadata::PackageMetadataError;
 
 use super::protocol::FuncType;
 
@@ -46,5 +48,21 @@ pub enum PhaseExecutionError {
     NonZeroExit(ExitStatus),
 
     #[error("internal execution error")]
+    Invariant(#[from] anyhow::Error),
+}
+
+/// Errors returned when generating package metadata for a [`CPV`].
+#[derive(Debug, Error)]
+pub enum MetadataGenerationError {
+    #[error(transparent)]
+    Ebuild(#[from] EbuildError),
+
+    #[error("internal error while preparing ebuild execution")]
     Internal(#[from] anyhow::Error),
+
+    #[error(transparent)]
+    Execution(#[from] PhaseExecutionError),
+
+    #[error(transparent)]
+    Metadata(#[from] PackageMetadataError),
 }

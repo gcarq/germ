@@ -1,32 +1,8 @@
 use crate::deps::atom::{Atom, AtomIdent};
-use crate::ebuild::handler::error::PhaseExecutionError;
-use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
-use crate::ebuild::{Ebuild, EbuildError};
-use crate::makenv::MakeEnv;
-use crate::package::metadata::{PackageMetadata, PackageMetadataError};
 use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY_RE, PKG_RE};
-use crate::repository::Repository;
-use crate::types::FxHashMap;
-use anyhow::{anyhow, bail};
-use std::{cmp::Ordering, fmt, path::Path};
-use thiserror::Error;
-
-/// Errors returned when generating package metadata for a [`CPV`].
-#[derive(Debug, Error)]
-pub enum MetadataGenerationError {
-    #[error(transparent)]
-    Ebuild(#[from] EbuildError),
-
-    #[error("internal error while preparing ebuild execution")]
-    Internal(#[from] anyhow::Error),
-
-    #[error(transparent)]
-    Execution(#[from] PhaseExecutionError),
-
-    #[error(transparent)]
-    Metadata(#[from] PackageMetadataError),
-}
+use anyhow::bail;
+use std::{cmp::Ordering, fmt};
 
 /// Represents a simplified form of a package only with its category, name and version.
 ///
@@ -76,34 +52,6 @@ impl CPV {
             return false;
         }
         self.version.matches_atom(atom)
-    }
-
-    /// Generates and returns the [`PackageMetadata`] for this CPV.
-    ///
-    /// `repo` is needed for resolving eclass locations, etc..
-    ///
-    /// Returns a [`MetadataGenerationError`] if the ebuild metadata cannot be resolved.
-    pub fn generate_metadata(
-        &self,
-        ebuild_path: &Path,
-        repo: &Repository,
-    ) -> Result<PackageMetadata, MetadataGenerationError> {
-        let ebuild = Ebuild::new(ebuild_path, self, repo)?;
-        let mut handler =
-            EbuildPhaseHandler::new(&ebuild, EbuildPhase::Depend, &MakeEnv::default())?;
-
-        let data = handler.spawn()?;
-        let data = data
-            .iter()
-            .map(|line| match line.split_once('=') {
-                Some((key, value)) => Ok((key.trim(), value.trim())),
-                None => Err(MetadataGenerationError::Internal(anyhow!(
-                    "invalid metadata line: {line}"
-                ))),
-            })
-            .collect::<Result<FxHashMap<_, _>, _>>();
-
-        Ok(PackageMetadata::from_map(data?)?)
     }
 
     /// Returns the package name, e.g.: `python`.

@@ -6,7 +6,8 @@ use germ_core::repository::RepoSet;
 /// TODO: this is just a placeholder for now.
 pub fn install(atom: &Atom, repo_set: &mut RepoSet) -> Result<()> {
     let package = repo_set
-        .find_packages(atom)
+        .find_packages(atom)?
+        .into_iter()
         .find_map(Result::ok)
         .ok_or_else(|| anyhow!("no matching package found for atom '{atom}'"))?;
 
