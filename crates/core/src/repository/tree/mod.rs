@@ -26,6 +26,7 @@ use log::{debug, warn};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::{fmt, fs};
 
 /// Represents an available ebuild repository.
@@ -33,7 +34,7 @@ use std::{fmt, fs};
 #[derive(Debug)]
 pub struct Repository {
     pub location: PathBuf,
-    pub name: String,
+    pub name: Arc<str>,
     pub(crate) layout: Layout,
     pub(crate) package_mask: PackageEntries,
     pub(crate) package_unmask: PackageEntries,
@@ -66,7 +67,7 @@ impl Repository {
         )
         .map_err(|err| ProfileError::from(err.context("unable to load package.unmask")))?;
 
-        let name = Self::resolve_repo_name(name, &layout, &profiles)?.to_owned();
+        let name = Self::resolve_repo_name(name, &layout, &profiles)?.into();
 
         Ok(Self {
             location: location.to_owned(),
@@ -173,14 +174,13 @@ impl Repository {
         &mut self,
         cpvs: &[CPV],
     ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
-        let repository = self.name.clone();
         let mut resolved = Vec::with_capacity(cpvs.len());
         let mut missing = Vec::new();
 
         for cpv in cpvs.iter() {
             match self.metadata_cache.get(cpv)? {
                 Some(metadata) => {
-                    resolved.push(Ok(Package::new(cpv.clone(), repository.clone(), metadata)));
+                    resolved.push(Ok(Package::new(cpv.clone(), self.name.clone(), metadata)));
                 }
                 None => missing.push(cpv),
             }
@@ -312,7 +312,7 @@ impl Default for Repository {
         let metadata_cache = MetadataCache::new(&temp_dir.path().join("metadata")).unwrap();
         Self {
             location: temp_dir.path().to_owned(),
-            name: String::new(),
+            name: "".into(),
             layout: Layout::default(),
             categories: FxHashSet::default(),
             package_mask: PackageEntries::default(),

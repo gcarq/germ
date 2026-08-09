@@ -7,6 +7,7 @@ use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
 use metadata::PackageMetadata;
 use std::fmt;
+use std::sync::Arc;
 
 /// Represents a package within a [`Repository`] with its category, name, version and additional
 /// metadata required to install it.
@@ -14,7 +15,7 @@ use std::fmt;
 #[cfg_attr(test, derive(Default))]
 pub struct Package {
     pub cpv: CPV,
-    pub repo: String,
+    pub repo: Arc<str>,
     pub metadata: PackageMetadata,
 }
 
@@ -22,7 +23,7 @@ impl Package {
     /// Creates a new [`Package`] from the given `cpv`, `repo` and `metadata`.
     ///
     /// Returns `Err` if `category` or `name` are invalid according to PMS 3.1.1 and 3.1.2.
-    pub const fn new(cpv: CPV, repo: String, metadata: PackageMetadata) -> Self {
+    pub const fn new(cpv: CPV, repo: Arc<str>, metadata: PackageMetadata) -> Self {
         Self {
             cpv,
             repo,

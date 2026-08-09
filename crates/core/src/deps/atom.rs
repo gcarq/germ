@@ -9,7 +9,7 @@ use regex::{Captures, Regex};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt::{self, Write};
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 /// Matches a category name or `*` to indicate a wildcard.
 const ATOM_WC_CAT: &str = r"(?<category>([a-zA-Z0-9_][a-zA-Z0-9_+.-]*)|\*)";
@@ -162,7 +162,7 @@ pub struct Atom {
     pub package: AtomIdent,
     pub version: Option<PackageVersion>,
     pub slot: Option<PackageSlot>,
-    pub repo: Option<String>,
+    pub repo: Option<Arc<str>>,
     pub use_deps: Option<Vec<UseFlag>>,
     pub variant: AtomVariant,
 }
@@ -231,7 +231,7 @@ impl Atom {
                 .name("slot")
                 .map(|m| m.as_str().parse())
                 .transpose()?,
-            repo: captures.name("repo").map(|m| m.as_str().to_owned()),
+            repo: captures.name("repo").map(|m| m.as_str().into()),
             use_deps: captures
                 .name("use_deps")
                 .map(|m| {
