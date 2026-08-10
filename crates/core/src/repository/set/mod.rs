@@ -5,9 +5,9 @@ mod sync;
 use self::config::RepoSetConfig;
 pub use self::error::RepoSetError;
 use self::sync::{SyncHandler, build_sync_handler};
-use super::tree::{PackageResolutionError, Repository, RepositoryError};
+use super::tree::{Repository, RepositoryError};
 use crate::deps::atom::Atom;
-use crate::package::Package;
+use crate::repository::tree::PackageResult;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::utils::Inherit;
 use anyhow::anyhow;
@@ -60,15 +60,18 @@ impl RepoSet {
         Ok(set)
     }
 
-    /// Finds and returns all packages that match the given `atom`.
+    /// Eagerly resolves and returns all packages that match the given `atom`.
     /// TODO: Order the returned packages by version
     pub fn find_packages<'r>(
         &'r self,
         atom: &Atom,
-    ) -> Result<Vec<Result<Package<'r>, PackageResolutionError>>, RepositoryError> {
+    ) -> Result<Vec<PackageResult<'r>>, RepoSetError> {
         let mut results = Vec::new();
-        for repository in self.select(atom.repo.as_deref()) {
-            results.extend(repository.find_packages(atom)?);
+        for repo in self.select(atom.repo.as_deref()) {
+            results.extend(
+                repo.find_packages(atom)
+                    .map_err(|err| RepoSetError::repo_failure(&repo.name, err))?,
+            );
         }
         Ok(results)
     }

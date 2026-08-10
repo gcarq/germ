@@ -23,11 +23,13 @@ use crate::types::FxHashSet;
 use crate::utils::Inherit;
 use anyhow::{Context, anyhow};
 use log::{debug, warn};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fmt, fs};
+
+pub use crate::repository::tree::package::PackageResult;
 
 /// Represents an available ebuild repository.
 /// See https://projects.gentoo.org/pms/8/pms.html#x1-290004.1
@@ -89,18 +91,16 @@ impl Repository {
         self.cpv_index.iter()
     }
 
-    /// Returns all known packages (including metadata) in the repository.
-    pub fn packages<'r>(
-        &'r self,
-    ) -> Result<Vec<Result<Package<'r>, PackageResolutionError>>, RepositoryError> {
+    /// Eagerly resolves and returns all known packages.
+    pub fn packages<'r>(&'r self) -> Result<Vec<PackageResult<'r>>, RepositoryError> {
         self.resolve_packages(self.cpv_index.iter())
     }
 
-    /// Finds and returns all packages that match the given [`Atom`].
+    /// Eagerly resolves all packages that match the given [`Atom`].
     pub fn find_packages<'r>(
         &'r self,
         atom: &Atom,
-    ) -> Result<Vec<Result<Package<'r>, PackageResolutionError>>, RepositoryError> {
+    ) -> Result<Vec<PackageResult<'r>>, RepositoryError> {
         self.resolve_packages(self.cpv_index.find_packages(atom))
     }
 
@@ -147,7 +147,7 @@ impl Repository {
     }
 
     /// Resolves the [`Package`] for the given [`CPV`].
-    fn resolve_package<'r>(&'r self, cpv: &'r CPV) -> Result<Package<'r>, PackageResolutionError> {
+    fn resolve_package<'r>(&'r self, cpv: &'r CPV) -> PackageResult<'r> {
         let ebuild = match Ebuild::new(cpv, self) {
             Ok(ebuild) => ebuild,
             Err(error) => {
@@ -165,36 +165,36 @@ impl Repository {
     fn resolve_packages<'r>(
         &'r self,
         cpvs: impl Iterator<Item = &'r CPV>,
-    ) -> Result<Vec<Result<Package<'r>, PackageResolutionError>>, RepositoryError> {
-        let mut resolved = Vec::with_capacity(cpvs.size_hint().0);
+    ) -> Result<Vec<PackageResult<'r>>, RepositoryError> {
+        let mut cached = Vec::with_capacity(cpvs.size_hint().0);
         let mut missing = Vec::new();
 
         for cpv in cpvs {
             match self.metadata_cache.get(cpv)? {
                 Some(metadata) => {
-                    resolved.push(Ok(Package::new(cpv, self.name.clone(), metadata)));
+                    cached.push(Ok(Package::new(cpv, self.name.clone(), metadata)));
                 }
                 None => missing.push(cpv),
             }
         }
 
-        let generated = missing
-            .par_iter()
-            .map(|&cpv| match self.resolve_package(cpv) {
-                Ok(package) => Ok(Ok(package)),
+        let resolved = missing
+            .into_par_iter()
+            .map(|cpv| match self.resolve_package(cpv) {
+                Ok(pkg) => Ok(Ok(pkg)),
                 Err(error) => error.promote().map(Err),
             })
             .collect::<Result<Vec<_>, RepositoryError>>()?;
 
         self.metadata_cache.insert_batch(
-            generated
+            resolved
                 .iter()
                 .filter_map(|result| result.as_ref().ok())
-                .map(|package| (package.cpv, &package.metadata)),
+                .map(|pkg| (pkg.cpv, &pkg.metadata)),
         )?;
 
-        resolved.extend(generated);
-        Ok(resolved)
+        cached.extend(resolved);
+        Ok(cached)
     }
 
     /// Collects all known eclasses in the repo.

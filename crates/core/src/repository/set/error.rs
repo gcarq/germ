@@ -1,7 +1,7 @@
 use super::super::tree::RepositoryError;
 use thiserror::Error;
 
-/// Defines failures while constructing or reloading a repository set.
+/// Defines failures for working with a repository set.
 #[derive(Debug, Error)]
 pub enum RepoSetError {
     #[error("repos.conf configuration failure")]
