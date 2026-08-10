@@ -49,18 +49,18 @@ pub enum EbuildError {
 /// An ebuild is associated with a package and contains the metadata and instructions
 /// how to build it. See PMS 6 and 7.
 #[derive(Debug)]
-pub struct Ebuild<'a> {
+pub struct Ebuild<'r> {
     pub path: PathBuf,
     pub eapi: Eapi,
-    pub cpv: &'a CPV,
-    pub repo: &'a Repository,
+    pub cpv: &'r CPV,
+    pub repo: &'r Repository,
 }
 
-impl<'a> Ebuild<'a> {
+impl<'r> Ebuild<'r> {
     /// Creates an [`Ebuild`] from the given `path` and [`CPV`] it relates to.
     ///
     /// Returns an [`EbuildError`] if the ebuild is malformed.
-    pub fn new(cpv: &'a CPV, repo: &'a Repository) -> Result<Self, EbuildError> {
+    pub fn new(cpv: &'r CPV, repo: &'r Repository) -> Result<Self, EbuildError> {
         let path = repo
             .location
             .join(cpv.category())

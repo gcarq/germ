@@ -49,15 +49,15 @@ fn map_invalid_args(
 }
 
 /// Manages the execution of an ebuild phase.
-pub struct EbuildPhaseHandler<'a> {
-    ebuild: &'a Ebuild<'a>,
+pub struct EbuildPhaseHandler<'r> {
+    ebuild: &'r Ebuild<'r>,
     phase: EbuildPhase,
     env: EbuildEnv,
 }
 
-impl<'a> EbuildPhaseHandler<'a> {
+impl<'r> EbuildPhaseHandler<'r> {
     /// Create a new ebuild phase handler for the given `ebuild` and `phase`.
-    pub fn new(ebuild: &'a Ebuild, phase: EbuildPhase, make_env: &MakeEnv) -> anyhow::Result<Self> {
+    pub fn new(ebuild: &'r Ebuild, phase: EbuildPhase, make_env: &MakeEnv) -> anyhow::Result<Self> {
         Ok(Self {
             env: EbuildEnv::new(ebuild, &phase, make_env)?,
             ebuild,

@@ -60,9 +60,9 @@ impl MetadataCache {
     }
 
     /// Inserts the given `entries` into the cache.
-    pub fn insert_batch<'a>(
+    pub fn insert_batch<'r>(
         &self,
-        entries: impl IntoIterator<Item = (&'a CPV, &'a PackageMetadata)>,
+        entries: impl IntoIterator<Item = (&'r CPV, &'r PackageMetadata)>,
     ) -> Result<(), CacheError> {
         let tx = self.db.begin_write().map_err(redb::Error::from)?;
         {
@@ -99,7 +99,7 @@ impl MetadataCache {
     }
 
     /// Retains only the metadata for the specified `cpvs`.
-    pub fn retain<'a>(&self, cpvs: impl IntoIterator<Item = &'a CPV>) -> Result<(), CacheError> {
+    pub fn retain<'r>(&self, cpvs: impl IntoIterator<Item = &'r CPV>) -> Result<(), CacheError> {
         let known = cpvs.into_iter().map(CPV::fqn).collect::<FxHashSet<_>>();
         let tx = self.db.begin_write().map_err(redb::Error::from)?;
         tx.open_table(METADATA_TABLE)
