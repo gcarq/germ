@@ -62,12 +62,12 @@ impl RepoSet {
 
     /// Finds and returns all packages that match the given `atom`.
     /// TODO: Order the returned packages by version
-    pub fn find_packages(
-        &mut self,
+    pub fn find_packages<'r>(
+        &'r self,
         atom: &Atom,
-    ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
+    ) -> Result<Vec<Result<Package<'r>, PackageResolutionError>>, RepositoryError> {
         let mut results = Vec::new();
-        for repository in self.select_mut(atom.repo.as_deref()) {
+        for repository in self.select(atom.repo.as_deref()) {
             results.extend(repository.find_packages(atom)?);
         }
         Ok(results)
@@ -96,6 +96,14 @@ impl RepoSet {
     }
 
     /// Returns an iterator over all repositories, or just the repository with the given `name`.
+    pub fn select(&self, name: Option<&str>) -> impl Iterator<Item = &Repository> {
+        match name {
+            Some(name) => Either::Left(self.get(name).into_iter()),
+            None => Either::Right(self.values()),
+        }
+    }
+
+    /// Returns a mutable iterator over all repositories, or just the repository with the given `name`.
     pub fn select_mut(&mut self, name: Option<&str>) -> impl Iterator<Item = &mut Repository> {
         match name {
             Some(name) => Either::Left(self.get_mut(name).into_iter()),

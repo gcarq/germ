@@ -1,16 +1,18 @@
 use crate::deps::useflag::UseFlag;
-use crate::package::Package;
+use crate::package::PackageView;
 use crate::package::cpv::CPV;
 use crate::package::metadata::PackageMetadata;
-use anyhow::{Context, Result};
-use std::ops::Deref;
+use crate::package::slot::PackageSlot;
+use anyhow::Context;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{fmt, fs};
 
-#[cfg_attr(test, derive(Default))]
 pub struct InstalledPackage {
-    package: Package,
+    pub cpv: CPV,
+    pub repo: Arc<str>,
+    pub metadata: PackageMetadata,
     pub use_flags: Vec<UseFlag>,
 }
 
@@ -18,7 +20,7 @@ impl InstalledPackage {
     /// Creates a new [`InstalledPackage`] from the given `CPV`.
     ///
     /// `path` is the path to the packages vdb directory where additional metadata can be queried.
-    pub fn new(cpv: CPV, path: &Path) -> Result<Self> {
+    pub fn new(cpv: CPV, path: &Path) -> anyhow::Result<Self> {
         let repo = fs::read_to_string(path.join("repository"))
             .with_context(|| "unable to read repo")?
             .trim()
@@ -27,26 +29,36 @@ impl InstalledPackage {
             .with_context(|| "unable to read USE flags")?
             .split_whitespace()
             .map(UseFlag::from_str)
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         let metadata =
             PackageMetadata::from_vdb_path(path).with_context(|| "unable to read metadata")?;
-        let package = Package::new(cpv, repo, metadata);
-        Ok(Self { package, use_flags })
+        Ok(Self {
+            cpv,
+            repo,
+            metadata,
+            use_flags,
+        })
+    }
+}
+
+impl PackageView for InstalledPackage {
+    fn cpv(&self) -> &CPV {
+        &self.cpv
+    }
+
+    fn repo(&self) -> &str {
+        &self.repo
+    }
+
+    fn slot(&self) -> &PackageSlot {
+        &self.metadata.slot
     }
 }
 
 impl fmt::Display for InstalledPackage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}::{}", self.package, self.package.repo)
-    }
-}
-
-impl Deref for InstalledPackage {
-    type Target = Package;
-
-    fn deref(&self) -> &Self::Target {
-        &self.package
+        write!(f, "{}::{}", self.cpv, self.repo)
     }
 }
 
@@ -57,18 +69,17 @@ mod tests {
 
     #[test]
     fn test_installed_package_fmt() {
+        let cpv = CPV::new(
+            "app-editors",
+            "vim",
+            PackageVersion::try_from("7.0.174-r1").unwrap(),
+        )
+        .unwrap();
         let pkg = InstalledPackage {
-            package: Package {
-                cpv: CPV::new(
-                    "app-editors",
-                    "vim",
-                    PackageVersion::try_from("7.0.174-r1").unwrap(),
-                )
-                .unwrap(),
-                repo: "gentoo".into(),
-                ..Default::default()
-            },
-            ..Default::default()
+            cpv,
+            repo: "gentoo".into(),
+            metadata: PackageMetadata::default(),
+            use_flags: Vec::new(),
         };
         assert_eq!(pkg.to_string(), "app-editors/vim-7.0.174-r1::gentoo");
     }

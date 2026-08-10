@@ -5,55 +5,74 @@ pub mod version;
 
 use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
+use crate::package::slot::PackageSlot;
 use metadata::PackageMetadata;
 use std::fmt;
 use std::sync::Arc;
 
+/// Provides a trait for [`Package`] and [`InstalledPackage`] used for common operations
+/// like comparison and atom matching.
+pub trait PackageView {
+    fn cpv(&self) -> &CPV;
+    fn repo(&self) -> &str;
+    fn slot(&self) -> &PackageSlot;
+
+    /// Returns the qualified name of the package in the format `category/name`.
+    fn qualified_name(&self) -> String {
+        self.cpv().qualified_name()
+    }
+
+    /// Checks if the given [`Atom`] matches.
+    fn matches_atom(&self, atom: &Atom) -> bool {
+        if let Some(repo) = atom.repo.as_deref()
+            && repo != self.repo()
+        {
+            return false;
+        }
+        if let Some(slot) = &atom.slot
+            && slot != self.slot()
+        {
+            return false;
+        }
+        self.cpv().matches_atom(atom)
+    }
+}
+
 /// Represents a package within a [`Repository`] with its category, name, version and additional
 /// metadata required to install it.
 #[derive(Debug)]
-#[cfg_attr(test, derive(Default))]
-pub struct Package {
-    pub cpv: CPV,
+pub struct Package<'r> {
+    pub cpv: &'r CPV,
     pub repo: Arc<str>,
     pub metadata: PackageMetadata,
 }
 
-impl Package {
+impl<'r> Package<'r> {
     /// Creates a new [`Package`] from the given `cpv`, `repo` and `metadata`.
-    ///
-    /// Returns `Err` if `category` or `name` are invalid according to PMS 3.1.1 and 3.1.2.
-    pub const fn new(cpv: CPV, repo: Arc<str>, metadata: PackageMetadata) -> Self {
+    pub const fn new(cpv: &'r CPV, repo: Arc<str>, metadata: PackageMetadata) -> Self {
         Self {
             cpv,
             repo,
             metadata,
         }
     }
+}
 
-    /// Checks if the given [`Atom`] matches this package.
-    pub fn matches_atom(&self, atom: &Atom) -> bool {
-        if let Some(repo_name) = &atom.repo
-            && repo_name != &self.repo
-        {
-            return false;
-        }
-        if let Some(slot) = &atom.slot
-            && slot != &self.metadata.slot
-        {
-            return false;
-        }
-        self.cpv.matches_atom(atom)
+impl<'r> PackageView for Package<'r> {
+    fn cpv(&self) -> &CPV {
+        self.cpv
     }
 
-    /// Returns the qualified name of the package in the format `category/name`
-    /// e.g. `app-editors/vim`.
-    pub fn qualified_name(&self) -> String {
-        self.cpv.qualified_name()
+    fn repo(&self) -> &str {
+        &self.repo
+    }
+
+    fn slot(&self) -> &PackageSlot {
+        &self.metadata.slot
     }
 }
 
-impl fmt::Display for Package {
+impl<'r> fmt::Display for Package<'r> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.cpv)
     }
@@ -62,41 +81,24 @@ impl fmt::Display for Package {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::package::slot::PackageSlot;
+    use crate::deps::useflag::UseFlag;
     use crate::package::version::PackageVersion;
+    use crate::vdb::package::InstalledPackage;
 
-    #[test]
-    fn test_pkg_matches_atom_true() {
-        let atoms = vec![
+    fn assert_package_view_matches_atoms<P: PackageView>(package: &P) {
+        for atom in [
             "sys-devel/gcc",
             "sys-devel/gcc::gentoo",
             "=sys-devel/gcc-15*",
             "sys-devel/gcc:15",
             "sys-devel/gcc:15=",
             "sys-devel/gcc:*",
-        ];
-        let pkg = Package {
-            cpv: CPV::new(
-                "sys-devel",
-                "gcc",
-                PackageVersion::try_from("15.2.1_p20251122-r1").unwrap(),
-            )
-            .unwrap(),
-            repo: "gentoo".into(),
-            metadata: PackageMetadata {
-                slot: PackageSlot::Eq("15".into()),
-                ..Default::default()
-            },
-        };
-        for atom in atoms {
+        ] {
             let atom = Atom::new(atom).unwrap();
-            assert!(pkg.matches_atom(&atom), "{atom} should match {pkg}");
+            assert!(package.matches_atom(&atom), "{atom} should match");
         }
-    }
 
-    #[test]
-    fn test_pkg_matches_atom_false() {
-        let atoms = vec![
+        for atom in [
             "sys-devel/gcc::local",
             "sys-devel/binutils",
             "virtual/gcc",
@@ -104,8 +106,35 @@ mod tests {
             "sys-devel/gcc:14",
             "sys-devel/gcc:14=",
             "sys-devel/gcc:15/0",
-        ];
-        let pkg = Package {
+        ] {
+            let atom = Atom::new(atom).unwrap();
+            assert!(!package.matches_atom(&atom), "{atom} shouldn't match");
+        }
+    }
+
+    #[test]
+    fn test_package_view_matches_repository_package() {
+        let cpv = CPV::new(
+            "sys-devel",
+            "gcc",
+            PackageVersion::try_from("15.2.1_p20251122-r1").unwrap(),
+        )
+        .unwrap();
+        let package = Package::new(
+            &cpv,
+            "gentoo".into(),
+            PackageMetadata {
+                slot: PackageSlot::Eq("15".into()),
+                ..Default::default()
+            },
+        );
+        assert_package_view_matches_atoms(&package);
+        assert_eq!(package.qualified_name(), "sys-devel/gcc");
+    }
+
+    #[test]
+    fn test_package_view_matches_installed_package() {
+        let package = InstalledPackage {
             cpv: CPV::new(
                 "sys-devel",
                 "gcc",
@@ -117,25 +146,21 @@ mod tests {
                 slot: PackageSlot::Eq("15".into()),
                 ..Default::default()
             },
+            use_flags: Vec::<UseFlag>::new(),
         };
-        for atom in atoms {
-            let atom = Atom::new(atom).unwrap();
-            assert!(!pkg.matches_atom(&atom), "{atom} shouldn't match {pkg}");
-        }
+        assert_package_view_matches_atoms(&package);
+        assert_eq!(package.qualified_name(), "sys-devel/gcc");
     }
 
     #[test]
     fn test_package_fmt() {
-        let package = Package {
-            cpv: CPV::new(
-                "app-editors",
-                "vim",
-                PackageVersion::try_from("7.0.174-r1").unwrap(),
-            )
-            .unwrap(),
-            ..Default::default()
-        };
+        let cpv = CPV::new(
+            "app-editors",
+            "vim",
+            PackageVersion::try_from("7.0.174-r1").unwrap(),
+        )
+        .unwrap();
+        let package = Package::new(&cpv, "gentoo".into(), PackageMetadata::default());
         assert_eq!(package.to_string(), "app-editors/vim-7.0.174-r1");
-        assert_eq!(package.qualified_name(), "app-editors/vim");
     }
 }

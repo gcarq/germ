@@ -90,17 +90,17 @@ impl Repository {
     }
 
     /// Returns all known packages (including metadata) in the repository.
-    pub fn packages(
-        &mut self,
-    ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
+    pub fn packages<'r>(
+        &'r self,
+    ) -> Result<Vec<Result<Package<'r>, PackageResolutionError>>, RepositoryError> {
         self.resolve_packages(self.cpv_index.iter())
     }
 
     /// Finds and returns all packages that match the given [`Atom`].
-    pub fn find_packages(
-        &mut self,
+    pub fn find_packages<'r>(
+        &'r self,
         atom: &Atom,
-    ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
+    ) -> Result<Vec<Result<Package<'r>, PackageResolutionError>>, RepositoryError> {
         self.resolve_packages(self.cpv_index.find_packages(atom))
     }
 
@@ -147,7 +147,7 @@ impl Repository {
     }
 
     /// Resolves the [`Package`] for the given [`CPV`].
-    fn resolve_package(&self, cpv: &CPV) -> Result<Package, PackageResolutionError> {
+    fn resolve_package<'r>(&'r self, cpv: &'r CPV) -> Result<Package<'r>, PackageResolutionError> {
         let ebuild = match Ebuild::new(cpv, self) {
             Ok(ebuild) => ebuild,
             Err(error) => {
@@ -156,23 +156,23 @@ impl Repository {
         };
 
         match ebuild.generate_metadata() {
-            Ok(metadata) => Ok(Package::new(cpv.clone(), self.name.clone(), metadata)),
+            Ok(metadata) => Ok(Package::new(cpv, self.name.clone(), metadata)),
             Err(source) => Err(PackageResolutionError::new(cpv.fqn(), source)),
         }
     }
 
     /// Builds the [`Package`] index for the given `cpvs`.
-    fn resolve_packages<'a>(
-        &self,
-        cpvs: impl Iterator<Item = &'a CPV>,
-    ) -> Result<Vec<Result<Package, PackageResolutionError>>, RepositoryError> {
+    fn resolve_packages<'r>(
+        &'r self,
+        cpvs: impl Iterator<Item = &'r CPV>,
+    ) -> Result<Vec<Result<Package<'r>, PackageResolutionError>>, RepositoryError> {
         let mut resolved = Vec::with_capacity(cpvs.size_hint().0);
         let mut missing = Vec::new();
 
         for cpv in cpvs {
             match self.metadata_cache.get(cpv)? {
                 Some(metadata) => {
-                    resolved.push(Ok(Package::new(cpv.clone(), self.name.clone(), metadata)));
+                    resolved.push(Ok(Package::new(cpv, self.name.clone(), metadata)));
                 }
                 None => missing.push(cpv),
             }
@@ -180,7 +180,7 @@ impl Repository {
 
         let generated = missing
             .par_iter()
-            .map(|cpv| match self.resolve_package(cpv) {
+            .map(|&cpv| match self.resolve_package(cpv) {
                 Ok(package) => Ok(Ok(package)),
                 Err(error) => error.promote().map(Err),
             })
@@ -190,7 +190,7 @@ impl Repository {
             generated
                 .iter()
                 .filter_map(|result| result.as_ref().ok())
-                .map(|package| (&package.cpv, &package.metadata)),
+                .map(|package| (package.cpv, &package.metadata)),
         )?;
 
         resolved.extend(generated);

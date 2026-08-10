@@ -1,11 +1,11 @@
 pub mod package;
 
 use crate::deps::atom::Atom;
-use crate::package::cpv::CPV;
 use crate::package::version::PackageVersion;
+use crate::package::{PackageView, cpv::CPV};
 use crate::regex::PV_REV;
 use crate::vdb::package::InstalledPackage;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ pub struct Vdb {
 
 impl Vdb {
     /// Collects and builds VDB from the given `path`.
-    pub fn from_path(path: PathBuf) -> Result<Self> {
+    pub fn from_path(path: PathBuf) -> anyhow::Result<Self> {
         let packages = Self::collect_packages(&path)?;
         Ok(Self { packages })
     }
@@ -35,7 +35,7 @@ impl Vdb {
     }
 
     /// Collects all packages from the given VDB `path`.
-    fn collect_packages(path: &Path) -> Result<Vec<InstalledPackage>> {
+    fn collect_packages(path: &Path) -> anyhow::Result<Vec<InstalledPackage>> {
         let paths = WalkDir::new(path)
             .min_depth(2)
             .max_depth(2)
@@ -45,12 +45,12 @@ impl Vdb {
                 Ok(entry) => Ok(entry.into_path()),
                 Err(e) => bail!("unable to read category in '{}': {e}", path.display()),
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         let packages = paths
             .par_iter()
             .filter_map(|p| Self::package_from_path(p).transpose())
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(packages)
     }
 
@@ -59,7 +59,7 @@ impl Vdb {
     /// Returns `Ok(None)` if the path hasn't the correct syntax,
     ///   e.g. a package has an incomplete merge, indicated by the `-MERGING-` prefix.
     /// Returns `Err` if the path or metadata can't be read.
-    fn package_from_path(path: &Path) -> Result<Option<InstalledPackage>> {
+    fn package_from_path(path: &Path) -> anyhow::Result<Option<InstalledPackage>> {
         let pvr = path
             .file_name()
             .and_then(|f| f.to_str())

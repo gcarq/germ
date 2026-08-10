@@ -3,7 +3,7 @@ use crate::deps::useflag::UseFlag;
 use crate::files::UseEntries;
 use crate::files::entry::Entry;
 use crate::files::pkguse::{EntryUseFlags, PackageUseEntries};
-use crate::package::Package;
+use crate::package::PackageView;
 use crate::profile::Profile;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::utils::Inherit;
@@ -87,8 +87,8 @@ impl UseMasks {
         self.use_mask.contains(flag) || self.use_stable_mask.contains(flag)
     }
 
-    /// Checks if the given [`UseFlag`] is masked for the given [`Package`].
-    pub fn is_masked_for_pkg(&self, pkg: &Package, flag: &UseFlag) -> bool {
+    /// Checks if the given [`UseFlag`] is masked for the given [`PackageView`].
+    pub fn is_masked_for_pkg<P: PackageView>(&self, pkg: &P, flag: &UseFlag) -> bool {
         if self.is_masked(flag) {
             return true;
         }
@@ -107,8 +107,8 @@ impl UseMasks {
         self.use_force.contains(flag) || self.use_stable_force.contains(flag)
     }
 
-    /// Checks if the given [`UseFlag`] is forced for the given [`Package`].
-    pub fn is_forced_for_pkg(&self, pkg: &Package, flag: &UseFlag) -> bool {
+    /// Checks if the given [`UseFlag`] is forced for the given [`PackageView`].
+    pub fn is_forced_for_pkg<P: PackageView>(&self, pkg: &P, flag: &UseFlag) -> bool {
         if self.is_forced(flag) {
             return true;
         }
@@ -125,8 +125,8 @@ impl UseMasks {
     }
 
     /// Returns the match with the highest precedence from the given `map`.
-    fn find_pkguse_match<'a>(
-        pkg: &Package,
+    fn find_pkguse_match<'a, P: PackageView>(
+        pkg: &P,
         flag: &UseFlag,
         map: &'a FxHashMap<Atom, EntryUseFlags>,
     ) -> Option<&'a Entry<UseFlag>> {

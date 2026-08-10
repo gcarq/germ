@@ -2,7 +2,7 @@ pub mod useflag;
 
 use crate::deps::atom::Atom;
 use crate::files::{PackageEntries, entry::Entry};
-use crate::package::Package;
+use crate::package::PackageView;
 use crate::profile::Profile;
 use crate::repository::RepoSet;
 use crate::types::FxHashMap;
@@ -51,7 +51,7 @@ impl PackageMasks {
     }
 
     /// Checks if the given `package` is masked.
-    pub fn is_masked(&self, pkg: &Package) -> bool {
+    pub fn is_masked<P: PackageView>(&self, pkg: &P) -> bool {
         match Self::find_match(pkg, &self.mask) {
             Some(mask) => match Self::find_match(pkg, &self.unmask) {
                 Some(unmask) => match mask.prec.cmp(&unmask.prec) {
@@ -65,8 +65,8 @@ impl PackageMasks {
     }
 
     /// Returns the match with the highest precedence from the given `map`.
-    fn find_match<'a>(
-        pkg: &Package,
+    fn find_match<'a, P: PackageView>(
+        pkg: &P,
         map: &'a FxHashMap<Box<str>, Vec<Entry<Atom>>>,
     ) -> Option<&'a Entry<Atom>> {
         let atoms = map.get(&*pkg.qualified_name())?;
@@ -90,7 +90,9 @@ impl PackageMasks {
 mod tests {
     use super::*;
     use crate::files::entry::Precedence;
+    use crate::package::Package;
     use crate::package::cpv::CPV;
+    use crate::package::metadata::PackageMetadata;
     use crate::package::version::PackageVersion;
 
     #[test]
@@ -103,48 +105,40 @@ mod tests {
         let repo_set = RepoSet::default();
         let manager = PackageMasks::new(&repo_set, &Profile::default(), mask_lines, unmask_lines);
 
-        let pkg1 = Package {
-            cpv: CPV::new(
-                "dev-lang",
-                "rust",
-                PackageVersion::try_from("1.50-r2").unwrap(),
-            )
-            .unwrap(),
-            ..Default::default()
-        };
+        let cpv1 = CPV::new(
+            "dev-lang",
+            "rust",
+            PackageVersion::try_from("1.50-r2").unwrap(),
+        )
+        .unwrap();
+        let pkg1 = Package::new(&cpv1, "gentoo".into(), PackageMetadata::default());
         assert!(!manager.is_masked(&pkg1), "{pkg1} should not be masked");
 
-        let pkg2 = Package {
-            cpv: CPV::new(
-                "dev-lang",
-                "rust",
-                PackageVersion::try_from("1.60-r1").unwrap(),
-            )
-            .unwrap(),
-            ..Default::default()
-        };
+        let cpv2 = CPV::new(
+            "dev-lang",
+            "rust",
+            PackageVersion::try_from("1.60-r1").unwrap(),
+        )
+        .unwrap();
+        let pkg2 = Package::new(&cpv2, "gentoo".into(), PackageMetadata::default());
         assert!(manager.is_masked(&pkg2), "{pkg2} should be masked");
 
-        let pkg3 = Package {
-            cpv: CPV::new(
-                "app-editors",
-                "vim",
-                PackageVersion::try_from("8.2").unwrap(),
-            )
-            .unwrap(),
-            ..Default::default()
-        };
+        let cpv3 = CPV::new(
+            "app-editors",
+            "vim",
+            PackageVersion::try_from("8.2").unwrap(),
+        )
+        .unwrap();
+        let pkg3 = Package::new(&cpv3, "gentoo".into(), PackageMetadata::default());
         assert!(manager.is_masked(&pkg3), "{pkg3} should be masked");
 
-        let pkg4 = Package {
-            cpv: CPV::new(
-                "app-editors",
-                "nano",
-                PackageVersion::try_from("5.0").unwrap(),
-            )
-            .unwrap(),
-            ..Default::default()
-        };
+        let cpv4 = CPV::new(
+            "app-editors",
+            "nano",
+            PackageVersion::try_from("5.0").unwrap(),
+        )
+        .unwrap();
+        let pkg4 = Package::new(&cpv4, "gentoo".into(), PackageMetadata::default());
         assert!(!manager.is_masked(&pkg4), "{pkg4} should not be masked");
     }
 }
