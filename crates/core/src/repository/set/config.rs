@@ -73,13 +73,13 @@ pub struct RepositoryConfig {
     // Defines parent repositories from repos.conf, if explicitly configured
     pub masters: Option<Vec<String>>,
     // Holds all raw properties from the repository section in repos.conf for potential future use
-    pub(super) raw_properties: FxHashMap<String, String>,
+    pub raw_properties: FxHashMap<String, String>,
 }
 
 impl RepositoryConfig {
     /// Builds a [`RepositoryConfig`] from the given `repo_name` and INI `properties`
     /// from repos.conf.
-    pub fn new(
+    fn new(
         repo_name: &str,
         properties: FxHashMap<String, String>,
     ) -> anyhow::Result<RepositoryConfig> {

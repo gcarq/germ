@@ -10,9 +10,9 @@ use std::process::{Command, Output, Stdio};
 pub struct GitSyncHandler {
     config: SyncConfig,
     // If set to 0, the depth is unlimited. Defaults to 1.
-    pub clone_depth: usize,
+    clone_depth: usize,
     // If set to 0, the depth is unlimited. Defaults to 1.
-    pub sync_depth: usize,
+    sync_depth: usize,
 }
 
 /// Helper function to create a non-interactive git `Command`

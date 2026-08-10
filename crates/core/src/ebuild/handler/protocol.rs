@@ -24,10 +24,10 @@ use thiserror::Error;
 const FIELD_DELIMITER: char = '\0';
 
 /// Frame delimiter for messages from the ebuild process.
-pub(super) const EBUILD_MESSAGE_DELIMITER: u8 = 0x04;
+pub const EBUILD_MESSAGE_DELIMITER: u8 = 0x04;
 
 /// Frame delimiter for messages sent to the ebuild process.
-pub(super) const FUNCTION_REPLY_DELIMITER: &[u8] = b"\n";
+pub const FUNCTION_REPLY_DELIMITER: &[u8] = b"\n";
 
 /// Errors caused by invalid ebuild IPC messages.
 #[derive(Error, Debug)]
@@ -103,7 +103,7 @@ pub struct FuncCall {
 }
 
 impl FuncCall {
-    pub(super) fn from_raw(func: &str, args: &[&str]) -> Result<Self, ProtocolError> {
+    pub fn from_raw(func: &str, args: &[&str]) -> Result<Self, ProtocolError> {
         let func = FuncType::from_str(func)?;
         let args = args.iter().map(ToString::to_string).collect();
         Ok(Self { func, args })

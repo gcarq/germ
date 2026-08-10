@@ -123,50 +123,34 @@ impl EbuildExecution {
         drop(self.ipc.take());
     }
 
-    /// Completes the execution by waiting for natural termination and
-    /// verifying that the process group is empty.
+    /// Completes the execution by waiting for termination and cleaning up its process group.
     async fn complete(&mut self) -> Result<(), PhaseExecutionError> {
         self.natural_exit_or_escalate().await?;
 
         let status = self
             .exit_status
             .ok_or_else(|| anyhow::anyhow!("ebuild process was not reaped"))?;
-        let cleanup = self.verify_group_empty().await;
-        if !status.success() {
-            if let Err(err) = cleanup {
-                warn!("unable to clean up failed ebuild execution: {err:#}");
-            }
-            return Err(PhaseExecutionError::NonZeroExit(status));
+        if status.success() {
+            Ok(())
+        } else {
+            Err(PhaseExecutionError::NonZeroExit(status))
         }
-        cleanup?;
-        Ok(())
-    }
-
-    /// Verifies the process group is empty, killing any remaining processes if needed.
-    async fn verify_group_empty(&mut self) -> anyhow::Result<()> {
-        if self.exit_status.is_none() {
-            bail!("ebuild process must be reaped before verifying its process group");
-        }
-        if process_group_exists(self.process_group)? {
-            self.kill_group_and_wait().await?;
-        }
-
-        self.finalized = true;
-        Ok(())
     }
 
     /// Allows the process to exit naturally before escalating cleanup.
     async fn natural_exit_or_escalate(&mut self) -> anyhow::Result<()> {
-        if self
-            .wait_for(NATURAL_EXIT_PERIOD, true)
-            .await?
-            .is_complete()
-        {
-            self.finalized = true;
-            return Ok(());
-        }
+        let status = match tokio::time::timeout(NATURAL_EXIT_PERIOD, self.child.wait()).await {
+            Ok(status) => status.with_context(|| "unable to wait for ebuild process")?,
+            Err(_) => return self.escalate().await,
+        };
+        self.exit_status = Some(status);
 
-        self.escalate().await
+        if process_group_exists(self.process_group)? {
+            self.kill_group_and_wait().await
+        } else {
+            self.finalized = true;
+            Ok(())
+        }
     }
 
     /// Stops the process with SIGTERM, then uses SIGKILL if it doesn't exit.

@@ -1,16 +1,18 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
-use germ_core::conf::PortageConf;
-use germ_core::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
+use germ_core::SysConf;
+use germ_core::conf::portage::PortageConf;
 use germ_core::deps::atom::Atom;
 use germ_core::repository::RepoSet;
 use germ_core::vdb::{Vdb, package::InstalledPackage};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 /// Prints system- and package information for all packages matching the given `Atom`.
-pub fn info(atom: Option<&Atom>, repo_set: &RepoSet) -> Result<()> {
-    let conf = PortageConf::new(Path::new(DEFAULT_USE_PORTAGE_CONF_PATH), repo_set)?;
+pub fn info(atom: Option<&Atom>, sysconf: Arc<SysConf>) -> Result<()> {
+    let repo_set = RepoSet::new(sysconf.clone()).with_context(|| "unable to build repo set")?;
+    let conf = PortageConf::new(&repo_set, &sysconf)?;
 
     println!("Repositories:");
     for repo in repo_set.values() {

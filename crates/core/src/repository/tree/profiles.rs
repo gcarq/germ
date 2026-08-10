@@ -39,13 +39,13 @@ pub struct ProfileDescription {
     pub keyword: String,
     pub profile_path: String,
     #[allow(unused)]
-    pub stability: String,
+    stability: String,
 }
 
 impl ProfileDescription {
     /// Parses a profile description from a single line.
     /// The line must consist of `<keyword> <profile_path> <stability>` otherwise an Err is returned.
-    pub fn from_line(line: &str) -> Result<Self, ProfileError> {
+    fn from_line(line: &str) -> Result<Self, ProfileError> {
         let parts = line.split_ascii_whitespace().collect::<Vec<_>>();
         match parts.as_slice() {
             [keyword, profile_path, stability] => Ok(Self {

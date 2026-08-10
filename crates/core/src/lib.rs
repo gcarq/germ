@@ -11,6 +11,7 @@ pub mod package;
 mod profile;
 mod regex;
 pub mod repository;
+pub use conf::system::SysConf;
 mod types;
 mod utils;
 pub mod vdb;

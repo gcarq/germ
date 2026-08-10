@@ -8,6 +8,7 @@ use std::{
 use anyhow::{Context, bail};
 
 use super::{RepoSet, Repository};
+use crate::SysConf;
 use crate::types::FxHashSet;
 
 /// Owns a temporary directory together with a value that depends on it.
@@ -244,7 +245,7 @@ impl RepoBuilder {
 
         self.write_to(&location)
             .with_context(|| format!("failed to write repository '{repo_name}'"))?;
-        let repository = Repository::load(&repo_name, &location)?;
+        let repository = Repository::load(&repo_name, &location, SysConf::default().into())?;
         Ok(Temp::new(repository, temp_dir))
     }
 }
@@ -263,7 +264,7 @@ pub fn repo_set(repos: impl IntoIterator<Item = RepoBuilder>) -> anyhow::Result<
             bail!("tried to insert duplicate repository {name}");
         }
 
-        let location = temp.path().join(&name);
+        let location = temp.path().join("repositories").join(&name);
         conf.push_str(&format!("[{name}]\nlocation = {}\n", location.display()));
         for (key, value) in &repo.repos_conf {
             conf.push_str(&format!("{key} = {value}\n"));
@@ -274,9 +275,10 @@ pub fn repo_set(repos: impl IntoIterator<Item = RepoBuilder>) -> anyhow::Result<
             .with_context(|| format!("failed to write repository '{name}'"))?;
     }
 
-    let repos_conf = temp.path().join("repos.conf");
-    write_file(&repos_conf, conf).context("failed to write repos.conf")?;
-    let repo_set = RepoSet::new(&repos_conf)?;
+    let sysconf = SysConf::new(temp.path().to_path_buf());
+    let repos_conf = sysconf.portage_conf().join("repos.conf");
+    write_file(repos_conf, conf).context("failed to write repos.conf")?;
+    let repo_set = RepoSet::new(sysconf.into())?;
 
     Ok(Temp::new(repo_set, temp))
 }

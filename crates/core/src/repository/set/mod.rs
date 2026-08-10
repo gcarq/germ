@@ -6,14 +6,19 @@ use self::config::RepoSetConfig;
 pub use self::error::RepoSetError;
 use self::sync::{SyncHandler, build_sync_handler};
 use super::tree::{Repository, RepositoryError};
+use crate::SysConf;
 use crate::deps::atom::Atom;
+use crate::files::PackageEntries;
+use crate::profile::Profile;
 use crate::repository::tree::PackageResult;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::utils::Inherit;
 use anyhow::anyhow;
 use either::Either;
 use log::{debug, error, info, warn};
-use std::{fs, io, path::Path};
+use std::path::Path;
+use std::sync::Arc;
+use std::{fs, io};
 
 /// Resolves and handles all available [`Repository`] instances.
 ///
@@ -21,8 +26,16 @@ use std::{fs, io, path::Path};
 /// See <https://dev.gentoo.org/~zmedico/portage/doc/man/portage.5.html>
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct RepoSet {
+    sysconf: Arc<SysConf>,
     config: RepoSetConfig,
     entries: FxHashMap<String, RepositoryEntry>,
+}
+
+/// Holds repository package masks aggregated from all available repositories.
+#[derive(Default)]
+pub struct RepoPackageMasks {
+    pub mask: PackageEntries,
+    pub unmask: PackageEntries,
 }
 
 /// Holds the result and sync handler of a configured repository.
@@ -44,16 +57,19 @@ impl RepositoryEntry {
 }
 
 impl RepoSet {
-    /// Builds a [`RepoSet`] from the repos.conf configuration from the given `location`.
-    pub fn new(location: &Path) -> Result<Self, RepoSetError> {
-        let config = RepoSetConfig::load(location).map_err(|error| {
+    /// Builds a [`RepoSet`] with the given runtime system configuration.
+    pub fn new(sysconf: Arc<SysConf>) -> Result<Self, RepoSetError> {
+        let repos_conf = sysconf.portage_conf().join("repos.conf");
+        let config = RepoSetConfig::load(&repos_conf).map_err(|error| {
             RepoSetError::Configuration(error.context(format!(
                 "unable to load repository configuration from {}",
-                location.display()
+                repos_conf.display()
             )))
         })?;
+
         let mut set = Self {
             config,
+            sysconf,
             entries: FxHashMap::default(),
         };
         set.reload_from_disk()?;
@@ -144,8 +160,51 @@ impl RepoSet {
         self.len() == 0
     }
 
+    /// Resolves a profile using the available repositories.
+    pub fn resolve_profile(&self, location: &Path) -> anyhow::Result<Profile> {
+        Profile::resolve(location, self)
+    }
+
+    /// Validates that at least one available repository supports the given architecture.
+    pub fn validate_arch(&self, arch: &str) -> anyhow::Result<()> {
+        for repository in self.values() {
+            if repository.arch_list.supports(arch) {
+                return Ok(());
+            }
+        }
+        anyhow::bail!("ARCH value '{arch}' is not supported by any configured repository")
+    }
+
+    /// Validates that a profile is described by at least one available repository for `arch`.
+    pub fn validate_profile(&self, profile: &Profile, arch: &str) -> anyhow::Result<()> {
+        for repo in self.values() {
+            let profile_prefix = format!("{}/profiles/", repo.location.display());
+            if let Some(profile_path) = profile
+                .location
+                .display()
+                .to_string()
+                .strip_prefix(&profile_prefix)
+                && repo.is_known_profile(arch, profile_path)
+            {
+                return Ok(());
+            }
+        }
+        anyhow::bail!("Profile {profile} is not valid for any configured repository")
+    }
+
+    /// Aggregates package masks and unmasks from all available repositories.
+    pub fn package_masks(&self) -> RepoPackageMasks {
+        let mut mask = PackageEntries::default();
+        let mut unmask = PackageEntries::default();
+        for repository in self.values() {
+            mask.inherit_from(&repository.package_mask);
+            unmask.inherit_from(&repository.package_unmask);
+        }
+        RepoPackageMasks { mask, unmask }
+    }
+
     /// Reloads all repository data from disk.
-    pub(crate) fn reload_from_disk(&mut self) -> Result<(), RepoSetError> {
+    fn reload_from_disk(&mut self) -> Result<(), RepoSetError> {
         let mut entries = FxHashMap::default();
         for config in self.config.iter() {
             let sync_handler = build_sync_handler(&config.raw_properties).map_err(|error| {
@@ -166,8 +225,9 @@ impl RepoSet {
 
         let mut pending = FxHashMap::default();
         for config in self.config.iter() {
+            let sysconf = self.sysconf.clone();
             match fs::metadata(&config.location) {
-                Ok(_) => match Repository::load(&config.name, &config.location) {
+                Ok(_) => match Repository::load(&config.name, &config.location, sysconf) {
                     Ok(repository) => {
                         pending.insert(config.name.clone(), repository);
                     }
@@ -316,6 +376,66 @@ impl RepoSet {
 mod tests {
     use super::super::test_support::{RepoBuilder, repo_set};
     use super::*;
+    use crate::files::entry::Precedence;
+    use crate::profile::Profile;
+
+    #[test]
+    fn test_resolve_profile() -> anyhow::Result<()> {
+        let fixture = repo_set([RepoBuilder::new("repo").profile("default/linux")])?;
+        let location = fixture
+            .get("repo")
+            .unwrap()
+            .location
+            .join("profiles/default/linux");
+
+        let profile = fixture.resolve_profile(&location)?;
+
+        assert_eq!(profile.location, location.canonicalize()?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_arch() -> anyhow::Result<()> {
+        let fixture = repo_set([RepoBuilder::new("repo")])?;
+
+        assert!(fixture.validate_arch("amd64").is_ok());
+        assert!(fixture.validate_arch("arm64").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_profile() -> anyhow::Result<()> {
+        let fixture = repo_set([RepoBuilder::new("repo")
+            .profile("default/linux")
+            .profile("other")])?;
+        let repository = fixture.get("repo").unwrap();
+        let valid = Profile::resolve(
+            &repository.location.join("profiles/default/linux"),
+            &fixture,
+        )?;
+        let invalid = Profile::resolve(&repository.location.join("profiles/other"), &fixture)?;
+
+        assert!(fixture.validate_profile(&valid, "amd64").is_ok());
+        assert!(fixture.validate_profile(&invalid, "amd64").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_package_masks() -> anyhow::Result<()> {
+        let fixture = repo_set([RepoBuilder::new("repo")
+            .profile_file("package.mask", "dev-lang/rust")
+            .profile_file("package.unmask", "app-editors/vim")])?;
+
+        let policy = fixture.package_masks();
+        let mask = policy.mask.iter().next().expect("repository mask");
+        let unmask = policy.unmask.iter().next().expect("repository unmask");
+
+        assert_eq!(mask.to_string(), "dev-lang/rust");
+        assert_eq!(mask.prec, Precedence::Repository);
+        assert_eq!(unmask.to_string(), "app-editors/vim");
+        assert_eq!(unmask.prec, Precedence::Repository);
+        Ok(())
+    }
 
     #[test]
     fn test_repository_data_failure() {
@@ -341,13 +461,15 @@ mod tests {
         let temp = tempfile::Builder::new().tempdir().unwrap();
         let location = temp.path().join("repository");
         RepoBuilder::new("repo").write_to(&location).unwrap();
-        let config = temp.path().join("repos.conf");
+        let sysconf = SysConf::new(temp.path().to_path_buf());
+        fs::create_dir_all(sysconf.portage_conf()).unwrap();
+        let config = sysconf.portage_conf().join("repos.conf");
         fs::write(
             &config,
             format!("[repo]\nlocation = {}\n", location.display()),
         )
         .unwrap();
-        let mut set = RepoSet::new(&config).unwrap();
+        let mut set = RepoSet::new(sysconf.into()).unwrap();
         fs::remove_dir_all(&location).unwrap();
         set.reload_from_disk().unwrap();
 
@@ -368,7 +490,9 @@ mod tests {
     #[test]
     fn test_missing_repository() {
         let temp = tempfile::Builder::new().tempdir().unwrap();
-        let config = temp.path().join("repos.conf");
+        let sysconf = SysConf::new(temp.path().to_path_buf());
+        fs::create_dir_all(sysconf.portage_conf()).unwrap();
+        let config = sysconf.portage_conf().join("repos.conf");
         fs::write(
             &config,
             format!(
@@ -378,7 +502,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = RepoSet::new(&config).unwrap_err();
+        let error = RepoSet::new(sysconf.into()).unwrap_err();
 
         assert!(matches!(error, RepoSetError::Configuration(_)));
     }

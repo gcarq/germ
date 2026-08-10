@@ -1,43 +1,63 @@
 pub mod useflag;
 
 use crate::deps::atom::Atom;
+use crate::files::entry::Precedence;
 use crate::files::{PackageEntries, entry::Entry};
 use crate::package::PackageView;
 use crate::profile::Profile;
-use crate::repository::RepoSet;
+use crate::repository::RepoPackageMasks;
 use crate::types::FxHashMap;
 use crate::utils::Inherit;
 
 use log::debug;
 use std::cmp::Ordering;
+use std::path::Path;
+
+/// Holds user defined package masks and unmasks,
+/// usually read from `/etc/portage/package.mask`
+/// and `/etc/portage/package.unmask`.
+#[derive(Default)]
+pub struct UserPackageMasks {
+    mask: PackageEntries,
+    unmask: PackageEntries,
+}
+
+impl UserPackageMasks {
+    /// Builds [`UserPackageMasks`] from the given portage conf `path`.
+    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
+        Ok(Self {
+            mask: PackageEntries::from_path(&path.join("package.mask"), Precedence::User, true)?,
+            unmask: PackageEntries::from_path(
+                &path.join("package.unmask"),
+                Precedence::User,
+                true,
+            )?,
+        })
+    }
+}
 
 /// Holds all package masks and should be used as the single source of truth  when checking
 /// if a package is masked. Masks and unmasks are stored in a `HashMap` that maps the
 /// qualified package name to a vector of [`Atom`].
 pub struct PackageMasks {
-    pub mask: FxHashMap<Box<str>, Vec<Entry<Atom>>>,
-    pub unmask: FxHashMap<Box<str>, Vec<Entry<Atom>>>,
+    mask: FxHashMap<Box<str>, Vec<Entry<Atom>>>,
+    unmask: FxHashMap<Box<str>, Vec<Entry<Atom>>>,
 }
 
 impl PackageMasks {
-    /// Builds a [`PackageMasks`] by aggregating package masks and unmasks in the following order:
+    /// Builds a [`PackageMasks`] from repository, profile, and user definitions.
+    ///
+    /// Definitions are merged in the following order:
     /// 1. Repository
     /// 2. Profile
     /// 3. User defined
-    pub fn new(
-        repo_set: &RepoSet,
-        profile: &Profile,
-        user_mask: PackageEntries,
-        user_unmask: PackageEntries,
-    ) -> Self {
+    pub fn new(repository: RepoPackageMasks, profile: &Profile, user: UserPackageMasks) -> Self {
         let mut mask = PackageEntries::default().inherit(&profile.package_mask);
         let mut unmask = PackageEntries::default().inherit(&profile.package_unmask);
-        for repo in repo_set.values() {
-            mask.inherit_from(&repo.package_mask);
-            unmask.inherit_from(&repo.package_unmask);
-        }
-        mask.inherit_from(&user_mask);
-        unmask.inherit_from(&user_unmask);
+        mask.inherit_from(&repository.mask);
+        unmask.inherit_from(&repository.unmask);
+        mask.inherit_from(&user.mask);
+        unmask.inherit_from(&user.unmask);
 
         let mask = Self::map_from_entries(mask);
         let unmask = Self::map_from_entries(unmask);
@@ -102,8 +122,14 @@ mod tests {
                 .unwrap();
         let unmask_lines =
             PackageEntries::from_string("=dev-lang/rust-1.50*".into(), Precedence::User).unwrap();
-        let repo_set = RepoSet::default();
-        let manager = PackageMasks::new(&repo_set, &Profile::default(), mask_lines, unmask_lines);
+        let manager = PackageMasks::new(
+            RepoPackageMasks::default(),
+            &Profile::default(),
+            UserPackageMasks {
+                mask: mask_lines,
+                unmask: unmask_lines,
+            },
+        );
 
         let cpv1 = CPV::new(
             "dev-lang",

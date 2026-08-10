@@ -23,7 +23,7 @@ pub enum RepoSetError {
 }
 
 impl RepoSetError {
-    pub(crate) fn repo_failure(repository: &str, source: RepositoryError) -> Self {
+    pub fn repo_failure(repository: &str, source: RepositoryError) -> Self {
         Self::Repository {
             repository: repository.to_owned(),
             source,

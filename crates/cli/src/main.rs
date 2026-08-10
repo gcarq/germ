@@ -1,14 +1,13 @@
 mod commands;
 
 use crate::commands::Command;
-use anyhow::{Context, Result};
 use clap::Parser;
 use colored::{Color, Colorize};
-use germ_core::consts::DEFAULT_USE_PORTAGE_CONF_PATH;
-use germ_core::repository::RepoSet;
+use germ_core::SysConf;
 use log::error;
 use std::io;
-use std::path::Path;
+use std::num::NonZeroUsize;
+use std::path::PathBuf;
 
 /// Package management tool for Gentoo-like systems.
 #[derive(Parser)]
@@ -17,6 +16,14 @@ pub struct Args {
     /// Increase verbosity
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
+
+    /// Maximum number of ebuilds to execute concurrently [default: number of CPU cores]
+    #[arg(long, value_name = "N")]
+    jobs: Option<NonZeroUsize>,
+
+    /// Root path to configuration files
+    #[arg(long, value_name = "PATH", default_value = "/")]
+    config_root: PathBuf,
 
     #[command(subcommand)]
     command: Command,
@@ -32,37 +39,41 @@ async fn main() {
     };
     setup_logger(log_level).expect("unable to setup logger");
 
-    match run(args).await {
-        Ok(()) => (),
-        Err(err) => {
-            let error_cause = err
-                .chain()
-                .skip(1)
-                .enumerate()
-                .map(|(i, cause)| format!("   {i}: {cause}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            if error_cause.is_empty() {
-                error!("{err}");
-            } else {
-                error!("{err}\nCaused by\n{error_cause}");
-            }
-            std::process::exit(1);
-        }
+    let sysconf = build_sysconf(&args).into();
+    match commands::execute(&args, sysconf).await {
+        Ok(()) => {}
+        Err(err) => handle_error(err),
     }
 }
 
-/// Main application logic is here.
-async fn run(args: Args) -> Result<()> {
-    let config_path = Path::new(DEFAULT_USE_PORTAGE_CONF_PATH).join("repos.conf");
-    let mut repo_set =
-        RepoSet::new(&config_path).with_context(|| "unable to process repos.conf")?;
-    commands::execute(&args.command, &mut repo_set).await?;
-    Ok(())
+/// Builds a [`SysConf`] from the given clap `args`.
+fn build_sysconf(args: &Args) -> SysConf {
+    let mut sysconf = SysConf::new(args.config_root.clone());
+    if let Some(jobs) = args.jobs {
+        sysconf = sysconf.with_ebuild_jobs(jobs);
+    }
+    sysconf
+}
+
+/// Logs the error cause and stops the process with a non-zero exit code.
+fn handle_error(err: anyhow::Error) -> ! {
+    let error_cause = err
+        .chain()
+        .skip(1)
+        .enumerate()
+        .map(|(i, cause)| format!("   {i}: {cause}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if error_cause.is_empty() {
+        error!("{err}");
+    } else {
+        error!("{err}\nCaused by\n{error_cause}");
+    }
+    std::process::exit(1);
 }
 
 /// Sets up application logger with the given `log_level`.
-fn setup_logger(log_level: log::LevelFilter) -> Result<()> {
+fn setup_logger(log_level: log::LevelFilter) -> anyhow::Result<()> {
     fern::Dispatch::new()
         .format(|out, message, record| {
             let color = match record.level() {

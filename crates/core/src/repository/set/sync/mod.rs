@@ -14,7 +14,7 @@ enum SyncType {
 }
 
 impl SyncType {
-    pub fn new(sync_type: &str) -> anyhow::Result<Self> {
+    fn new(sync_type: &str) -> anyhow::Result<Self> {
         match sync_type {
             "git" => Ok(SyncType::Git),
             _ => bail!("unsupported sync-type: '{sync_type}'"),
@@ -28,12 +28,12 @@ impl SyncType {
 #[derive(Debug)]
 struct SyncConfig {
     // Absolute path to the repository location on the local filesystem.
-    pub location: PathBuf,
-    pub sync_uri: String,
+    location: PathBuf,
+    sync_uri: String,
 }
 
 impl SyncConfig {
-    pub fn from_ini(properties: &FxHashMap<String, String>) -> anyhow::Result<Self> {
+    fn from_ini(properties: &FxHashMap<String, String>) -> anyhow::Result<Self> {
         let location = properties
             .get("location")
             .map(PathBuf::from)

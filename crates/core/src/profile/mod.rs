@@ -39,7 +39,7 @@ impl<'repo> ProfileSource<'repo> {
             }
         }
 
-        bail!("profile {} is not owned by a repository", path.display())
+        bail!("profile {} is not owned by any repository", path.display())
     }
 }
 

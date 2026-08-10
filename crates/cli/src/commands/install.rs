@@ -1,10 +1,14 @@
-use anyhow::{Result, anyhow};
+use std::sync::Arc;
+
+use anyhow::{Context, anyhow};
+use germ_core::SysConf;
 use germ_core::deps::atom::Atom;
 use germ_core::repository::RepoSet;
 
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.
-pub async fn install(atom: &Atom, repo_set: &mut RepoSet) -> Result<()> {
+pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
+    let repo_set = RepoSet::new(sysconf).with_context(|| "unable to build repo set")?;
     let package = repo_set
         .find_packages(atom)
         .await?

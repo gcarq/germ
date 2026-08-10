@@ -3,11 +3,15 @@ mod gencache;
 mod info;
 mod install;
 
+use std::sync::Arc;
+
+use crate::Args;
 use crate::commands::gencache::gencache;
 use crate::commands::info::info;
 use crate::commands::install::install;
-use anyhow::Result;
+use anyhow::Context;
 use clap::Subcommand;
+use germ_core::SysConf;
 use germ_core::deps::atom::Atom;
 use germ_core::repository::RepoSet;
 
@@ -41,12 +45,19 @@ pub enum Command {
     Sync,
 }
 
-pub async fn execute(command: &Command, repo_set: &mut RepoSet) -> Result<()> {
-    match command {
-        Command::Info { atom } => info(atom.as_ref(), repo_set)?,
-        Command::Install { atom } => install(atom, repo_set).await?,
-        Command::Gencache { force, repo } => gencache(repo.as_deref(), *force, repo_set).await?,
-        Command::Sync => repo_set.maybe_sync()?,
+pub async fn execute(args: &Args, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
+    match &args.command {
+        Command::Info { atom } => info(atom.as_ref(), sysconf)?,
+        Command::Install { atom } => install(atom, sysconf).await?,
+        Command::Gencache { force, repo } => gencache(repo.as_deref(), *force, sysconf).await?,
+        Command::Sync => sync(sysconf)?,
     }
     Ok(())
+}
+
+/// Sync all repositories.
+fn sync(sysconf: Arc<SysConf>) -> anyhow::Result<()> {
+    Ok(RepoSet::new(sysconf)
+        .with_context(|| "unable to build repo set")?
+        .maybe_sync()?)
 }

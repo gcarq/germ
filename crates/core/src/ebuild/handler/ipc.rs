@@ -27,8 +27,8 @@ pub enum IpcError {
 }
 
 /// Handler for IPC communication via pipes with a child process.
-/// Each response is flushed by [`Self::send`] before it returns; dropping the handler closes the
-/// pipe ends.
+/// Each response is written completely by [`Self::send`] before it returns; dropping the handler
+/// closes the pipe ends.
 ///
 /// **Example message from the ebuild process:**
 ///
@@ -36,7 +36,8 @@ pub enum IpcError {
 pub struct IpcHandler {
     reader: BufReader<Receiver>,
     writer: Sender,
-    buffer: Vec<u8>,
+    recvbuf: Vec<u8>,
+    sendbuf: Vec<u8>,
 }
 
 impl IpcHandler {
@@ -70,9 +71,10 @@ impl IpcHandler {
 
         Ok((
             Self {
-                buffer: Vec::with_capacity(256),
                 reader: BufReader::new(Receiver::from_owned_fd(parent_reader)?),
                 writer: Sender::from_owned_fd(parent_writer)?,
+                recvbuf: Vec::with_capacity(256),
+                sendbuf: Vec::with_capacity(128),
             },
             child,
         ))
@@ -81,31 +83,32 @@ impl IpcHandler {
     /// Sends encoded response bytes to the child process.
     /// The data must not contain [`FUNCTION_REPLY_DELIMITER`], which is added automatically.
     pub async fn send(&mut self, bytes: &[u8]) -> Result<(), IpcError> {
-        self.writer.write_all(bytes).await?;
-        self.writer.write_all(FUNCTION_REPLY_DELIMITER).await?;
-        self.writer.flush().await?;
+        self.sendbuf.clear();
+        self.sendbuf.extend_from_slice(bytes);
+        self.sendbuf.extend_from_slice(FUNCTION_REPLY_DELIMITER);
+        self.writer.write_all(&self.sendbuf).await?;
         Ok(())
     }
 
     /// Reads raw bytes from the child process until [`EBUILD_MESSAGE_DELIMITER`] is encountered.
     /// Returns `Ok(None)` if EOF is reached.
     pub async fn recv_bytes(&mut self) -> Result<Option<&[u8]>, IpcError> {
-        self.buffer.clear();
+        self.recvbuf.clear();
         let num_bytes = self
             .reader
-            .read_until(EBUILD_MESSAGE_DELIMITER, &mut self.buffer)
+            .read_until(EBUILD_MESSAGE_DELIMITER, &mut self.recvbuf)
             .await?;
         // We got EOF
         if num_bytes == 0 {
             return Ok(None);
         }
-        if self.buffer.last() != Some(&EBUILD_MESSAGE_DELIMITER) {
+        if self.recvbuf.last() != Some(&EBUILD_MESSAGE_DELIMITER) {
             return Err(IpcError::IncompleteMessage);
         }
 
         // Get rid of the EOT character
-        self.buffer.truncate(self.buffer.len() - 1);
-        Ok(Some(&self.buffer))
+        self.recvbuf.truncate(self.recvbuf.len() - 1);
+        Ok(Some(&self.recvbuf))
     }
 }
 

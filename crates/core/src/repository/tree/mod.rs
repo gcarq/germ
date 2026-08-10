@@ -8,19 +8,19 @@ pub use eclass::{Eclass, Eclasses};
 pub use error::RepositoryError;
 use futures_util::{StreamExt, TryStreamExt, stream};
 pub use layout::{Layout, LayoutError};
-pub use package::PackageResolutionError;
+pub use package::{PackageResolutionError, PackageResult};
 pub use profiles::{ArchList, ProfileError};
 
 use self::package::{CPVIndex, resolve_cpv_from_category};
 use self::profiles::ProfileDescriptions;
-use crate::consts::PARALLEL_EBUILD_EXECUTIONS;
+use crate::SysConf;
 use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
 use crate::ebuild::Ebuild;
 use crate::files::{PackageEntries, entry::Precedence};
 use crate::package::{Package, cpv::CPV};
 use crate::regex::REPO_RE;
-use crate::repository::tree::package::cache::{CacheError, MetadataCache};
+use crate::repository::tree::package::cache::MetadataCache;
 use crate::types::FxHashSet;
 use crate::utils::Inherit;
 use anyhow::{Context, anyhow};
@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fmt, fs};
 
-pub use crate::repository::tree::package::PackageResult;
+pub use package::cache::CacheError;
 
 /// Represents an available ebuild repository.
 /// See https://projects.gentoo.org/pms/8/pms.html#x1-290004.1
@@ -39,20 +39,25 @@ pub use crate::repository::tree::package::PackageResult;
 pub struct Repository {
     pub location: PathBuf,
     pub name: Arc<str>,
-    pub(crate) layout: Layout,
-    pub(crate) package_mask: PackageEntries,
-    pub(crate) package_unmask: PackageEntries,
-    pub(crate) eclasses: Eclasses,
-    pub(crate) arch_list: ArchList,
-    pub(crate) categories: FxHashSet<String>,
+    pub layout: Layout,
+    pub eclasses: Eclasses,
+    pub package_mask: PackageEntries,
+    pub package_unmask: PackageEntries,
+    pub arch_list: ArchList,
+    pub categories: FxHashSet<String>,
     profiles_desc: ProfileDescriptions,
     cpv_index: CPVIndex,
     metadata_cache: MetadataCache,
+    sysconf: Arc<SysConf>,
 }
 
 impl Repository {
-    /// Loads intrinsic repository data from disk.
-    pub(super) fn load(name: &str, location: &Path) -> Result<Self, RepositoryError> {
+    /// Loads repository data from disk with the given [`SysConf`].
+    pub fn load(
+        name: &str,
+        location: &Path,
+        sysconf: Arc<SysConf>,
+    ) -> Result<Self, RepositoryError> {
         let layout = Layout::from_path(&location.join("metadata").join("layout.conf"))?;
         let profiles = location.join("profiles");
         let eapi = Eapi::from_eapi_file(&profiles.join("eapi")).map_err(ProfileError::from)?;
@@ -85,6 +90,7 @@ impl Repository {
             package_unmask,
             layout,
             name,
+            sysconf,
         })
     }
 
@@ -120,7 +126,7 @@ impl Repository {
     /// Populates all categories, packages and eclasses.
     ///
     /// NOTE: The caller must ensure [`Inherit::inherit_from`] has been called before.
-    pub(crate) fn populate(&mut self) -> Result<(), RepositoryError> {
+    pub fn populate(&mut self) -> Result<(), RepositoryError> {
         self.collect_eclasses().map_err(RepositoryError::Data)?;
         self.collect_categories();
         self.collect_cpvs().map_err(RepositoryError::Data)?;
@@ -189,7 +195,7 @@ impl Repository {
                     Err(error) => error.promote().map(Err),
                 }
             })
-            .buffer_unordered(PARALLEL_EBUILD_EXECUTIONS)
+            .buffer_unordered(self.sysconf.ebuild_jobs())
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -321,6 +327,7 @@ impl Default for Repository {
             profiles_desc: ProfileDescriptions::default(),
             cpv_index: CPVIndex::default(),
             metadata_cache,
+            sysconf: SysConf::default().into(),
         }
     }
 }
@@ -429,8 +436,9 @@ mod tests {
             .write_to(&invalid_location)
             .unwrap();
 
-        let valid = Repository::load("valid", &valid_location);
-        let invalid = Repository::load("invalid", &invalid_location);
+        let sysconf = Arc::new(SysConf::default());
+        let valid = Repository::load("valid", &valid_location, sysconf.clone());
+        let invalid = Repository::load("invalid", &invalid_location, sysconf.clone());
 
         assert!(valid.is_ok());
         assert!(matches!(invalid, Err(RepositoryError::Profile(_))));
