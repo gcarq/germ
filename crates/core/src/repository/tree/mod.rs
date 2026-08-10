@@ -322,10 +322,13 @@ impl Default for Repository {
 mod tests {
     use std::iter;
 
-use super::*;
+    use super::*;
 
     use super::super::test_support::RepoBuilder;
-    use crate::package::{metadata::PackageMetadata, version::PackageVersion};
+    use crate::{
+        ebuild::{EbuildError, handler::error::MetadataGenerationError},
+        package::{metadata::PackageMetadata, version::PackageVersion},
+    };
 
     #[test]
     fn test_invalid_package_versions() {
@@ -341,8 +344,16 @@ use super::*;
             .find_packages(&Atom::new("app-misc/foo").unwrap())
             .unwrap();
 
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().all(Result::is_err));
+        let errors = results
+            .into_iter()
+            .map(Result::unwrap_err)
+            .collect::<Vec<_>>();
+
+        assert_eq!(errors.len(), 2);
+        assert!(errors.iter().all(|error| matches!(
+            &error.source,
+            MetadataGenerationError::Ebuild(EbuildError::MissingEapi)
+        )));
     }
 
     #[test]
