@@ -35,6 +35,8 @@ All of this is experimental and might only work for common configurations. There
 
 ### Planned
 
+Smaller improvements and ideas are collected in [TODO.md](TODO.md).
+
 - proper `USE_EXPAND` and keyword handling
 - dependency resolution
 - download and build package sources
