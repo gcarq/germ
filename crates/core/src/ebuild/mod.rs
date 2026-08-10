@@ -98,10 +98,10 @@ impl<'r> Ebuild<'r> {
     /// Generates and returns the [`PackageMetadata`] for this ebuild.
     ///
     /// Returns a [`MetadataGenerationError`] if it cannot be resolved.
-    pub fn generate_metadata(&self) -> Result<PackageMetadata, MetadataGenerationError> {
+    pub async fn generate_metadata(&self) -> Result<PackageMetadata, MetadataGenerationError> {
         let mut handler = EbuildPhaseHandler::new(self, EbuildPhase::Depend, &MakeEnv::default())?;
 
-        let data = handler.spawn()?;
+        let data = handler.spawn().await?;
         let data = data
             .iter()
             .map(|line| match line.split_once('=') {

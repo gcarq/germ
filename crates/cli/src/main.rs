@@ -22,7 +22,8 @@ pub struct Args {
     command: Command,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
     let log_level = match args.verbose {
         0 => log::LevelFilter::Info,
@@ -31,7 +32,7 @@ fn main() {
     };
     setup_logger(log_level).expect("unable to setup logger");
 
-    match run(args) {
+    match run(args).await {
         Ok(()) => (),
         Err(err) => {
             let error_cause = err
@@ -52,11 +53,11 @@ fn main() {
 }
 
 /// Main application logic is here.
-fn run(args: Args) -> Result<()> {
+async fn run(args: Args) -> Result<()> {
     let config_path = Path::new(DEFAULT_USE_PORTAGE_CONF_PATH).join("repos.conf");
     let mut repo_set =
         RepoSet::new(&config_path).with_context(|| "unable to process repos.conf")?;
-    commands::execute(&args.command, &mut repo_set)?;
+    commands::execute(&args.command, &mut repo_set).await?;
     Ok(())
 }
 

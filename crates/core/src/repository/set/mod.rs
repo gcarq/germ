@@ -62,7 +62,7 @@ impl RepoSet {
 
     /// Eagerly resolves and returns all packages that match the given `atom`.
     /// TODO: Order the returned packages by version
-    pub fn find_packages<'r>(
+    pub async fn find_packages<'r>(
         &'r self,
         atom: &Atom,
     ) -> Result<Vec<PackageResult<'r>>, RepoSetError> {
@@ -70,6 +70,7 @@ impl RepoSet {
         for repo in self.select(atom.repo.as_deref()) {
             results.extend(
                 repo.find_packages(atom)
+                    .await
                     .map_err(|err| RepoSetError::repo_failure(&repo.name, err))?,
             );
         }
@@ -382,8 +383,8 @@ mod tests {
         assert!(matches!(error, RepoSetError::Configuration(_)));
     }
 
-    #[test]
-    fn test_find_unavailable_repo() {
+    #[tokio::test]
+    async fn test_find_unavailable_repo() {
         let mut fixture = repo_set(vec![
             RepoBuilder::new("repo")
                 .repos_conf_property("sync-type", "git")
@@ -396,6 +397,7 @@ mod tests {
         assert!(
             fixture
                 .find_packages(&Atom::new("app-misc/foo::repo").unwrap())
+                .await
                 .unwrap()
                 .is_empty()
         );

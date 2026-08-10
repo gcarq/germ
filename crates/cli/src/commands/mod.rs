@@ -41,11 +41,11 @@ pub enum Command {
     Sync,
 }
 
-pub fn execute(command: &Command, repo_set: &mut RepoSet) -> Result<()> {
+pub async fn execute(command: &Command, repo_set: &mut RepoSet) -> Result<()> {
     match command {
         Command::Info { atom } => info(atom.as_ref(), repo_set)?,
-        Command::Install { atom } => install(atom, repo_set)?,
-        Command::Gencache { force, repo } => gencache(repo.as_deref(), *force, repo_set)?,
+        Command::Install { atom } => install(atom, repo_set).await?,
+        Command::Gencache { force, repo } => gencache(repo.as_deref(), *force, repo_set).await?,
         Command::Sync => repo_set.maybe_sync()?,
     }
     Ok(())

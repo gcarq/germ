@@ -6,12 +6,14 @@ mod profiles;
 
 pub use eclass::{Eclass, Eclasses};
 pub use error::RepositoryError;
+use futures_util::{StreamExt, TryStreamExt, stream};
 pub use layout::{Layout, LayoutError};
 pub use package::PackageResolutionError;
 pub use profiles::{ArchList, ProfileError};
 
 use self::package::{CPVIndex, resolve_cpv_from_category};
 use self::profiles::ProfileDescriptions;
+use crate::consts::PARALLEL_EBUILD_EXECUTIONS;
 use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
 use crate::ebuild::Ebuild;
@@ -23,7 +25,7 @@ use crate::types::FxHashSet;
 use crate::utils::Inherit;
 use anyhow::{Context, anyhow};
 use log::{debug, warn};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -92,16 +94,17 @@ impl Repository {
     }
 
     /// Eagerly resolves and returns all known packages.
-    pub fn packages<'r>(&'r self) -> Result<Vec<PackageResult<'r>>, RepositoryError> {
-        self.resolve_packages(self.cpv_index.iter())
+    pub async fn packages<'r>(&'r self) -> Result<Vec<PackageResult<'r>>, RepositoryError> {
+        self.resolve_packages(self.cpv_index.iter()).await
     }
 
     /// Eagerly resolves all packages that match the given [`Atom`].
-    pub fn find_packages<'r>(
+    pub async fn find_packages<'r>(
         &'r self,
         atom: &Atom,
     ) -> Result<Vec<PackageResult<'r>>, RepositoryError> {
         self.resolve_packages(self.cpv_index.find_packages(atom))
+            .await
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
@@ -125,9 +128,10 @@ impl Repository {
     }
 
     /// Resolves all package metadata and builds [`MetadataCache`].
-    pub fn build_cache(&mut self) -> Result<Vec<PackageResolutionError>, RepositoryError> {
+    pub async fn build_cache(&mut self) -> Result<Vec<PackageResolutionError>, RepositoryError> {
         Ok(self
-            .packages()?
+            .packages()
+            .await?
             .into_iter()
             .filter_map(Result::err)
             .collect())
@@ -147,7 +151,7 @@ impl Repository {
     }
 
     /// Resolves the [`Package`] for the given [`CPV`].
-    fn resolve_package<'r>(&'r self, cpv: &'r CPV) -> PackageResult<'r> {
+    async fn resolve_package<'r>(&'r self, cpv: &'r CPV) -> PackageResult<'r> {
         let ebuild = match Ebuild::new(cpv, self) {
             Ok(ebuild) => ebuild,
             Err(error) => {
@@ -155,14 +159,14 @@ impl Repository {
             }
         };
 
-        match ebuild.generate_metadata() {
+        match ebuild.generate_metadata().await {
             Ok(metadata) => Ok(Package::new(cpv, self.name.clone(), metadata)),
             Err(source) => Err(PackageResolutionError::new(cpv.fqn(), source)),
         }
     }
 
     /// Builds the [`Package`] index for the given `cpvs`.
-    fn resolve_packages<'r>(
+    async fn resolve_packages<'r>(
         &'r self,
         cpvs: impl Iterator<Item = &'r CPV>,
     ) -> Result<Vec<PackageResult<'r>>, RepositoryError> {
@@ -178,13 +182,16 @@ impl Repository {
             }
         }
 
-        let resolved = missing
-            .into_par_iter()
-            .map(|cpv| match self.resolve_package(cpv) {
-                Ok(pkg) => Ok(Ok(pkg)),
-                Err(error) => error.promote().map(Err),
+        let resolved = stream::iter(missing)
+            .map(|cpv| async move {
+                match self.resolve_package(cpv).await {
+                    Ok(pkg) => Ok(Ok(pkg)),
+                    Err(error) => error.promote().map(Err),
+                }
             })
-            .collect::<Result<Vec<_>, RepositoryError>>()?;
+            .buffer_unordered(PARALLEL_EBUILD_EXECUTIONS)
+            .try_collect::<Vec<_>>()
+            .await?;
 
         self.metadata_cache.insert_batch(
             resolved
@@ -330,8 +337,8 @@ mod tests {
         package::{metadata::PackageMetadata, version::PackageVersion},
     };
 
-    #[test]
-    fn test_invalid_package_versions() {
+    #[tokio::test]
+    async fn test_invalid_package_versions() {
         let mut repository = RepoBuilder::new("repo")
             .categories(["app-misc"])
             .ebuild("app-misc", "foo", "1", "")
@@ -342,6 +349,7 @@ mod tests {
 
         let results = repository
             .find_packages(&Atom::new("app-misc/foo").unwrap())
+            .await
             .unwrap();
 
         let errors = results
@@ -356,8 +364,8 @@ mod tests {
         )));
     }
 
-    #[test]
-    fn test_repository_resolves_cached_metadata() {
+    #[tokio::test]
+    async fn test_repository_resolves_cached_metadata() {
         let repository = RepoBuilder::new("repo").finalize().unwrap();
         let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
         let metadata = PackageMetadata {
@@ -370,6 +378,7 @@ mod tests {
             .unwrap();
         let package = repository
             .resolve_packages(iter::once(&cpv))
+            .await
             .unwrap()
             .into_iter()
             .next()

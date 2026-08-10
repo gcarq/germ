@@ -7,6 +7,7 @@ edition.workspace = true
 anyhow.workspace = true
 constcat.workspace = true
 either.workspace = true
+futures-util.workspace = true
 fxhash.workspace = true
 log.workspace = true
 md-5.workspace = true
@@ -18,6 +19,7 @@ rkyv.workspace = true
 rust-ini.workspace = true
 shlex.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 walkdir.workspace = true
 
 [dev-dependencies]

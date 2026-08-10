@@ -3,13 +3,12 @@ use crate::types::FxHashMap;
 use nix::errno::Errno;
 use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
 use nix::unistd::pipe2;
-use std::fs::File;
-use std::io::{self, BufRead, BufReader, Write};
-use std::mem::ManuallyDrop;
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::process::CommandExt;
-use std::process;
+use std::io;
+use std::os::fd::AsRawFd;
 use thiserror::Error;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::unix::pipe::{Receiver, Sender};
+use tokio::process;
 
 /// Errors caused by ebuild IPC setup or I/O.
 #[derive(Error, Debug)]
@@ -22,18 +21,21 @@ pub enum IpcError {
 
     #[error("IPC I/O error")]
     Io(#[from] io::Error),
+
+    #[error("incomplete IPC message")]
+    IncompleteMessage,
 }
 
 /// Handler for IPC communication via pipes with a child process.
-/// When the `IpcHandler` is dropped, the write end of the pipe is flushed to ensure all data is
-/// sent to the child process before closing.
+/// Each response is flushed by [`Self::send`] before it returns; dropping the handler closes the
+/// pipe ends.
 ///
 /// **Example message from the ebuild process:**
 ///
 /// `FN\0__resolve_eclass\0toolchain-funcs\4`
 pub struct IpcHandler {
-    reader: BufReader<File>,
-    writer: File,
+    reader: BufReader<Receiver>,
+    writer: Sender,
     buffer: Vec<u8>,
 }
 
@@ -66,17 +68,11 @@ impl IpcHandler {
             .spawn()
             .map_err(IpcError::Spawn)?;
 
-        // SAFETY: We take ownership of the file descriptors and ensure with `ManuallyDrop` that
-        // they are not closed when `OwnedFd` goes out of scope. They will only be dropped when
-        // `IpcHandler` goes out of scope.
-        let reader = unsafe { File::from_raw_fd(ManuallyDrop::new(parent_reader).as_raw_fd()) };
-        let writer = unsafe { File::from_raw_fd(ManuallyDrop::new(parent_writer).as_raw_fd()) };
-
         Ok((
             Self {
                 buffer: Vec::with_capacity(256),
-                reader: BufReader::new(reader),
-                writer,
+                reader: BufReader::new(Receiver::from_owned_fd(parent_reader)?),
+                writer: Sender::from_owned_fd(parent_writer)?,
             },
             child,
         ))
@@ -84,34 +80,32 @@ impl IpcHandler {
 
     /// Sends encoded response bytes to the child process.
     /// The data must not contain [`FUNCTION_REPLY_DELIMITER`], which is added automatically.
-    pub fn send(&mut self, bytes: &[u8]) -> Result<(), IpcError> {
-        self.writer
-            .write_all(bytes)
-            .and_then(|()| self.writer.write_all(FUNCTION_REPLY_DELIMITER))
-            .and_then(|()| self.writer.flush())?;
+    pub async fn send(&mut self, bytes: &[u8]) -> Result<(), IpcError> {
+        self.writer.write_all(bytes).await?;
+        self.writer.write_all(FUNCTION_REPLY_DELIMITER).await?;
+        self.writer.flush().await?;
         Ok(())
     }
 
     /// Reads raw bytes from the child process until [`EBUILD_MESSAGE_DELIMITER`] is encountered.
     /// Returns `Ok(None)` if EOF is reached.
-    pub fn recv_bytes(&mut self) -> Result<Option<&[u8]>, IpcError> {
+    pub async fn recv_bytes(&mut self) -> Result<Option<&[u8]>, IpcError> {
         self.buffer.clear();
         let num_bytes = self
             .reader
-            .read_until(EBUILD_MESSAGE_DELIMITER, &mut self.buffer)?;
+            .read_until(EBUILD_MESSAGE_DELIMITER, &mut self.buffer)
+            .await?;
         // We got EOF
         if num_bytes == 0 {
             return Ok(None);
         }
+        if self.buffer.last() != Some(&EBUILD_MESSAGE_DELIMITER) {
+            return Err(IpcError::IncompleteMessage);
+        }
+
         // Get rid of the EOT character
         self.buffer.truncate(self.buffer.len() - 1);
         Ok(Some(&self.buffer))
-    }
-}
-
-impl Drop for IpcHandler {
-    fn drop(&mut self) {
-        let _ = self.writer.flush();
     }
 }
 
@@ -132,12 +126,12 @@ mod tests {
         IpcHandler::spawn(BASH_BINARY_PATH, &args, &env).unwrap()
     }
 
-    fn recv(ipc: &mut IpcHandler) -> String {
-        String::from_utf8(ipc.recv_bytes().unwrap().unwrap().to_owned()).unwrap()
+    async fn recv(ipc: &mut IpcHandler) -> String {
+        String::from_utf8(ipc.recv_bytes().await.unwrap().unwrap().to_owned()).unwrap()
     }
 
-    #[test]
-    fn test_ipc_reply_state() {
+    #[tokio::test]
+    async fn test_ipc_reply_state() {
         let (mut ipc, mut process) = spawn_process(
             r#"
                 source "${INTERNALS_PATH}" || exit 1
@@ -169,16 +163,16 @@ mod tests {
             ("FN\0no-payload", "OK", "RESULT\0no-payload\0"),
             ("FN\0failure", "ERR", "RESULT\0failure\0"),
         ] {
-            assert_eq!(recv(&mut ipc), request);
-            ipc.send(reply.as_bytes()).unwrap();
-            assert_eq!(recv(&mut ipc), result);
+            assert_eq!(recv(&mut ipc).await, request);
+            ipc.send(reply.as_bytes()).await.unwrap();
+            assert_eq!(recv(&mut ipc).await, result);
         }
 
-        assert!(process.wait().unwrap().success());
+        assert!(process.wait().await.unwrap().success());
     }
 
-    #[test]
-    fn test_ipc_handler_pipes() {
+    #[tokio::test]
+    async fn test_ipc_handler_pipes() {
         let (mut ipc, mut process) = spawn_process(
             r#"
                 IFS= read -r response <&${CHILD_READ_FD} || exit 1
@@ -188,15 +182,28 @@ mod tests {
             [("TEST_ENV", "42")],
         );
 
-        ipc.send(b"sync").unwrap();
-        assert_eq!(recv(&mut ipc), "sync", "expected echoed line");
-        assert_eq!(recv(&mut ipc), "42", "expected value from env variable");
+        ipc.send(b"sync").await.unwrap();
+        assert_eq!(recv(&mut ipc).await, "sync", "expected echoed line");
+        assert_eq!(
+            recv(&mut ipc).await,
+            "42",
+            "expected value from env variable"
+        );
 
-        assert!(process.wait().unwrap().success());
+        assert!(process.wait().await.unwrap().success());
     }
 
-    #[test]
-    fn test_fatal_die_exits_shell_after_ipc_reply() {
+    #[tokio::test]
+    async fn test_incomplete_message_is_rejected() {
+        let (mut ipc, mut process) = spawn_process("printf 'partial' >&${CHILD_WRITE_FD}", []);
+
+        let result = ipc.recv_bytes().await;
+        assert!(matches!(result, Err(IpcError::IncompleteMessage)));
+        process.wait().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_fatal_die_exits_shell_after_ipc_reply() {
         let (mut ipc, mut process) = spawn_process(
             r#"
                 cd "${PROJECT_ROOT}" || exit 2
@@ -210,9 +217,9 @@ mod tests {
             )],
         );
 
-        recv(&mut ipc);
-        ipc.send(b"DIE").unwrap();
+        recv(&mut ipc).await;
+        ipc.send(b"DIE").await.unwrap();
 
-        assert_eq!(process.wait().unwrap().code(), Some(1));
+        assert_eq!(process.wait().await.unwrap().code(), Some(1));
     }
 }

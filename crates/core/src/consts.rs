@@ -4,3 +4,6 @@ pub const DEFAULT_USE_PORTAGE_CONF_PATH: &str = "/etc/portage";
 pub const BASH_BINARY_PATH: &str = "/bin/bash";
 pub const SANDBOX_BINARY_PATH: &str = "/bin/sandbox";
 pub const GIT_BINARY_PATH: &str = "/usr/bin/git";
+
+/// Controls the number of ebuilds execution handler working concurrently.
+pub(crate) const PARALLEL_EBUILD_EXECUTIONS: usize = 8;

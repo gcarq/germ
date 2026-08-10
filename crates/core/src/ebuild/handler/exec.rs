@@ -5,9 +5,9 @@ use log::warn;
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
-use std::process::{Child, ExitStatus};
-use std::thread;
+use std::process::ExitStatus;
 use std::time::{Duration, Instant};
+use tokio::process::Child;
 
 const NATURAL_EXIT_PERIOD: Duration = Duration::from_millis(100);
 const SIGTERM_GRACE_PERIOD: Duration = Duration::from_secs(5);
@@ -62,39 +62,43 @@ pub struct EbuildExecution {
 
 impl EbuildExecution {
     /// Creates an ebuild execution that owns the given `ipc` channel and direct `child`.
-    pub fn new(ipc: IpcHandler, child: Child) -> Self {
-        let process_group = Pid::from_raw(child.id() as i32);
-        Self {
+    pub fn new(ipc: IpcHandler, child: Child) -> anyhow::Result<Self> {
+        let pid = child
+            .id()
+            .with_context(|| "spawned ebuild process has no longer a PID")?;
+        let process_group =
+            Pid::from_raw(i32::try_from(pid).with_context(|| "ebuild PID does not fit in i32")?);
+        Ok(Self {
             ipc: Some(ipc),
             child,
             process_group,
             exit_status: None,
             finalized: false,
             timeouts: Timeouts::default(),
-        }
+        })
     }
 
     /// Runs the execution with the given IPC `handler`.
     ///
     /// Data is returned only when the child exits successfully.
-    pub fn run<T>(
+    pub async fn run<T>(
         &mut self,
-        handler: impl FnOnce(&mut IpcHandler) -> Result<T, PhaseExecutionError>,
+        handler: impl AsyncFnOnce(&mut IpcHandler) -> Result<T, PhaseExecutionError>,
     ) -> Result<T, PhaseExecutionError> {
         let ipc = self
             .ipc
             .as_mut()
             .context("ebuild execution IPC is already closed")?;
 
-        match handler(ipc) {
+        match handler(ipc).await {
             Ok(data) => {
                 self.close_ipc();
-                self.complete().map(|()| data)
+                self.complete().await.map(|()| data)
             }
             // In case of a DIE, we still want to wait for the child to exit and close the
             // IPC channel afterwards
             Err(err @ PhaseExecutionError::Die(_)) => {
-                let completion = self.complete();
+                let completion = self.complete().await;
                 self.close_ipc();
                 match completion {
                     Ok(()) | Err(PhaseExecutionError::NonZeroExit(_)) => (),
@@ -106,7 +110,7 @@ impl EbuildExecution {
             }
             Err(err) => {
                 self.close_ipc();
-                if let Err(cleanup) = self.natural_exit_or_escalate() {
+                if let Err(cleanup) = self.natural_exit_or_escalate().await {
                     warn!("unable to clean up aborted ebuild execution: {cleanup:#}");
                 }
                 Err(err)
@@ -121,13 +125,13 @@ impl EbuildExecution {
 
     /// Completes the execution by waiting for natural termination and
     /// verifying that the process group is empty.
-    fn complete(&mut self) -> Result<(), PhaseExecutionError> {
-        self.natural_exit_or_escalate()?;
+    async fn complete(&mut self) -> Result<(), PhaseExecutionError> {
+        self.natural_exit_or_escalate().await?;
 
         let status = self
             .exit_status
             .ok_or_else(|| anyhow::anyhow!("ebuild process was not reaped"))?;
-        let cleanup = self.verify_group_empty();
+        let cleanup = self.verify_group_empty().await;
         if !status.success() {
             if let Err(err) = cleanup {
                 warn!("unable to clean up failed ebuild execution: {err:#}");
@@ -139,12 +143,12 @@ impl EbuildExecution {
     }
 
     /// Verifies the process group is empty, killing any remaining processes if needed.
-    fn verify_group_empty(&mut self) -> anyhow::Result<()> {
+    async fn verify_group_empty(&mut self) -> anyhow::Result<()> {
         if self.exit_status.is_none() {
             bail!("ebuild process must be reaped before verifying its process group");
         }
         if process_group_exists(self.process_group)? {
-            self.kill_group_and_wait()?;
+            self.kill_group_and_wait().await?;
         }
 
         self.finalized = true;
@@ -152,29 +156,33 @@ impl EbuildExecution {
     }
 
     /// Allows the process to exit naturally before escalating cleanup.
-    fn natural_exit_or_escalate(&mut self) -> anyhow::Result<()> {
-        if self.wait_for(NATURAL_EXIT_PERIOD, true)?.is_complete() {
+    async fn natural_exit_or_escalate(&mut self) -> anyhow::Result<()> {
+        if self
+            .wait_for(NATURAL_EXIT_PERIOD, true)
+            .await?
+            .is_complete()
+        {
             self.finalized = true;
             return Ok(());
         }
 
-        self.escalate()
+        self.escalate().await
     }
 
     /// Stops the process with SIGTERM, then uses SIGKILL if it doesn't exit.
-    fn escalate(&mut self) -> anyhow::Result<()> {
+    async fn escalate(&mut self) -> anyhow::Result<()> {
         match kill(self.process_group, Signal::SIGTERM) {
             Ok(()) | Err(Errno::ESRCH) => (),
             Err(err) => bail!("unable to signal ebuild process: {err}"),
         };
 
-        let state = self.wait_for(self.timeouts.sigterm_grace, false)?;
+        let state = self.wait_for(self.timeouts.sigterm_grace, false).await?;
         if state.is_complete() {
             self.finalized = true;
             return Ok(());
         }
 
-        self.kill_group_and_wait()
+        self.kill_group_and_wait().await
     }
 
     /// Checks whether the child and its process group have exited.
@@ -193,14 +201,15 @@ impl EbuildExecution {
     }
 
     /// Kills the process group with SIGKILL and waits for it to exit.
-    fn kill_group_and_wait(&mut self) -> anyhow::Result<()> {
+    async fn kill_group_and_wait(&mut self) -> anyhow::Result<()> {
         match killpg(self.process_group, Signal::SIGKILL) {
             Ok(()) | Err(Errno::ESRCH) => (),
             Err(err) => bail!("unable to signal ebuild process group: {err}"),
         };
 
         let is_complete = self
-            .wait_for(self.timeouts.sigkill_wait, true)?
+            .wait_for(self.timeouts.sigkill_wait, true)
+            .await?
             .is_complete();
         self.finalized = true;
         match is_complete {
@@ -210,7 +219,7 @@ impl EbuildExecution {
     }
 
     /// Waits for the child, and optionally its process group to exit.
-    fn wait_for(
+    async fn wait_for(
         &mut self,
         timeout: Duration,
         require_group_empty: bool,
@@ -222,7 +231,7 @@ impl EbuildExecution {
             if complete || Instant::now() >= deadline {
                 return Ok(state);
             }
-            thread::sleep(self.timeouts.poll);
+            tokio::time::sleep(self.timeouts.poll).await;
         }
     }
 
@@ -238,8 +247,10 @@ impl Drop for EbuildExecution {
         if self.finalized {
             return;
         }
-        if let Err(err) = self.kill_group_and_wait() {
-            warn!("unable to clean up abandoned ebuild execution: {err:#}");
+        // We cannot use `kill_group_and_wait` here due to async,
+        // so we just send SIGKILL and hope for the best.
+        if !self.finalized {
+            let _ = killpg(self.process_group, Signal::SIGKILL);
         }
     }
 }
@@ -268,123 +279,131 @@ mod tests {
         let args = vec!["-c".into(), script.into()];
         let (ipc, child) =
             IpcHandler::spawn(BASH_BINARY_PATH, &args, &FxHashMap::default()).unwrap();
-        let mut execution = EbuildExecution::new(ipc, child);
+        let mut execution = EbuildExecution::new(ipc, child).unwrap();
         execution.timeouts = TEST_TIMEOUTS;
         execution
     }
 
-    #[test]
-    fn test_run_success() {
+    #[tokio::test]
+    async fn test_run_success() {
         let mut execution = spawn_execution("exit 0");
 
-        execution.run(|_| Ok(())).unwrap();
+        execution.run(async |_| Ok(())).await.unwrap();
 
         assert!(execution.exit_status.is_some_and(|status| status.success()));
     }
 
-    #[test]
-    fn test_run_die() {
+    #[tokio::test]
+    async fn test_run_die() {
         let mut execution = spawn_execution("IFS= read -r <&${CHILD_READ_FD}");
 
         let err = execution
-            .run::<()>(|_| Err(PhaseExecutionError::Die(String::new())))
+            .run::<()>(async |_| Err(PhaseExecutionError::Die(String::new())))
+            .await
             .unwrap_err();
 
         assert!(matches!(err, PhaseExecutionError::Die(_)));
         assert!(execution.finalized);
     }
 
-    #[test]
-    fn test_run_non_zero_exit() {
+    #[tokio::test]
+    async fn test_run_non_zero_exit() {
         let mut execution = spawn_execution("exit 7");
 
-        let err = execution.run(|_| Ok(())).unwrap_err();
-
+        let err = execution.run(async |_| Ok(())).await.unwrap_err();
         assert!(
             matches!(err, PhaseExecutionError::NonZeroExit(status) if status.code() == Some(7))
         );
     }
 
-    #[test]
-    fn test_run_background_process() {
+    #[tokio::test]
+    async fn test_run_background_process() {
         let mut execution = spawn_execution("sleep 30 & exit 0");
 
-        let result = execution.run(|_| Ok(42));
-
+        let result = execution.run(async |_| Ok(42)).await;
         assert_eq!(result.unwrap(), 42);
     }
 
-    #[test]
-    fn test_natural_exit() {
+    #[tokio::test]
+    async fn test_natural_exit() {
         let mut execution = spawn_execution("trap 'exit 0' TERM; while :; do :; done");
-        thread::sleep(Duration::from_millis(20));
+        tokio::time::sleep(Duration::from_millis(20)).await;
 
         execution.close_ipc();
-        execution.natural_exit_or_escalate().unwrap();
+        execution.natural_exit_or_escalate().await.unwrap();
 
         assert!(execution.exit_status.is_some_and(|status| status.success()));
     }
 
-    #[test]
-    fn test_sigterm_escalation() {
+    #[tokio::test]
+    async fn test_sigterm_escalation() {
         let mut execution = spawn_execution("kill -STOP $$");
-        thread::sleep(Duration::from_millis(20));
+        tokio::time::sleep(Duration::from_millis(20)).await;
         let started_at = Instant::now();
 
         execution.close_ipc();
-        execution.natural_exit_or_escalate().unwrap();
+        execution.natural_exit_or_escalate().await.unwrap();
 
         assert!(started_at.elapsed() >= TEST_TIMEOUTS.sigterm_grace);
     }
 
-    #[test]
-    fn test_orphaned_process_cleanup() {
+    #[tokio::test]
+    async fn test_orphaned_process_cleanup() {
         let mut execution = spawn_execution("sleep 30 & exit 0");
         execution.timeouts.sigterm_grace = Duration::from_secs(2);
-        thread::sleep(Duration::from_millis(20));
+        tokio::time::sleep(Duration::from_millis(20)).await;
         let started_at = Instant::now();
 
         execution.close_ipc();
-        execution.natural_exit_or_escalate().unwrap();
+        execution.natural_exit_or_escalate().await.unwrap();
 
         assert!(started_at.elapsed() < Duration::from_secs(1));
     }
 
-    #[test]
-    fn test_sigterm_cleanup_with_orphaned_process() {
+    #[tokio::test]
+    async fn test_sigterm_cleanup_with_orphaned_process() {
         let mut execution = spawn_execution("trap 'exit 0' TERM; sleep 30 & while :; do :; done");
         execution.timeouts.sigterm_grace = Duration::from_secs(2);
-        thread::sleep(Duration::from_millis(20));
+        tokio::time::sleep(Duration::from_millis(20)).await;
         let started_at = Instant::now();
 
         execution.close_ipc();
-        execution.natural_exit_or_escalate().unwrap();
+        execution.natural_exit_or_escalate().await.unwrap();
 
         assert!(started_at.elapsed() < Duration::from_secs(1));
     }
 
-    #[test]
-    fn test_process_group_isolation() {
+    #[tokio::test]
+    async fn test_process_group_isolation() {
         let mut first = spawn_execution("kill -STOP $$");
         let mut second = spawn_execution("while :; do :; done");
-        thread::sleep(Duration::from_millis(20));
+        tokio::time::sleep(Duration::from_millis(20)).await;
 
         first.close_ipc();
-        first.natural_exit_or_escalate().unwrap();
+        first.natural_exit_or_escalate().await.unwrap();
         let second_is_running = second.child.try_wait().unwrap().is_none();
         second.close_ipc();
-        second.natural_exit_or_escalate().unwrap();
+        second.natural_exit_or_escalate().await.unwrap();
 
         assert!(second_is_running);
     }
 
-    #[test]
-    fn test_drop_cleanup() {
+    #[tokio::test]
+    async fn test_drop_cleanup() {
         let execution = spawn_execution("sleep 30 & wait");
         let process_group = execution.process_group;
 
         drop(execution);
 
-        assert!(!process_group_exists(process_group).unwrap());
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if !process_group_exists(process_group).unwrap() {
+                    break;
+                }
+                tokio::time::sleep(TEST_TIMEOUTS.poll).await;
+            }
+        })
+        .await
+        .unwrap();
     }
 }

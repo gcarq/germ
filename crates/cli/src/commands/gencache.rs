@@ -3,7 +3,7 @@ use germ_core::repository::RepoSet;
 use log::{info, warn};
 
 /// Generates metadata cache for repositories.
-pub fn gencache(
+pub async fn gencache(
     repo_name: Option<&str>,
     force: bool,
     repo_set: &mut RepoSet,
@@ -18,8 +18,10 @@ pub fn gencache(
                 .with_context(|| format!("unable to recreate cache for {name}"))?;
         }
         info!("Generating metadata cache for {name}...");
+
         for error in repo
             .build_cache()
+            .await
             .with_context(|| format!("unable to process repo {name}"))?
         {
             warn!("{name}: {error}");

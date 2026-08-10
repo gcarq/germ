@@ -11,6 +11,7 @@ either.workspace = true
 fern.workspace = true
 log.workspace = true
 germ-core.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

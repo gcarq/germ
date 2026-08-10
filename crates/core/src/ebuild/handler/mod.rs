@@ -66,9 +66,9 @@ impl<'r> EbuildPhaseHandler<'r> {
     }
 
     /// Spawns the process and returns the data sent by the ebuild process.
-    /// NOTE: This call blocks until the process has been finished or the
-    /// IPC channel has been closed.
-    pub fn spawn(&mut self) -> Result<Vec<String>, PhaseExecutionError> {
+    ///
+    /// The returned future completes when the process has finished or the IPC channel has been closed.
+    pub async fn spawn(&mut self) -> Result<Vec<String>, PhaseExecutionError> {
         debug!(
             "Executing ebuild phase '{}' for '{}' ...",
             self.phase, self.ebuild.cpv
@@ -76,13 +76,18 @@ impl<'r> EbuildPhaseHandler<'r> {
 
         let args = Self::build_args();
         let (ipc, child) = IpcHandler::spawn(SANDBOX_BINARY_PATH, &args, &self.env)?;
-        let mut execution = EbuildExecution::new(ipc, child);
-        execution.run(|channel| self.handle_messages(channel))
+        let mut execution = EbuildExecution::new(ipc, child)?;
+        execution
+            .run(async |channel| self.handle_messages(channel).await)
+            .await
     }
 
-    fn handle_messages(&self, ipc: &mut IpcHandler) -> Result<Vec<String>, PhaseExecutionError> {
+    async fn handle_messages(
+        &self,
+        ipc: &mut IpcHandler,
+    ) -> Result<Vec<String>, PhaseExecutionError> {
         let mut data = Vec::new();
-        while let Some(bytes) = ipc.recv_bytes()? {
+        while let Some(bytes) = ipc.recv_bytes().await? {
             match EbuildMessage::from_bytes(bytes)? {
                 EbuildMessage::Call(func_call) => {
                     let response = self.handle_request(func_call)?;
@@ -90,7 +95,7 @@ impl<'r> EbuildPhaseHandler<'r> {
                         FunctionReply::Die(message) => Some(message.clone()),
                         _ => None,
                     };
-                    ipc.send(&response.into_bytes())?;
+                    ipc.send(&response.into_bytes()).await?;
                     if let Some(message) = die_message {
                         return Err(PhaseExecutionError::Die(message));
                     }
@@ -207,8 +212,8 @@ mod tests {
     use super::*;
     use crate::{ebuild::handler::error::ProtocolError, types::FxHashMap};
 
-    #[test]
-    fn test_abort_ipc_ordering() {
+    #[tokio::test]
+    async fn test_abort_ipc_ordering() {
         let args = vec![
             "-c".into(),
             r#"
@@ -220,14 +225,17 @@ mod tests {
         ];
         let (ipc, child) =
             IpcHandler::spawn(BASH_BINARY_PATH, &args, &FxHashMap::default()).unwrap();
-        let mut execution = EbuildExecution::new(ipc, child);
+        let mut execution = EbuildExecution::new(ipc, child).unwrap();
 
-        let result: Result<(), PhaseExecutionError> = execution.run(|channel| {
-            channel
-                .recv_bytes()?
-                .ok_or_else(|| ProtocolError::InvalidRequest("".into()))?;
-            Err(PhaseExecutionError::Invariant(anyhow!("test")))
-        });
+        let result: Result<(), PhaseExecutionError> = execution
+            .run(async |channel| {
+                channel
+                    .recv_bytes()
+                    .await?
+                    .ok_or_else(|| ProtocolError::InvalidRequest("".into()))?;
+                Err(PhaseExecutionError::Invariant(anyhow!("test")))
+            })
+            .await;
 
         assert!(
             result.is_err()
