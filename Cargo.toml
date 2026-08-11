@@ -28,7 +28,7 @@ rust-ini = { version = "0.21.3", default-features = false }
 shlex = { version = "2.0.1", default-features = false, features = ["std"] }
 tempfile = { version = "3.27.0", default-features = false }
 thiserror = { version = "2.0.19", default-features = false, features = ["std"] }
-tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "time"] }
+tokio = { version = "1.53.1", default-features = false, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "time"] }
 walkdir = { version = "2.5.0", default-features = false }
 
 [workspace.lints.clippy]
