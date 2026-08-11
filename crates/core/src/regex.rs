@@ -26,9 +26,9 @@ pub const REPOSITORY: &str = r"(?P<repo>[a-zA-Z0-9_][a-zA-Z0-9_-]*)";
 pub const VERSION: &str =
     r"(?<version>[0-9]+(?:\.[0-9]+)*[a-z]?)(?<suffixes>(?:_(?:alpha|beta|pre|rc|p)[0-9]*)*)";
 
-pub const REVISION: &str = r"(?<revision>[0-9]*)";
+pub const REVISION: &str = r"(?<revision>[0-9]+)";
 
-pub const V_REV: &str = concat!(VERSION, "(:?-r", REVISION, ")?");
+pub const V_REV: &str = concat!(VERSION, "(?:-r", REVISION, ")?");
 
 pub const PV_REV: &str = concat!(PACKAGE, "-", V_REV);
 

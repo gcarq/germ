@@ -1,4 +1,5 @@
-use anyhow::{Context, Result, anyhow, bail};
+use super::numeric::NumericComponent;
+use anyhow::{Context, anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::str::FromStr;
@@ -13,21 +14,33 @@ pub struct VersionSuffixes(Box<[VersionSuffix]>);
 
 impl VersionSuffixes {
     /// Parses a string of version suffixes separated by underscores into a [`VersionSuffixes`] instance.
-    /// `'_'` prefixes are ignored For example, `"_beta_p20230101"` is still valid.
-    fn new(suffixes: &str) -> Result<Self> {
+    ///
+    /// The initial `_` is required, e.g.: `"_beta_p20230101"`.
+    fn new(suffixes: &str) -> anyhow::Result<Self> {
+        if suffixes.is_empty() {
+            return Ok(Self::default());
+        }
         let suffixes = suffixes
+            .strip_prefix('_')
+            .ok_or_else(|| anyhow!("suffixes must start with '_'"))?
             .split('_')
-            .filter(|s| !s.is_empty())
-            .map(VersionSuffix::new)
-            .collect::<Result<_>>()?;
+            .map(|suffix| match suffix.is_empty() {
+                true => bail!("empty version suffix"),
+                false => VersionSuffix::new(suffix),
+            })
+            .collect::<anyhow::Result<_>>()?;
         Ok(Self(suffixes))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &VersionSuffix> {
+        self.0.iter()
     }
 }
 
 impl FromStr for VersionSuffixes {
     type Err = anyhow::Error;
 
-    fn from_str(suffixes: &str) -> Result<Self> {
+    fn from_str(suffixes: &str) -> anyhow::Result<Self> {
         Self::new(suffixes)
     }
 }
@@ -43,24 +56,24 @@ impl FromIterator<VersionSuffix> for VersionSuffixes {
 }
 
 impl Ord for VersionSuffixes {
-    /// Compares version suffixes. If one has an additional patch suffix, it's considered greater.
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.0.len().cmp(&other.0.len()) {
-            Ordering::Equal => self
-                .0
-                .iter()
-                .zip(other.0.iter())
-                .map(|(a, b)| a.cmp(b))
-                .find(|o| *o != Ordering::Equal)
-                .unwrap_or(Ordering::Equal),
-            Ordering::Greater => match self.0[other.0.len()] {
-                VersionSuffix::Patch(_) => Ordering::Greater,
-                _ => Ordering::Less,
-            },
-            Ordering::Less => match other.0[self.0.len()] {
-                VersionSuffix::Patch(_) => Ordering::Less,
-                _ => Ordering::Greater,
-            },
+        // Compare shared suffixes first
+        for (a, b) in self.0.iter().zip(&other.0) {
+            match a.cmp(b) {
+                Ordering::Equal => {}
+                ordering => return ordering,
+            }
+        }
+
+        // At this point they have a different length, so select the next suffix
+        // for each (if any) and compare them according to PMS 3.5.
+        match (self.0.get(other.0.len()), other.0.get(self.0.len())) {
+            (Some(VersionSuffix::Patch(_)), None) => Ordering::Greater,
+            (Some(_), None) => Ordering::Less,
+            (None, Some(VersionSuffix::Patch(_))) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+            (Some(_), Some(_)) => unreachable!(),
         }
     }
 }
@@ -96,17 +109,17 @@ impl fmt::Display for VersionSuffixes {
 /// For example: `"alpha1", "beta2", "pre", "rc", "p20230101"`.
 #[derive(Archive, Serialize, Deserialize, Clone, Eq, Debug)]
 pub enum VersionSuffix {
-    Alpha(Option<Box<str>>),
-    Beta(Option<Box<str>>),
-    Pre(Option<Box<str>>),
-    Rc(Option<Box<str>>),
-    Patch(Option<Box<str>>),
+    Alpha(Option<NumericComponent>),
+    Beta(Option<NumericComponent>),
+    Pre(Option<NumericComponent>),
+    Rc(Option<NumericComponent>),
+    Patch(Option<NumericComponent>),
 }
 
 impl VersionSuffix {
     /// Creates a new [`VersionSuffix`] from the given suffix string.
     /// Must start with one of: "alpha", "beta", "pre", "rc", "p".
-    pub fn new(suffix: &str) -> Result<Self> {
+    pub fn new(suffix: &str) -> anyhow::Result<Self> {
         if !SUFFIX_PREFIXES
             .iter()
             .any(|prefix| suffix.starts_with(prefix))
@@ -118,13 +131,13 @@ impl VersionSuffix {
             .unwrap_or(suffix.len());
         let (suffix, number) = suffix.split_at(split_index);
 
-        let number = if number.is_empty() {
-            None
-        } else {
-            number
-                .parse::<usize>()
-                .with_context(|| anyhow!("unable to parse version suffix number: '{number}'"))?;
-            Some(number.into())
+        let number = match number.is_empty() {
+            true => None,
+            false => Some(
+                number
+                    .parse()
+                    .with_context(|| anyhow!("unable to parse version suffix"))?,
+            ),
         };
 
         let suffix = match suffix {
@@ -138,8 +151,16 @@ impl VersionSuffix {
         Ok(suffix)
     }
 
+    pub const fn name(&self) -> &'static str {
+        self.deconstruct().0
+    }
+
+    pub const fn number(&self) -> Option<&NumericComponent> {
+        self.deconstruct().1.as_ref()
+    }
+
     /// Deconstructs the suffix into its string representation and optional number.
-    const fn deconstruct(&self) -> (&str, &Option<Box<str>>) {
+    const fn deconstruct(&self) -> (&'static str, &Option<NumericComponent>) {
         match self {
             VersionSuffix::Alpha(num) => ("alpha", num),
             VersionSuffix::Beta(num) => ("beta", num),
@@ -169,22 +190,14 @@ impl Ord for VersionSuffix {
             non_equal => return non_equal,
         }
 
-        match (self, other) {
-            (VersionSuffix::Alpha(a), VersionSuffix::Alpha(b))
-            | (VersionSuffix::Beta(a), VersionSuffix::Beta(b))
-            | (VersionSuffix::Pre(a), VersionSuffix::Pre(b))
-            | (VersionSuffix::Rc(a), VersionSuffix::Rc(b))
-            | (VersionSuffix::Patch(a), VersionSuffix::Patch(b)) => match (a, b) {
-                // Safe to unwrap since the number is guaranteed to be a valid usize if it exists
-                (Some(a_num), Some(b_num)) => a_num
-                    .parse::<usize>()
-                    .unwrap()
-                    .cmp(&b_num.parse::<usize>().unwrap()),
-                (Some(_), None) => Ordering::Greater,
-                (None, Some(_)) => Ordering::Less,
-                (None, None) => Ordering::Equal,
-            },
-            _ => unreachable!(),
+        match (self.deconstruct().1, other.deconstruct().1) {
+            // Zero is considered equal to None
+            (Some(a), None) if a.is_zero() => Ordering::Equal,
+            (None, Some(b)) if b.is_zero() => Ordering::Equal,
+            (Some(a), Some(b)) => a.cmp(b),
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => Ordering::Equal,
         }
     }
 }
@@ -203,15 +216,13 @@ impl PartialEq<Self> for VersionSuffix {
 
 impl hash::Hash for VersionSuffix {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.ordinal().hash(state);
-        let num = match self {
-            VersionSuffix::Alpha(n)
-            | VersionSuffix::Beta(n)
-            | VersionSuffix::Pre(n)
-            | VersionSuffix::Rc(n)
-            | VersionSuffix::Patch(n) => n,
-        };
-        num.hash(state);
+        let (suffix, number) = self.deconstruct();
+        suffix.hash(state);
+        number
+            .as_ref()
+            .map(NumericComponent::normalized)
+            .unwrap_or_default()
+            .hash(state);
     }
 }
 
@@ -220,7 +231,7 @@ impl fmt::Display for VersionSuffix {
         let (suffix, num) = self.deconstruct();
         f.write_str(suffix)?;
         if let Some(num) = num {
-            f.write_str(num)?;
+            f.write_str(num.as_str())?;
         }
         Ok(())
     }
@@ -229,93 +240,104 @@ impl fmt::Display for VersionSuffix {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::assert_eq_hash;
 
     #[test]
-    fn test_version_suffixes_from_str() {
+    fn test_version_suffixes_parse() {
         let test_cases = [
             ("", [].into()),
             ("_alpha", [VersionSuffix::Alpha(None)].into()),
             (
                 "_alpha1_beta2",
                 [
-                    VersionSuffix::Alpha(Some("1".into())),
-                    VersionSuffix::Beta(Some("2".into())),
+                    VersionSuffix::Alpha(Some("1".parse().unwrap())),
+                    VersionSuffix::Beta(Some("2".parse().unwrap())),
                 ]
                 .into(),
             ),
             (
-                "pre_rc_p20230101",
+                "_pre_rc_p20230101",
                 [
                     VersionSuffix::Pre(None),
                     VersionSuffix::Rc(None),
-                    VersionSuffix::Patch(Some("20230101".into())),
+                    VersionSuffix::Patch(Some("20230101".parse().unwrap())),
                 ]
                 .into(),
             ),
         ];
         for (input, expected) in test_cases {
             let suffixes = input.parse::<VersionSuffixes>().unwrap();
-            assert_eq!(suffixes.0, expected);
+            assert_eq_hash(&suffixes.0, &expected);
         }
     }
 
     #[test]
-    fn test_version_suffix_new_ok() {
-        let test_cases = vec![
+    fn test_version_suffixes_parse_error() {
+        assert!(VersionSuffixes::from_str("_alpha__beta").is_err());
+    }
+
+    #[test]
+    fn test_version_suffix_parse() {
+        let test_cases = [
             ("alpha", VersionSuffix::Alpha(None)),
-            ("alpha1", VersionSuffix::Alpha(Some("1".into()))),
+            ("alpha1", VersionSuffix::Alpha(Some("1".parse().unwrap()))),
             ("beta", VersionSuffix::Beta(None)),
-            ("beta2", VersionSuffix::Beta(Some("2".into()))),
+            ("beta2", VersionSuffix::Beta(Some("2".parse().unwrap()))),
             ("pre", VersionSuffix::Pre(None)),
-            ("pre3", VersionSuffix::Pre(Some("3".into()))),
+            ("pre3", VersionSuffix::Pre(Some("3".parse().unwrap()))),
             ("rc", VersionSuffix::Rc(None)),
-            ("rc4", VersionSuffix::Rc(Some("4".into()))),
+            ("rc4", VersionSuffix::Rc(Some("4".parse().unwrap()))),
             ("p", VersionSuffix::Patch(None)),
-            ("p20230101", VersionSuffix::Patch(Some("20230101".into()))),
+            (
+                "p20230101",
+                VersionSuffix::Patch(Some("20230101".parse().unwrap())),
+            ),
+            (
+                "alpha999999999999999999999999",
+                VersionSuffix::Alpha(Some("999999999999999999999999".parse().unwrap())),
+            ),
         ];
         for (input, expected) in test_cases {
             let suffix = VersionSuffix::new(input).unwrap();
-            assert_eq!(suffix, expected);
+            assert_eq_hash(&suffix, &expected);
         }
     }
 
     #[test]
-    fn test_version_suffix_new_err() {
-        let invalid_cases = vec!["alph", "betaa", "prex", "rc!", "patch1", "unknown", "p-1"];
+    fn test_version_suffix_parse_error() {
+        let invalid_cases = ["alph", "betaa", "prex", "rc!", "patch1", "unknown", "p-1"];
         for input in invalid_cases {
             assert!(VersionSuffix::new(input).is_err());
         }
     }
 
     #[test]
-    fn test_version_suffix_ord() {
-        let alpha1 = VersionSuffix::Alpha(Some("1".into()));
-        let alpha01 = VersionSuffix::Alpha(Some("01".into()));
-        let alpha2 = VersionSuffix::Alpha(Some("2".into()));
-        let beta_none = VersionSuffix::Beta(None);
-        let beta1 = VersionSuffix::Beta(Some("1".into()));
-        let pre1 = VersionSuffix::Pre(Some("1".into()));
-        let rc_none = VersionSuffix::Rc(Some("1".into()));
-        let patch1 = VersionSuffix::Patch(Some("1".into()));
-
-        assert_eq!(alpha1, alpha01);
-        assert!(alpha1 < alpha2);
-        assert!(alpha2 < beta_none);
-        assert!(beta_none < beta1);
-        assert!(beta1 < pre1);
-        assert!(pre1 < rc_none);
-        assert!(rc_none < patch1);
+    fn test_version_suffix_equality() {
+        assert_eq_hash(
+            &VersionSuffix::Alpha(None),
+            &VersionSuffix::Alpha(Some("0".parse().unwrap())),
+        );
     }
 
     #[test]
     fn test_version_suffix_display() {
-        let test_cases = vec![
-            (VersionSuffix::Alpha(Some("1".into())), "alpha1"),
+        let test_cases = [
+            (VersionSuffix::Alpha(Some("1".parse().unwrap())), "alpha1"),
             (VersionSuffix::Beta(None), "beta"),
-            (VersionSuffix::Pre(Some("3".into())), "pre3"),
+            (VersionSuffix::Pre(Some("3".parse().unwrap())), "pre3"),
             (VersionSuffix::Rc(None), "rc"),
-            (VersionSuffix::Patch(Some("20231231".into())), "p20231231"),
-            (VersionSuffix::Patch(Some("01234".into())), "p01234"),
+            (
+                VersionSuffix::Patch(Some("20231231".parse().unwrap())),
+                "p20231231",
+            ),
+            (
+                VersionSuffix::Patch(Some("01234".parse().unwrap())),
+                "p01234",
+            ),
+            (
+                VersionSuffix::Alpha(Some("999999999999999999999999".parse().unwrap())),
+                "alpha999999999999999999999999",
+            ),
         ];
         for (suffix, expected) in test_cases {
             assert_eq!(suffix.to_string(), expected);

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use super::numeric::NumericComponent;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
@@ -10,36 +10,19 @@ use std::hash::{Hash, Hasher};
 ///
 /// For example `-r0302 == -r302`, `-r0` == None`.
 #[derive(Archive, Serialize, Deserialize, Clone, Debug, Default)]
-pub struct PackageRevision {
-    /// Source value parsed from ebuild file name
-    source: Option<Box<str>>,
-    /// Effective revision used for comparison
-    effective: u64,
-}
+pub struct PackageRevision(Option<NumericComponent>);
 
 impl PackageRevision {
-    pub fn new(revision: Option<&str>) -> Result<Self> {
-        let effective = revision
-            .map(|rev| {
-                rev.parse::<u64>()
-                    .with_context(|| anyhow!("revision must be a valid u64, got '{rev}'"))
-            })
-            .transpose()?
-            .unwrap_or_default();
-        Ok(Self {
-            source: revision.map(Into::into),
-            effective,
-        })
+    pub fn new(revision: Option<&str>) -> anyhow::Result<Self> {
+        Ok(Self(revision.map(NumericComponent::new).transpose()?))
     }
 
-    /// Returns the effective revision, defaulting to zero when omitted.
-    pub const fn effective(&self) -> u64 {
-        self.effective
+    pub fn as_str(&self) -> Option<&str> {
+        self.0.as_ref().map(NumericComponent::as_str)
     }
 
-    /// Returns the source revision, or `None` if omitted.
-    pub fn source(&self) -> Option<&str> {
-        self.source.as_deref()
+    pub const fn number(&self) -> Option<&NumericComponent> {
+        self.0.as_ref()
     }
 }
 
@@ -53,7 +36,18 @@ impl Eq for PackageRevision {}
 
 impl Ord for PackageRevision {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.effective().cmp(&other.effective())
+        match (&self.0, &other.0) {
+            (None, None) => Ordering::Equal,
+            (None, Some(right)) => match right.is_zero() {
+                true => Ordering::Equal,
+                false => Ordering::Less,
+            },
+            (Some(left), None) => match left.is_zero() {
+                true => Ordering::Equal,
+                false => Ordering::Greater,
+            },
+            (Some(left), Some(right)) => left.cmp(right),
+        }
     }
 }
 
@@ -65,36 +59,34 @@ impl PartialOrd for PackageRevision {
 
 impl Hash for PackageRevision {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.effective().hash(state);
+        self.0
+            .as_ref()
+            .map(NumericComponent::normalized)
+            .unwrap_or_default()
+            .hash(state);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
+    use crate::test_support::assert_eq_hash;
 
     #[test]
-    fn test_package_revision_semantics() {
+    fn test_package_revision_equality() {
         let implicit = PackageRevision::new(None).unwrap();
         let explicit_zero = PackageRevision::new(Some("0")).unwrap();
         let padded = PackageRevision::new(Some("03")).unwrap();
         let canonical = PackageRevision::new(Some("3")).unwrap();
-        let mut revisions = HashSet::new();
+        let r9999 = PackageRevision::new(Some("999999999999999999999999999999999")).unwrap();
 
-        revisions.insert(implicit.clone());
-        revisions.insert(explicit_zero.clone());
-        revisions.insert(padded.clone());
-        revisions.insert(canonical.clone());
-
-        assert_eq!(implicit, explicit_zero);
-        assert_eq!(padded, canonical);
+        assert_eq_hash(&implicit, &explicit_zero);
+        assert_eq_hash(&padded, &canonical);
         assert!(implicit < canonical);
-        assert_eq!(implicit.effective(), 0);
-        assert_eq!(implicit.source(), None);
-        assert_eq!(explicit_zero.source(), Some("0"));
-        assert_eq!(padded.effective(), 3);
-        assert_eq!(padded.source(), Some("03"));
-        assert_eq!(revisions.len(), 2);
+        assert!(canonical < r9999);
+        assert_eq!(implicit.as_str(), None);
+        assert_eq!(explicit_zero.as_str(), Some("0"));
+        assert_eq!(padded.as_str(), Some("03"));
+        assert_eq!(r9999.as_str(), Some("999999999999999999999999999999999"));
     }
 }

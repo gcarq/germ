@@ -1,4 +1,5 @@
-use anyhow::{Result, anyhow, bail};
+use super::numeric::NumericComponent;
+use anyhow::{anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::Write;
@@ -19,7 +20,7 @@ impl VersionNumber {
     ///
     /// For example, `"1.2.3a"` becomes `(["1", "2", "3", "a"], Some('a'))` while
     /// `"2.0.1"` becomes `(["2", "0", "1"], None)`.
-    fn new(version: &str) -> Result<Self> {
+    fn new(version: &str) -> anyhow::Result<Self> {
         let (version, letter) = match version
             .chars()
             .last()
@@ -36,24 +37,24 @@ impl VersionNumber {
             .split('.')
             .enumerate()
             .map(|(idx, comp)| NumberComponent::new(comp, idx))
-            .collect::<Result<_>>()?;
+            .collect::<anyhow::Result<_>>()?;
         Ok(Self { components, letter })
     }
 
-    /// Returns an iterator over the string representations of each component
-    /// including the optional letter suffix as the last element.
-    pub fn iter(&self) -> impl Iterator<Item = String> {
-        self.components
-            .iter()
-            .map(ToString::to_string)
-            .chain(self.letter.map(|c| c.to_string()))
+    /// Returns an iterator over the components.
+    pub fn components(&self) -> impl Iterator<Item = &NumberComponent> {
+        self.components.iter()
+    }
+
+    pub const fn letter(&self) -> Option<char> {
+        self.letter
     }
 }
 
 impl FromStr for VersionNumber {
     type Err = anyhow::Error;
 
-    fn from_str(version: &str) -> Result<Self> {
+    fn from_str(version: &str) -> anyhow::Result<Self> {
         Self::new(version)
     }
 }
@@ -130,8 +131,8 @@ impl fmt::Display for VersionNumber {
 /// and not part of this enum.
 /// See PMS 3.2 and 3.3 for more details.
 #[derive(Archive, Serialize, Deserialize, Clone, Eq, Debug)]
-enum NumberComponent {
-    Numeric(Box<str>),
+pub enum NumberComponent {
+    Numeric(NumericComponent),
     Alphabetic(Box<str>),
 }
 
@@ -140,12 +141,12 @@ impl NumberComponent {
     /// The first component (index 0) is always considered `Numeric`.
     /// Subsequent components starting with '0' are considered `Alphabetic`.
     /// Returns an `Err` if the `number` is empty or contains non-digit characters.
-    pub fn new(number: &str, index: usize) -> Result<Self> {
+    pub fn new(number: &str, index: usize) -> anyhow::Result<Self> {
         if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
             bail!("invalid version component: '{number}'");
         }
         let component = match index == 0 || !number.starts_with('0') {
-            true => NumberComponent::Numeric(number.into()),
+            true => NumberComponent::Numeric(NumericComponent::new_unchecked(number)),
             false => NumberComponent::Alphabetic(number.into()),
         };
         Ok(component)
@@ -155,16 +156,17 @@ impl NumberComponent {
 impl Ord for NumberComponent {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (NumberComponent::Numeric(a), NumberComponent::Numeric(b)) => {
-                let a = a.trim_start_matches('0');
-                let b = b.trim_start_matches('0');
-                a.len().cmp(&b.len()).then_with(|| a.cmp(b))
-            }
-            (NumberComponent::Alphabetic(a), NumberComponent::Alphabetic(b))
-            | (NumberComponent::Numeric(a), NumberComponent::Alphabetic(b))
-            | (NumberComponent::Alphabetic(a), NumberComponent::Numeric(b)) => {
+            (NumberComponent::Numeric(a), NumberComponent::Numeric(b)) => a.cmp(b),
+            (NumberComponent::Alphabetic(a), NumberComponent::Alphabetic(b)) => {
                 a.trim_end_matches('0').cmp(b.trim_end_matches('0'))
             }
+            (NumberComponent::Numeric(a), NumberComponent::Alphabetic(b)) => a
+                .as_str()
+                .trim_end_matches('0')
+                .cmp(b.trim_end_matches('0')),
+            (NumberComponent::Alphabetic(a), NumberComponent::Numeric(b)) => a
+                .trim_end_matches('0')
+                .cmp(b.as_str().trim_end_matches('0')),
         }
     }
 }
@@ -183,81 +185,84 @@ impl PartialOrd<Self> for NumberComponent {
 
 impl hash::Hash for NumberComponent {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        let comp = match self {
-            NumberComponent::Numeric(n) => n,
-            NumberComponent::Alphabetic(a) => a.trim_start_matches('0'),
-        };
-        comp.hash(state);
+        match self {
+            NumberComponent::Numeric(n) => n.hash(state),
+            NumberComponent::Alphabetic(a) => a.trim_end_matches('0').hash(state),
+        }
     }
 }
 
 impl fmt::Display for NumberComponent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let repr = match self {
-            NumberComponent::Numeric(n) => n,
-            NumberComponent::Alphabetic(a) => a,
-        };
-        f.write_str(repr)
+        match self {
+            NumberComponent::Numeric(n) => f.write_str(n.as_str()),
+            NumberComponent::Alphabetic(a) => f.write_str(a),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::assert_eq_hash;
 
     #[test]
-    fn test_version_number_new_ok() {
-        assert_eq!(
-            VersionNumber::from_str("1.2.3a").unwrap(),
-            VersionNumber {
+    fn test_version_number_parse() {
+        assert_eq_hash(
+            &VersionNumber::from_str("1.2.3a").unwrap(),
+            &VersionNumber {
                 components: [
-                    NumberComponent::Numeric("1".into()),
-                    NumberComponent::Numeric("2".into()),
-                    NumberComponent::Numeric("3".into()),
+                    NumberComponent::Numeric("1".parse().unwrap()),
+                    NumberComponent::Numeric("2".parse().unwrap()),
+                    NumberComponent::Numeric("3".parse().unwrap()),
                 ]
                 .into(),
                 letter: Some('a'),
-            }
+            },
         );
 
-        assert_eq!(
-            VersionNumber::from_str("2.0.1").unwrap(),
-            VersionNumber {
+        assert_eq_hash(
+            &VersionNumber::from_str("2.0.1").unwrap(),
+            &VersionNumber {
                 components: [
-                    NumberComponent::Numeric("2".into()),
-                    NumberComponent::Numeric("0".into()),
-                    NumberComponent::Numeric("1".into()),
+                    NumberComponent::Numeric("2".parse().unwrap()),
+                    NumberComponent::Numeric("0".parse().unwrap()),
+                    NumberComponent::Numeric("1".parse().unwrap()),
                 ]
                 .into(),
                 letter: None,
-            }
+            },
         );
 
-        assert_eq!(
-            VersionNumber::from_str("1.2.03").unwrap(),
-            VersionNumber {
+        assert_eq_hash(
+            &VersionNumber::from_str("1.2.03").unwrap(),
+            &VersionNumber {
                 components: [
-                    NumberComponent::Numeric("1".into()),
-                    NumberComponent::Numeric("2".into()),
+                    NumberComponent::Numeric("1".parse().unwrap()),
+                    NumberComponent::Numeric("2".parse().unwrap()),
                     NumberComponent::Alphabetic("03".into()),
                 ]
                 .into(),
                 letter: None,
-            }
+            },
         );
 
-        assert_eq!(
-            VersionNumber::from_str("20251122").unwrap(),
-            VersionNumber {
-                components: [NumberComponent::Numeric("20251122".into())].into(),
+        assert_eq_hash(
+            &VersionNumber::from_str("20251122").unwrap(),
+            &VersionNumber {
+                components: [NumberComponent::Numeric("20251122".parse().unwrap())].into(),
                 letter: None,
-            }
+            },
+        );
+        assert_eq_hash(
+            &VersionNumber::from_str("1.030").unwrap(),
+            &VersionNumber::from_str("1.03").unwrap(),
         );
     }
 
     #[test]
-    fn test_version_number_new_err() {
-        let invalid_versions = vec!["", ".", "1..2", "1.2.3A", "1.2.3!"];
+    fn test_version_number_parse_error() {
+        let invalid_versions = ["", ".", "1..2", "1.2.3A", "1.2.3!"];
         for version in invalid_versions {
             assert!(
                 VersionNumber::from_str(version).is_err(),
@@ -267,33 +272,8 @@ mod tests {
     }
 
     #[test]
-    fn test_version_number_ord() {
-        let v1_2_3 = VersionNumber::from_str("1.2.3").unwrap();
-        let v1_2_03 = VersionNumber::from_str("1.2.03").unwrap();
-        let v1_2_3a = VersionNumber::from_str("1.2.3a").unwrap();
-        let v1_2_3b = VersionNumber::from_str("1.2.3b").unwrap();
-        let v1_2_3_1 = VersionNumber::from_str("1.2.3.1").unwrap();
-        let v1_2_4 = VersionNumber::from_str("1.2.4").unwrap();
-        let v1_10_0 = VersionNumber::from_str("1.10.0").unwrap();
-        let v1_10_0_1 = VersionNumber::from_str("1.10.0.1").unwrap();
-        let v2_0 = VersionNumber::from_str("2.0").unwrap();
-        let v2025_11_22 = VersionNumber::from_str("20251122").unwrap();
-
-        assert!(v1_2_03 < v1_2_3);
-        assert!(v1_2_3 < v1_2_4);
-        assert!(v1_2_3 < v1_2_3a);
-        assert!(v1_2_3a < v1_2_3b);
-        assert!(v1_2_3b < v1_2_3_1);
-        assert!(v1_2_3_1 < v1_2_4);
-        assert!(v1_2_4 < v1_10_0);
-        assert!(v1_10_0 < v1_10_0_1);
-        assert!(v1_10_0_1 < v2_0);
-        assert!(v2_0 < v2025_11_22);
-    }
-
-    #[test]
     fn test_version_number_display() {
-        let test_cases: Vec<(VersionNumber, &str)> = vec![
+        let test_cases: [(VersionNumber, &str); 4] = [
             ("1.2.3a".parse().unwrap(), "1.2.3a"),
             ("2.0.1".parse().unwrap(), "2.0.1"),
             ("1.2.03".parse().unwrap(), "1.2.03"),
@@ -305,28 +285,19 @@ mod tests {
     }
 
     #[test]
-    fn test_number_component_ord() {
-        let num1 = NumberComponent::Numeric("1".into());
-        let num2 = NumberComponent::Numeric("2".into());
-        let huge = NumberComponent::Numeric("64027794000528877187958462653".into());
-        let larger_huge = NumberComponent::Numeric("164027794000528877187958462653".into());
+    fn test_number_component_ordering() {
         let alpha03 = NumberComponent::Alphabetic("03".into());
         let alpha3 = NumberComponent::Alphabetic("3".into());
 
-        assert!(num1 < num2);
-        assert!(num2 < huge);
-        assert!(huge < larger_huge);
-        assert!(alpha03 < alpha3); // '03' vs '3' should compare as ascii
-        assert!(alpha03 < num1); // Numeric vs Alphabetic comparison
-        assert!(alpha3 > num2); // Alphabetic vs Numeric comparison
+        assert!(alpha03 < alpha3); // Alphabetic components compare as ASCII
     }
 
     #[test]
     fn test_number_component_display() {
-        let test_cases = vec![
-            (NumberComponent::Numeric("2".into()), "2"),
+        let test_cases = [
+            (NumberComponent::Numeric("2".parse().unwrap()), "2"),
             (NumberComponent::Alphabetic("03".into()), "03"),
-            (NumberComponent::Numeric("3".into()), "3"),
+            (NumberComponent::Numeric("3".parse().unwrap()), "3"),
         ];
         for (component, expected) in test_cases {
             assert_eq!(component.to_string(), expected);

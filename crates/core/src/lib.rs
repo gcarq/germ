@@ -12,6 +12,8 @@ mod profile;
 mod regex;
 pub mod repository;
 pub use conf::system::SysConf;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod types;
 mod utils;
 pub mod vdb;
