@@ -5,6 +5,12 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Checks whether a line is blank or a comment after ASCII trimming.
+pub fn is_blank_or_comment(line: &str) -> bool {
+    let line = line.trim_ascii_start();
+    line.is_empty() || line.starts_with('#')
+}
+
 /// Trait for inheriting configurations from another instance.
 pub trait Inherit {
     fn inherit_from(&mut self, parent: &Self);
@@ -68,6 +74,19 @@ pub fn list_files(path: &Path) -> impl Iterator<Item = Result<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_blank_or_comment() {
+        for (line, expected) in [
+            ("", true),
+            ("  ", true),
+            ("\t# comment", true),
+            ("value", false),
+            ("value # comment", false),
+        ] {
+            assert_eq!(is_blank_or_comment(line), expected, "{line:?}");
+        }
+    }
 
     #[test]
     fn test_shlex_split_valid_syntax() {

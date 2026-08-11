@@ -1,4 +1,5 @@
 use crate::files::content_from_path;
+use crate::utils::is_blank_or_comment;
 use anyhow::anyhow;
 use std::ops::Deref;
 use std::path::Path;
@@ -18,7 +19,7 @@ impl ProfileDescriptions {
         let descriptions = content
             .lines()
             .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .filter(|line| !is_blank_or_comment(line))
             .map(ProfileDescription::from_line)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self(descriptions))
@@ -70,7 +71,7 @@ impl ArchList {
         let archs = content
             .lines()
             .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .filter(|line| !is_blank_or_comment(line))
             .map(String::from)
             .collect();
         Ok(Self(archs))

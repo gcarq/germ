@@ -1,5 +1,6 @@
 use super::ProfileSource;
 use crate::repository::RepoSet;
+use crate::utils::is_blank_or_comment;
 use anyhow::{Context, Result, anyhow, bail};
 use std::{
     fmt, fs,
@@ -34,7 +35,7 @@ impl ParentEntry {
         content
             .lines()
             .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .filter(|line| !is_blank_or_comment(line))
             .map(Self::try_from)
             .collect::<Result<_>>()
             .with_context(|| anyhow!("unable to parse parent file {}", path.display()))

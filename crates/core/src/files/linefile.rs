@@ -1,7 +1,7 @@
 use crate::files::content_from_path;
 use crate::files::entry::{Entry, FileEntry, Precedence};
 use crate::types::FxHashSet;
-use crate::utils::Inherit;
+use crate::utils::{Inherit, is_blank_or_comment};
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -25,7 +25,7 @@ impl<T: FileEntry> LineBasedFile<T> {
             .lines()
             .enumerate()
             .map(|(lineno, line)| (lineno, line.trim()))
-            .filter(|(_, line)| !line.is_empty() && !line.starts_with('#'))
+            .filter(|(_, line)| !is_blank_or_comment(line))
             .map(|(lineno, line)| {
                 Entry::from_str(line, order)
                     .with_context(|| format!("failed to parse line {}: {line}", lineno + 1))

@@ -9,29 +9,31 @@ use crate::package::cpv::CPV;
 use crate::package::metadata::PackageMetadata;
 use crate::repository::Repository;
 use crate::types::FxHashMap;
+use crate::utils::is_blank_or_comment;
 
 use anyhow::anyhow;
 use regex::Regex;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::LazyLock;
 use thiserror::Error;
 
-/// Regex to capture EAPI from ebuild files according to PMS 7.3.1.
-/// The regex crate doesn't support backreferences, so we can't enforce matching quotes.
+/// Regex for a PMS 7.3.1 EAPI declaration.
+///
+/// The `regex` crate doesn't support backreferences, so all cases are handled explicitly.
 static PMS_EAPI_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^[ \t]*EAPI=['"]?(?<eapi>[A-Za-z0-9+_.-]*)['"]?[ \t]*([ \t]#.*)?$"#).unwrap()
+    Regex::new(
+        r#"^[ \t]*EAPI=(?:([A-Za-z0-9+_.-]*)|'([A-Za-z0-9+_.-]*)'|"([A-Za-z0-9+_.-]*)")(?:[ \t]+#.*|[ \t]*)$"#,
+    )
+    .unwrap()
 });
 
 /// Errors returned when loading and validating an [`Ebuild`].
 #[derive(Error, Debug)]
 pub enum EbuildError {
-    #[error("EAPI declaration not found")]
-    MissingEapi,
-
     #[error(transparent)]
     Eapi(#[from] EapiError),
 
@@ -67,32 +69,17 @@ impl<'r> Ebuild<'r> {
             .join(cpv.package())
             .join(format!("{}.ebuild", cpv.pf()));
 
-        let file = File::open(&path).map_err(|source| EbuildError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        let reader = BufReader::with_capacity(256, file);
-
-        for line in reader.lines() {
-            let line = line.map_err(|source| EbuildError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            if let Some(caps) = PMS_EAPI_RE.captures(&line) {
-                let value = &caps["eapi"];
-                let eapi = Eapi::from_str(value)?;
-                if !eapi.is_supported_for_ebuilds() {
-                    return Err(EbuildError::UnsupportedEapi(eapi));
-                }
-                return Ok(Self {
-                    path,
-                    eapi,
-                    cpv,
-                    repo,
-                });
-            }
+        let eapi = Self::parse_eapi(&path)?;
+        if !eapi.is_supported_for_ebuilds() {
+            return Err(EbuildError::UnsupportedEapi(eapi));
         }
-        Err(EbuildError::MissingEapi)
+
+        Ok(Self {
+            path,
+            eapi,
+            cpv,
+            repo,
+        })
     }
 
     /// Generates and returns the [`PackageMetadata`] for this ebuild.
@@ -113,6 +100,49 @@ impl<'r> Ebuild<'r> {
             .collect::<Result<FxHashMap<_, _>, _>>();
 
         Ok(PackageMetadata::from_map(data?)?)
+    }
+
+    /// Parses the EAPI from the ebuild file at the given `path`.
+    ///
+    /// The EAPI is expected to be declared in the first non-blank and non-comment line,
+    /// otherwise [`Eapi::Zero`] will be returned.
+    fn parse_eapi(path: &Path) -> Result<Eapi, EbuildError> {
+        let file = File::open(path).map_err(|source| EbuildError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+        let reader = BufReader::with_capacity(256, file);
+
+        let first_line = reader
+            .lines()
+            .find_map(|line| match line {
+                Ok(line) if !is_blank_or_comment(&line) => Some(Ok(line)),
+                Ok(_) => None,
+                Err(err) => Some(Err(err)),
+            })
+            .transpose()
+            .map_err(|source| EbuildError::Io {
+                path: path.to_owned(),
+                source,
+            })?;
+
+        let Some(first_line) = first_line else {
+            return Ok(Eapi::Zero);
+        };
+        match Self::parse_eapi_declaration(&first_line) {
+            Some("") | None => Ok(Eapi::Zero),
+            Some(value) => Ok(Eapi::from_str(value)?),
+        }
+    }
+
+    /// Parses a PMS EAPI assignment and returns its raw value.
+    fn parse_eapi_declaration(line: &str) -> Option<&str> {
+        let captures = PMS_EAPI_RE.captures(line)?;
+        captures
+            .get(1)
+            .or_else(|| captures.get(2))
+            .or_else(|| captures.get(3))
+            .map(|value| value.as_str())
     }
 }
 
@@ -139,14 +169,40 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn test_missing_eapi() {
-        let repo = RepoBuilder::new("repo")
-            .ebuild("cat", "pkg", "1", "DESCRIPTION=missing")
-            .finalize()
+    fn test_eapi_declarations() {
+        for (line, expected) in [
+            ("EAPI=7", Some("7")),
+            ("  EAPI='7'", Some("7")),
+            ("EAPI=\"7\" # comment", Some("7")),
+            ("EAPI='7\"", None),
+            ("EAPI=\"7'", None),
+            ("EAPI = 7", None),
+        ] {
+            assert_eq!(Ebuild::parse_eapi_declaration(line), expected);
+        }
+    }
+
+    #[test]
+    fn test_ebuild_without_eapi() {
+        let contents = ["", "  # comment", "DESCRIPTION=missing", "EAPI="];
+        let mut builder = RepoBuilder::new("repo");
+        for (index, content) in contents.iter().enumerate() {
+            builder = builder.ebuild("cat", "pkg", (index + 1).to_string(), *content);
+        }
+        let repo = builder.finalize().unwrap();
+
+        for (index, _) in contents.iter().enumerate() {
+            let cpv = CPV::new(
+                "cat",
+                "pkg",
+                PackageVersion::try_from((index + 1).to_string().as_str()).unwrap(),
+            )
             .unwrap();
-        let cpv = CPV::new("cat", "pkg", PackageVersion::try_from("1").unwrap()).unwrap();
-        let err = Ebuild::new(&cpv, &repo).unwrap_err();
-        assert!(matches!(err, EbuildError::MissingEapi));
+            assert!(matches!(
+                Ebuild::new(&cpv, &repo).unwrap_err(),
+                EbuildError::UnsupportedEapi(Eapi::Zero)
+            ));
+        }
     }
 
     #[test]

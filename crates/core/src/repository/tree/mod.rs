@@ -339,37 +339,7 @@ mod tests {
     use super::*;
 
     use super::super::test_support::RepoBuilder;
-    use crate::{
-        ebuild::{EbuildError, handler::error::MetadataGenerationError},
-        package::{metadata::PackageMetadata, version::PackageVersion},
-    };
-
-    #[tokio::test]
-    async fn test_invalid_package_versions() {
-        let mut repository = RepoBuilder::new("repo")
-            .categories(["app-misc"])
-            .ebuild("app-misc", "foo", "1", "")
-            .ebuild("app-misc", "foo", "2", "")
-            .finalize()
-            .unwrap();
-        repository.populate().unwrap();
-
-        let results = repository
-            .find_packages(&Atom::new("app-misc/foo").unwrap())
-            .await
-            .unwrap();
-
-        let errors = results
-            .into_iter()
-            .map(Result::unwrap_err)
-            .collect::<Vec<_>>();
-
-        assert_eq!(errors.len(), 2);
-        assert!(errors.iter().all(|error| matches!(
-            &error.source,
-            MetadataGenerationError::Ebuild(EbuildError::MissingEapi)
-        )));
-    }
+    use crate::package::{metadata::PackageMetadata, version::PackageVersion};
 
     #[tokio::test]
     async fn test_repository_resolves_cached_metadata() {

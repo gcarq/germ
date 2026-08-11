@@ -3,7 +3,7 @@ use crate::deps::useflag::UseFlag;
 use crate::files::content_from_path;
 use crate::files::entry::{Entry, Precedence};
 use crate::types::{FxHashMap, FxHashSet};
-use crate::utils::Inherit;
+use crate::utils::{Inherit, is_blank_or_comment};
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
@@ -22,7 +22,7 @@ impl PackageUseEntries {
 
         for (lineno, line) in content.lines().enumerate() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
+            if is_blank_or_comment(line) {
                 continue;
             }
             let (atom, flags) = Self::parse_line(line, order)
