@@ -18,6 +18,9 @@ pub enum RepoSetError {
         source: RepositoryError,
     },
 
+    #[error("repository sync failed")]
+    Sync(#[source] anyhow::Error),
+
     #[error("internal reposet error")]
     Internal(#[source] anyhow::Error),
 }

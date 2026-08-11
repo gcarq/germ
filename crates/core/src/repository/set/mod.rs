@@ -15,7 +15,7 @@ use crate::types::{FxHashMap, FxHashSet};
 use crate::utils::Inherit;
 use anyhow::anyhow;
 use either::Either;
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use std::path::Path;
 use std::sync::Arc;
 use std::{fs, io};
@@ -48,11 +48,12 @@ struct RepositoryEntry {
 }
 
 impl RepositoryEntry {
-    fn sync(&self) -> anyhow::Result<()> {
-        if let Some(handler) = &self.sync_handler {
-            handler.sync()?;
+    fn sync(&self, name: &str, force: bool) -> anyhow::Result<()> {
+        match &self.sync_handler {
+            Some(handler) => handler.sync(name, force),
+            None if force => Err(anyhow!("repository has no sync handler")),
+            None => Ok(()),
         }
-        Ok(())
     }
 }
 
@@ -95,11 +96,21 @@ impl RepoSet {
 
     /// Attempts to synchronize all repositories and reloads repo data from disk.
     ///
+    /// If `repo` is provided, only it will be synced, overriding `auto-sync`,
+    /// otherwise all repositories with `auto-sync` enabled will be synced.
     /// A sync failure is logged as error but doesn't return an `Err`.
-    pub fn maybe_sync(&mut self) -> Result<(), RepoSetError> {
+    pub fn maybe_sync(&mut self, repo: Option<&str>) -> Result<(), RepoSetError> {
+        if let Some(name) = repo {
+            let entry = self
+                .entries
+                .get(name)
+                .ok_or_else(|| RepoSetError::Sync(anyhow!("unknown repository '{name}'")))?;
+            return entry.sync(name, true).map_err(|err| {
+                RepoSetError::Sync(err.context(anyhow!("unable to sync repository '{name}'")))
+            });
+        }
         for (name, entry) in &self.entries {
-            info!("Syncing repository '{name}'");
-            if let Err(err) = entry.sync() {
+            if let Err(err) = entry.sync(name, false) {
                 error!("Failed to sync repository '{name}': {err}");
             }
         }
@@ -457,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_makes_repository_available() {
+    fn test_sync_reloads_repository() {
         let temp = tempfile::Builder::new().tempdir().unwrap();
         let location = temp.path().join("repository");
         RepoBuilder::new("repo").write_to(&location).unwrap();
@@ -478,7 +489,7 @@ mod tests {
             .ebuild("app-misc", "foo", "1", "")
             .write_to(&location)
             .unwrap();
-        set.maybe_sync().unwrap();
+        set.maybe_sync(None).unwrap();
 
         assert!(
             set.get("repo").is_some_and(|repository| repository

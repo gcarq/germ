@@ -36,13 +36,17 @@ pub enum Command {
         #[arg(short, long)]
         force: bool,
 
-        /// Only generate cache for the given repository (defaults to all)
+        /// Only generate cache for the given repository [default: all]
         #[arg(value_name = "repo")]
         repo: Option<String>,
     },
 
     /// Sync repositories
-    Sync,
+    Sync {
+        /// Only sync the given repository [default: all]
+        #[arg(value_name = "repo")]
+        repo: Option<String>,
+    },
 }
 
 pub async fn execute(args: &Args, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
@@ -50,14 +54,14 @@ pub async fn execute(args: &Args, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
         Command::Info { atom } => info(atom.as_ref(), sysconf)?,
         Command::Install { atom } => install(atom, sysconf).await?,
         Command::Gencache { force, repo } => gencache(repo.as_deref(), *force, sysconf).await?,
-        Command::Sync => sync(sysconf)?,
+        Command::Sync { repo } => sync(repo.as_deref(), sysconf)?,
     }
     Ok(())
 }
 
-/// Sync all repositories.
-fn sync(sysconf: Arc<SysConf>) -> anyhow::Result<()> {
+/// Sync either all or the provided `repo`.
+fn sync(repo: Option<&str>, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     Ok(RepoSet::new(sysconf)
         .with_context(|| "unable to build repo set")?
-        .maybe_sync()?)
+        .maybe_sync(repo)?)
 }

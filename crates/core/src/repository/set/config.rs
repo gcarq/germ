@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 // List of properties in repos.conf that are currently not supported.
-const UNSUPPORTED_CONF_PROPERTIES: &[&str] = &["aliases", "auto-sync", "eclass-overrides", "force"];
+const UNSUPPORTED_CONF_PROPERTIES: &[&str] = &["aliases", "eclass-overrides", "force"];
 
 #[cfg_attr(test, derive(Default, Debug))]
 pub struct RepoSetConfig {
@@ -117,12 +117,9 @@ impl RepositoryConfig {
                 .to_owned(),
         );
 
-        let masters = properties.get("masters").map(|masters| {
-            masters
-                .split_ascii_whitespace()
-                .map(ToOwned::to_owned)
-                .collect()
-        });
+        let masters = properties
+            .get("masters")
+            .map(|m| m.split_ascii_whitespace().map(ToOwned::to_owned).collect());
 
         let config = RepositoryConfig {
             location,

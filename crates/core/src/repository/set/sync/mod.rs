@@ -6,6 +6,7 @@ mod git;
 use self::git::GitSyncHandler;
 use crate::types::FxHashMap;
 use anyhow::{Context, anyhow, bail};
+use log::{debug, info};
 use std::fmt;
 use std::path::PathBuf;
 
@@ -30,6 +31,7 @@ struct SyncConfig {
     // Absolute path to the repository location on the local filesystem.
     location: PathBuf,
     sync_uri: String,
+    auto_sync: bool,
 }
 
 impl SyncConfig {
@@ -39,11 +41,25 @@ impl SyncConfig {
             .map(PathBuf::from)
             .ok_or_else(|| anyhow!("missing required 'location' property"))?;
 
-        let Some(sync_uri) = properties.get("sync-uri").map(ToOwned::to_owned) else {
-            bail!("missing required 'sync-uri' property");
+        let sync_uri = match properties.get("sync-uri") {
+            Some(uri) => uri.to_owned(),
+            None => bail!("missing required 'sync-uri' property"),
         };
 
-        Ok(SyncConfig { location, sync_uri })
+        let auto_sync = match properties.get("auto-sync") {
+            Some(value) => match value.as_str() {
+                "true" | "yes" => true,
+                "false" | "no" => false,
+                _ => bail!("invalid 'auto-sync' value: '{value}'"),
+            },
+            None => true, // Default to true if not specified
+        };
+
+        Ok(SyncConfig {
+            location,
+            sync_uri,
+            auto_sync,
+        })
     }
 }
 
@@ -75,7 +91,15 @@ pub trait SyncHandler: fmt::Debug + Send + Sync {
         Self: Sized;
 
     /// Conditionally syncs the repository using either `init` or `update`.
-    fn sync(&self) -> anyhow::Result<()> {
+    ///
+    /// If `force` is true, the sync will be performed regardless of the `auto_sync` setting.
+    fn sync(&self, name: &str, force: bool) -> anyhow::Result<()> {
+        if !self.auto_sync() && !force {
+            debug!("auto-sync disabled for {name}");
+            return Ok(());
+        }
+
+        info!("Syncing repository '{name}'");
         match self.is_initialized() {
             true => self.update(),
             false => self.init(),
@@ -91,12 +115,45 @@ pub trait SyncHandler: fmt::Debug + Send + Sync {
 
     /// Updates an existing repository.
     fn update(&self) -> anyhow::Result<()>;
+
+    fn auto_sync(&self) -> bool;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ini::Ini;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug, Default)]
+    struct TestSyncHandler {
+        auto_sync: bool,
+        sync_calls: AtomicUsize,
+    }
+
+    impl SyncHandler for TestSyncHandler {
+        fn new(_properties: &FxHashMap<String, String>) -> anyhow::Result<Self> {
+            Ok(Default::default())
+        }
+
+        fn is_initialized(&self) -> bool {
+            true
+        }
+
+        fn init(&self) -> anyhow::Result<()> {
+            self.sync_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+
+        fn update(&self) -> anyhow::Result<()> {
+            self.sync_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+
+        fn auto_sync(&self) -> bool {
+            self.auto_sync
+        }
+    }
 
     fn load_properties(ini_content: &str) -> FxHashMap<String, String> {
         Ini::load_from_str(ini_content)
@@ -106,6 +163,17 @@ mod tests {
             .into_iter()
             .map(|(k, v)| (k.to_owned(), v.to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn test_sync_respects_auto_sync() {
+        let handler = TestSyncHandler {
+            auto_sync: false,
+            sync_calls: AtomicUsize::new(0),
+        };
+        handler.sync("gentoo", false).unwrap();
+        handler.sync("gentoo", true).unwrap();
+        assert_eq!(handler.sync_calls.load(Ordering::Relaxed), 1);
     }
 
     #[test]

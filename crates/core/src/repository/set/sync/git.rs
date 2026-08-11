@@ -100,6 +100,10 @@ impl SyncHandler for GitSyncHandler {
         self.reset_hard(&remote_branch, &env)?;
         Ok(())
     }
+
+    fn auto_sync(&self) -> bool {
+        self.config.auto_sync
+    }
 }
 
 impl GitSyncHandler {
@@ -280,11 +284,11 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     fn properties(location: &Path, sync_uri: &str) -> FxHashMap<String, String> {
-        let mut properties = FxHashMap::default();
-        properties.insert("location".into(), location.to_string_lossy().into_owned());
-        properties.insert("sync-type".into(), "git".into());
-        properties.insert("sync-uri".into(), sync_uri.into());
-        properties
+        FxHashMap::from_iter([
+            ("location".into(), location.to_string_lossy().into_owned()),
+            ("sync-type".into(), "git".into()),
+            ("sync-uri".into(), sync_uri.into()),
+        ])
     }
 
     fn run(command: &mut Command) -> Output {
@@ -352,101 +356,84 @@ mod tests {
     }
 
     #[test]
-    fn test_parses_default_depth_values() {
+    fn test_default_depths() {
         let temp = tempfile::Builder::new().tempdir().unwrap();
-        let properties = properties(&temp.path().join("repo"), "file:///tmp/origin.git");
+        let props = properties(&temp.path().join("repo"), "file:///tmp/origin.git");
 
-        let handler = GitSyncHandler::new(&properties).unwrap();
+        let handler = GitSyncHandler::new(&props).unwrap();
         assert_eq!(handler.clone_depth, 1);
         assert_eq!(handler.sync_depth, 1);
     }
 
     #[test]
-    fn test_clone_from_local_origin_creates_destination() {
-        let temp = tempfile::Builder::new().tempdir().unwrap();
-        let (_bare, _work, origin_url) = create_origin(temp.path(), "gentoo", "initial");
-        let destination = temp.path().join("gentoo");
-        let mut properties = properties(&destination, &origin_url);
-        properties.insert("clone-depth".into(), "1".into());
+    fn test_clone_depths() {
+        for (clone_depth, expected_shallow) in [("1", "true"), ("0", "false")] {
+            let temp = tempfile::Builder::new().tempdir().unwrap();
+            let (_bare, _work, origin_url) = create_origin(temp.path(), "gentoo", "initial");
+            let dest = temp.path().join("gentoo");
+            let mut props = properties(&dest, &origin_url);
+            props.insert("clone-depth".into(), clone_depth.into());
 
-        let handler = GitSyncHandler::new(&properties).unwrap();
-        handler.sync().unwrap();
+            let handler = GitSyncHandler::new(&props).unwrap();
+            handler.sync("gentoo", false).unwrap();
 
-        assert!(destination.join(".git").exists());
-        let output = git_in(&destination, &["rev-parse", "--is-shallow-repository"]);
-        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "true");
+            let output = git_in(&dest, &["rev-parse", "--is-shallow-repository"]);
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout).trim(),
+                expected_shallow
+            );
+        }
     }
 
     #[test]
-    fn test_clone_depth_zero_uses_full_history() {
-        let temp = tempfile::Builder::new().tempdir().unwrap();
-        let (_bare, _work, origin_url) = create_origin(temp.path(), "gentoo", "initial");
-        let destination = temp.path().join("gentoo");
-        let mut properties = properties(&destination, &origin_url);
-        properties.insert("clone-depth".into(), "0".into());
-
-        let handler = GitSyncHandler::new(&properties).unwrap();
-        handler.sync().unwrap();
-
-        let output = git_in(&destination, &["rev-parse", "--is-shallow-repository"]);
-        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "false");
-    }
-
-    #[test]
-    fn test_update_fetches_and_hard_resets_to_origin() {
+    fn test_update_resets_to_origin() {
         let temp = tempfile::Builder::new().tempdir().unwrap();
         let (_bare, work, origin_url) = create_origin(temp.path(), "gentoo", "initial");
-        let destination = temp.path().join("gentoo");
-        let mut properties = properties(&destination, &origin_url);
-        properties.insert("clone-depth".into(), "0".into());
-        properties.insert("sync-depth".into(), "0".into());
-        let handler = GitSyncHandler::new(&properties).unwrap();
-        handler.sync().unwrap();
+        let dest = temp.path().join("gentoo");
+        let mut props = properties(&dest, &origin_url);
+        props.insert("clone-depth".into(), "0".into());
+        props.insert("sync-depth".into(), "0".into());
+        let handler = GitSyncHandler::new(&props).unwrap();
+        handler.sync("gentoo", false).unwrap();
 
-        fs::write(destination.join("MARKER"), "local commit").unwrap();
-        commit_all(&destination, "local commit");
+        fs::write(dest.join("MARKER"), "local commit").unwrap();
+        commit_all(&dest, "local commit");
 
         fs::write(work.join("MARKER"), "remote update").unwrap();
         commit_all(&work, "remote update");
         git_in(&work, &["push", "origin", "main"]);
 
-        handler.sync().unwrap();
+        handler.sync("gentoo", false).unwrap();
 
         assert_eq!(
-            fs::read_to_string(destination.join("MARKER")).unwrap(),
+            fs::read_to_string(dest.join("MARKER")).unwrap(),
             "remote update"
         );
-        let head = git_in(&destination, &["rev-parse", "HEAD"]);
-        let origin_head = git_in(&destination, &["rev-parse", "origin/main"]);
+        let head = git_in(&dest, &["rev-parse", "HEAD"]);
+        let origin_head = git_in(&dest, &["rev-parse", "origin/main"]);
         assert_eq!(head.stdout, origin_head.stdout);
     }
 
     #[test]
-    fn test_update_replaces_existing_origin_url() {
+    fn test_update_replaces_origin() {
         let temp = tempfile::Builder::new().tempdir().unwrap();
-        let origin_one_root = temp.path().join("one");
-        let origin_two_root = temp.path().join("two");
-        fs::create_dir_all(&origin_one_root).unwrap();
-        fs::create_dir_all(&origin_two_root).unwrap();
-        let (_bare_one, _work_one, origin_one_url) =
-            create_origin(&origin_one_root, "gentoo", "one");
-        let (_bare_two, _work_two, origin_two_url) =
-            create_origin(&origin_two_root, "gentoo", "two");
+        let origin_one = temp.path().join("one");
+        let origin_two = temp.path().join("two");
+        fs::create_dir_all(&origin_one).unwrap();
+        fs::create_dir_all(&origin_two).unwrap();
+        let (_bare_one, _work_one, origin_one_url) = create_origin(&origin_one, "gentoo", "one");
+        let (_bare_two, _work_two, origin_two_url) = create_origin(&origin_two, "gentoo", "two");
         let destination = temp.path().join("gentoo");
 
-        let mut initial_properties = properties(&destination, &origin_one_url);
-        initial_properties.insert("clone-depth".into(), "0".into());
-        GitSyncHandler::new(&initial_properties)
-            .unwrap()
-            .sync()
-            .unwrap();
+        let mut init_props = properties(&destination, &origin_one_url);
+        init_props.insert("clone-depth".into(), "0".into());
+        let handler = GitSyncHandler::new(&init_props).unwrap();
+        handler.sync("gentoo", false).unwrap();
 
-        let mut replacement_properties = properties(&destination, &origin_two_url);
-        replacement_properties.insert("sync-depth".into(), "0".into());
-        GitSyncHandler::new(&replacement_properties)
-            .unwrap()
-            .sync()
-            .unwrap();
+        let mut new_props = properties(&destination, &origin_two_url);
+        new_props.insert("sync-depth".into(), "0".into());
+        let handler = GitSyncHandler::new(&new_props).unwrap();
+        handler.sync("gentoo", false).unwrap();
 
         let output = git_in(&destination, &["remote", "get-url", "origin"]);
         assert_eq!(
