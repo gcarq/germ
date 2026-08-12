@@ -47,14 +47,15 @@ impl PackageUseEntries {
 }
 
 impl Inherit for PackageUseEntries {
-    fn inherit_from(&mut self, parent: &Self) {
+    fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
         for (atom, parent_flags) in &parent.0 {
             if let Some(child_flags) = self.0.get_mut(atom) {
-                child_flags.inherit_from(parent_flags);
+                child_flags.inherit_from(parent_flags)?;
             } else {
                 self.0.insert(atom.clone(), parent_flags.clone());
             }
         }
+        Ok(())
     }
 }
 
@@ -104,7 +105,7 @@ impl EntryUseFlags {
 impl Inherit for EntryUseFlags {
     /// Inherits flags from the given `parent`, replacing any existing flags with the same name.
     /// Flags that are unset in the child will not be inherited from the parent.
-    fn inherit_from(&mut self, parent: &Self) {
+    fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
         let mut seen = FxHashSet::default();
         let mut result = Vec::new();
         for flag in self.0.iter().rev().chain(parent.0.iter().rev()) {
@@ -114,6 +115,7 @@ impl Inherit for EntryUseFlags {
         }
         result.reverse();
         self.0 = result;
+        Ok(())
     }
 }
 
@@ -186,7 +188,7 @@ mod tests {
             .into(),
             Precedence::User,
         )?;
-        child.inherit_from(&parent.inherit(&grand_parent));
+        child.inherit_from(&parent.inherit(&grand_parent)?)?;
 
         assert_eq!(child.0.len(), 5);
         assert_eq!(
@@ -234,7 +236,7 @@ mod tests {
             Entry::from_str("qux", Precedence::Profile(1))?,
         ]);
 
-        child.inherit_from(&parent);
+        child.inherit_from(&parent)?;
 
         let expected = EntryUseFlags(vec![
             Entry::from_str("baz", Precedence::Profile(0))?,

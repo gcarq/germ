@@ -8,7 +8,7 @@ use crate::deps::atom::{Atom, AtomOperator, AtomVariant};
 use crate::regex::V_REV;
 use anyhow::anyhow;
 use base::VersionNumber;
-use regex::Regex;
+use fancy_regex::Regex;
 use revision::PackageRevision;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
@@ -99,7 +99,7 @@ impl TryFrom<&str> for PackageVersion {
     /// Create a `PackageVersion` from a full version string, for example: `1.2.3_alpha1-r1`.
     fn try_from(version: &str) -> anyhow::Result<Self> {
         let caps = VERSION_RE
-            .captures(version)
+            .captures(version)?
             .ok_or_else(|| anyhow!("invalid version: '{version}'"))?;
         Self::new(
             &caps["version"],

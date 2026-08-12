@@ -106,10 +106,10 @@ impl Profile {
 
         let mut inherited = parents.remove(0);
         for parent in parents {
-            inherited = parent.inherit(&inherited);
+            inherited = parent.inherit(&inherited)?;
         }
 
-        Ok(profile.inherit(&inherited))
+        profile.inherit(&inherited)
     }
 
     /// Loads one profile directory without resolving its parents.
@@ -205,23 +205,26 @@ impl Profile {
 
 impl Inherit for Profile {
     /// Inherits relevant configurations from the given parent profile.
-    fn inherit_from(&mut self, parent: &Profile) {
-        self.make_defaults.inherit_from(&parent.make_defaults);
-        self.packages.inherit_from(&parent.packages);
-        self.package_mask.inherit_from(&parent.package_mask);
-        self.package_unmask.inherit_from(&parent.package_unmask);
-        self.package_use.inherit_from(&parent.package_use);
-        self.use_mask.inherit_from(&parent.use_mask);
-        self.use_force.inherit_from(&parent.use_force);
-        self.use_stable_mask.inherit_from(&parent.use_stable_mask);
-        self.use_stable_force.inherit_from(&parent.use_stable_force);
-        self.package_use_mask.inherit_from(&parent.package_use_mask);
+    fn inherit_from(&mut self, parent: &Profile) -> anyhow::Result<()> {
+        self.make_defaults.inherit_from(&parent.make_defaults)?;
+        self.packages.inherit_from(&parent.packages)?;
+        self.package_mask.inherit_from(&parent.package_mask)?;
+        self.package_unmask.inherit_from(&parent.package_unmask)?;
+        self.package_use.inherit_from(&parent.package_use)?;
+        self.use_mask.inherit_from(&parent.use_mask)?;
+        self.use_force.inherit_from(&parent.use_force)?;
+        self.use_stable_mask.inherit_from(&parent.use_stable_mask)?;
+        self.use_stable_force
+            .inherit_from(&parent.use_stable_force)?;
+        self.package_use_mask
+            .inherit_from(&parent.package_use_mask)?;
         self.package_use_force
-            .inherit_from(&parent.package_use_force);
+            .inherit_from(&parent.package_use_force)?;
         self.package_use_stable_mask
-            .inherit_from(&parent.package_use_stable_mask);
+            .inherit_from(&parent.package_use_stable_mask)?;
         self.package_use_stable_force
-            .inherit_from(&parent.package_use_stable_force);
+            .inherit_from(&parent.package_use_stable_force)?;
+        Ok(())
     }
 }
 
@@ -282,7 +285,7 @@ mod tests {
             ..Default::default()
         };
 
-        child.inherit_from(&parent);
+        child.inherit_from(&parent)?;
         assert_eq!(
             child.make_defaults.get("USE").unwrap().to_string(),
             "foo bar"

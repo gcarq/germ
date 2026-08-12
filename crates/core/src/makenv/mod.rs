@@ -64,7 +64,7 @@ impl MakeEnv {
             .collect::<Result<Vec<_>>>()?;
 
         for i in 0..vars.len() {
-            vars[i].1 = vars[i].1.expand(&vars[..i]);
+            vars[i].1 = vars[i].1.expand(&vars[..i])?;
         }
 
         Ok(Self(vars.into_iter().collect()))
@@ -77,7 +77,7 @@ impl MakeEnv {
 }
 
 impl Inherit for MakeEnv {
-    fn inherit_from(&mut self, parent: &MakeEnv) {
+    fn inherit_from(&mut self, parent: &MakeEnv) -> anyhow::Result<()> {
         let parent_ctx = parent
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -87,14 +87,15 @@ impl Inherit for MakeEnv {
             // incremental variables, otherwise just insert it.
             match self.0.get_mut(key) {
                 Some(self_value) => {
-                    *self_value = self_value.expand(&parent_ctx);
-                    self_value.inherit_from(parent_value);
+                    *self_value = self_value.expand(&parent_ctx)?;
+                    self_value.inherit_from(parent_value)?;
                 }
                 None => {
                     self.0.insert(key.clone(), parent_value.clone());
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -152,7 +153,7 @@ enable_year2038="no"
         "#;
         let parent = MakeEnv::from_string(parent_content.into()).unwrap();
         let mut child = MakeEnv::from_string(child_content.into()).unwrap();
-        child.inherit_from(&parent);
+        child.inherit_from(&parent).unwrap();
         assert_eq!(child.get("USE").unwrap().to_string(), "seccomp branding");
         assert_eq!(child.get("INPUT_DEVICES").unwrap().to_string(), "libinput");
         assert_eq!(child.get("GRUB_PLATFORM").unwrap().to_string(), "efi-64");

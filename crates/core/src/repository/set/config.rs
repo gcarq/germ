@@ -83,7 +83,7 @@ impl RepositoryConfig {
         repo_name: &str,
         properties: FxHashMap<String, String>,
     ) -> anyhow::Result<RepositoryConfig> {
-        if !REPO_RE.is_match(repo_name) {
+        if !REPO_RE.is_match(repo_name)? {
             bail!("Invalid repository name: {repo_name}");
         }
 

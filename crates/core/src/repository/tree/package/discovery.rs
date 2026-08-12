@@ -1,8 +1,9 @@
 use crate::package::cpv::CPV;
+
 use crate::package::version::PackageVersion;
-use crate::regex::PV_REV;
-use anyhow::{Context, anyhow};
-use regex::Regex;
+use crate::regex::{PKG_RE, PV_REV};
+use fancy_regex::Regex;
+use log::debug;
 use std::path::Path;
 use std::sync::LazyLock;
 use walkdir::WalkDir;
@@ -39,20 +40,28 @@ pub fn resolve_cpv_from_category(
 ///
 /// Returns `Ok(None)` if the file is not a valid ebuild or the package name
 /// doesn't match the ebuild name.
-/// Returns `Err` if the file is a valid regex, but no valid [`CPV`].
 fn cpv_from_fs_parts(category: &str, package: &str, ebuild: &str) -> anyhow::Result<Option<CPV>> {
-    let Some(caps) = EBUILD_RE.captures(ebuild) else {
+    let Some(caps) = EBUILD_RE.captures(ebuild)? else {
         return Ok(None);
     };
     if package != &caps["package"] {
+        debug!("Ignoring invalid ebuild: {category}/{package}/{ebuild}");
         return Ok(None);
     }
-    let version = PackageVersion::new(
-        &caps["version"],
-        Some(&caps["suffixes"]),
-        caps.name("revision").map(|m| m.as_str()),
-    )
-    .with_context(|| anyhow!("unable to parse version from ebuild: '{ebuild}'"))?;
+
+    if !PKG_RE.is_match(package)? {
+        debug!("Ignoring invalid ebuild: {category}/{package}/{ebuild}");
+        return Ok(None);
+    }
+
+    let revision = caps.name("revision").map(|m| m.as_str());
+    let version = match PackageVersion::new(&caps["version"], Some(&caps["suffixes"]), revision) {
+        Ok(v) => v,
+        Err(e) => {
+            debug!("Ignoring invalid ebuild: {category}/{package}/{ebuild}: {e}");
+            return Ok(None);
+        }
+    };
     Ok(Some(CPV::new_unchecked(category, package, version)))
 }
 
@@ -70,14 +79,15 @@ mod tests {
             ("app-editors", "vim", "vim-8.2.3456-r0.ebuild", true),
             ("app-editors", "vim", "vim-8.2.3456-r1.ebuild", true),
             ("dev-lang", "rust", "rust-1.65.0_alpha1-r2.ebuild", true),
+            ("dev-libs", "foo-r2", "foo-r2-2.ebuild", true),
+            ("dev-libs", "pkg-1", "pkg-1-2.ebuild", false),
             ("net-misc", "curl", "curl-7.79.1_beta2.ebuild", true),
             ("net-misc", "curl", "Manifest", false),
         ];
         for (category, package, ebuild, is_some) in valid_ebuilds {
-            let cpv = cpv_from_fs_parts(category, package, ebuild);
-            assert!(cpv.is_ok(), "CPV from '{ebuild}' should be valid");
+            let cpv = cpv_from_fs_parts(category, package, ebuild).unwrap();
             assert_eq!(
-                cpv.is_ok_and(|cpv| cpv.is_some()),
+                cpv.is_some(),
                 is_some,
                 "failure for {category}/{package}/{ebuild}",
             );

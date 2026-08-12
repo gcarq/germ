@@ -1,6 +1,6 @@
 use crate::regex::SLOT;
 use anyhow::{Result, bail};
-use regex::Regex;
+use fancy_regex::Regex;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
@@ -45,24 +45,28 @@ impl PackageSlot {
             _ => (),
         };
 
-        let slot = match slot_str.strip_suffix('=') {
-            Some(slot) => match slot.split_once('/') {
-                Some((slot, sub_slot)) if SLOT_RE.is_match(slot) && SLOT_RE.is_match(sub_slot) => {
-                    Self::EqSubSlotRebuild(slot.into(), sub_slot.into())
-                }
-                None if SLOT_RE.is_match(slot) => Self::EqRebuild(slot.into()),
-                _ => bail!("invalid slot '{slot_str}'"),
-            },
-            None => match slot_str.split_once('/') {
-                Some((slot, sub_slot)) if SLOT_RE.is_match(slot) && SLOT_RE.is_match(sub_slot) => {
-                    Self::EqSubSlot(slot.into(), sub_slot.into())
-                }
-                None if SLOT_RE.is_match(slot_str) => Self::Eq(slot_str.into()),
-                _ => bail!("invalid slot '{slot_str}'"),
-            },
+        let (slot, rebuild) = match slot_str.strip_suffix('=') {
+            Some(slot) => (slot, true),
+            None => (slot_str, false),
         };
 
-        Ok(slot)
+        match slot.split_once('/') {
+            Some((slot, sub_slot)) if SLOT_RE.is_match(slot)? && SLOT_RE.is_match(sub_slot)? => {
+                if rebuild {
+                    Ok(Self::EqSubSlotRebuild(slot.into(), sub_slot.into()))
+                } else {
+                    Ok(Self::EqSubSlot(slot.into(), sub_slot.into()))
+                }
+            }
+            None if SLOT_RE.is_match(slot)? => {
+                if rebuild {
+                    Ok(Self::EqRebuild(slot.into()))
+                } else {
+                    Ok(Self::Eq(slot.into()))
+                }
+            }
+            _ => bail!("invalid slot '{slot_str}'"),
+        }
     }
 }
 

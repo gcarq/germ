@@ -13,18 +13,18 @@ pub fn is_blank_or_comment(line: &str) -> bool {
 
 /// Trait for inheriting configurations from another instance.
 pub trait Inherit {
-    fn inherit_from(&mut self, parent: &Self);
+    fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()>;
 
     /// Inherits the configuration of the given parent into self and returns the result as a new
     /// instance.
     #[must_use = "this method returns the inherited instance"]
-    fn inherit(self, parent: &Self) -> Self
+    fn inherit(self, parent: &Self) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
         let mut child = self;
-        child.inherit_from(parent);
-        child
+        child.inherit_from(parent)?;
+        Ok(child)
     }
 }
 

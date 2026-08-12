@@ -204,14 +204,14 @@ impl RepoSet {
     }
 
     /// Aggregates package masks and unmasks from all available repositories.
-    pub fn package_masks(&self) -> RepoPackageMasks {
+    pub fn package_masks(&self) -> anyhow::Result<RepoPackageMasks> {
         let mut mask = PackageEntries::default();
         let mut unmask = PackageEntries::default();
         for repository in self.values() {
-            mask.inherit_from(&repository.package_mask);
-            unmask.inherit_from(&repository.package_unmask);
+            mask.inherit_from(&repository.package_mask)?;
+            unmask.inherit_from(&repository.package_unmask)?;
         }
-        RepoPackageMasks { mask, unmask }
+        Ok(RepoPackageMasks { mask, unmask })
     }
 
     /// Reloads all repository data from disk.
@@ -354,7 +354,9 @@ impl RepoSet {
         })?;
         for master_name in masters {
             if let Some(master) = completed.get(master_name) {
-                repository.inherit_from(master);
+                repository.inherit_from(master).map_err(|source| {
+                    RepoSetError::repo_failure(name, RepositoryError::Internal(source))
+                })?;
             } else {
                 debug!("Skipping missing or unavailable master '{master_name}' for '{name}'");
             }
@@ -437,7 +439,7 @@ mod tests {
             .profile_file("package.mask", "dev-lang/rust")
             .profile_file("package.unmask", "app-editors/vim")])?;
 
-        let policy = fixture.package_masks();
+        let policy = fixture.package_masks()?;
         let mask = policy.mask.iter().next().expect("repository mask");
         let unmask = policy.unmask.iter().next().expect("repository unmask");
 

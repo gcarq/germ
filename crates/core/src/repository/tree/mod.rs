@@ -272,7 +272,7 @@ impl Repository {
                 "Repository name mismatch: repo_name='{declared_name}' vs repos.conf='{name}'! Using {name}..."
             );
         }
-        if !REPO_RE.is_match(name) {
+        if !REPO_RE.is_match(name).map_err(anyhow::Error::from)? {
             return Err(anyhow!("invalid repository name: '{name}'").into());
         }
         Ok(name)
@@ -281,10 +281,11 @@ impl Repository {
 
 impl Inherit for Repository {
     /// Inherits relevant metadata from the given `master` repository.
-    fn inherit_from(&mut self, master: &Repository) {
+    fn inherit_from(&mut self, master: &Repository) -> anyhow::Result<()> {
         debug!("Inheriting '{}' from '{}' ...", self.name, master.name);
         self.categories.extend(master.categories.iter().cloned());
         self.eclasses.extend(&master.eclasses);
+        Ok(())
     }
 }
 

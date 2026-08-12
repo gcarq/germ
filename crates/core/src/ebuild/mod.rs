@@ -12,7 +12,7 @@ use crate::types::FxHashMap;
 use crate::utils::is_blank_or_comment;
 
 use anyhow::anyhow;
-use regex::Regex;
+use fancy_regex::Regex;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
@@ -22,11 +22,9 @@ use std::sync::LazyLock;
 use thiserror::Error;
 
 /// Regex for a PMS 7.3.1 EAPI declaration.
-///
-/// The `regex` crate doesn't support backreferences, so all cases are handled explicitly.
 static PMS_EAPI_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"^[ \t]*EAPI=(?:([A-Za-z0-9+_.-]*)|'([A-Za-z0-9+_.-]*)'|"([A-Za-z0-9+_.-]*)")(?:[ \t]+#.*|[ \t]*)$"#,
+        r#"^[ \t]*EAPI=(?<quote>['\"]?)(?<value>[A-Za-z0-9+_.-]*)\k<quote>(?:[ \t]+#.*|[ \t]*)$"#,
     )
     .unwrap()
 });
@@ -39,6 +37,9 @@ pub enum EbuildError {
 
     #[error("unsupported EAPI '{0}'")]
     UnsupportedEapi(Eapi),
+
+    #[error("internal ebuild error")]
+    Internal(#[from] anyhow::Error),
 
     #[error("unable to read ebuild {path}")]
     Io {
@@ -93,9 +94,7 @@ impl<'r> Ebuild<'r> {
             .iter()
             .map(|line| match line.split_once('=') {
                 Some((key, value)) => Ok((key.trim(), value.trim())),
-                None => Err(MetadataGenerationError::Internal(anyhow!(
-                    "invalid metadata line: {line}"
-                ))),
+                None => Err(anyhow!("invalid metadata line: {line}")),
             })
             .collect::<Result<FxHashMap<_, _>, _>>();
 
@@ -129,20 +128,17 @@ impl<'r> Ebuild<'r> {
         let Some(first_line) = first_line else {
             return Ok(Eapi::Zero);
         };
-        match Self::parse_eapi_declaration(&first_line) {
+        match Self::parse_eapi_declaration(&first_line)? {
             Some("") | None => Ok(Eapi::Zero),
             Some(value) => Ok(Eapi::from_str(value)?),
         }
     }
 
     /// Parses a PMS EAPI assignment and returns its raw value.
-    fn parse_eapi_declaration(line: &str) -> Option<&str> {
-        let captures = PMS_EAPI_RE.captures(line)?;
-        captures
-            .get(1)
-            .or_else(|| captures.get(2))
-            .or_else(|| captures.get(3))
-            .map(|value| value.as_str())
+    fn parse_eapi_declaration(line: &str) -> anyhow::Result<Option<&str>> {
+        Ok(PMS_EAPI_RE
+            .captures(line)?
+            .and_then(|captures| captures.name("value").map(|value| value.as_str())))
     }
 }
 
@@ -178,7 +174,7 @@ mod tests {
             ("EAPI=\"7'", None),
             ("EAPI = 7", None),
         ] {
-            assert_eq!(Ebuild::parse_eapi_declaration(line), expected);
+            assert_eq!(Ebuild::parse_eapi_declaration(line).unwrap(), expected);
         }
     }
 

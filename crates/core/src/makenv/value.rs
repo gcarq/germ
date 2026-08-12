@@ -1,5 +1,6 @@
 use crate::utils::Inherit;
-use regex::Regex;
+use anyhow::anyhow;
+use fancy_regex::Regex;
 use std::fmt;
 use std::sync::LazyLock;
 
@@ -38,7 +39,7 @@ impl EnvValue {
     /// The passed context must be in the original order.
     /// TODO: Add env.d to context for expansion.
     #[must_use = "this returns the expanded value as a new allocation"]
-    pub fn expand(&self, context: &[(String, EnvValue)]) -> Self {
+    pub fn expand(&self, context: &[(String, EnvValue)]) -> anyhow::Result<Self> {
         let value = match self {
             EnvValue::Literal(values) | EnvValue::Incremental(values) => values,
         }
@@ -46,14 +47,23 @@ impl EnvValue {
         let mut new_value = value.clone();
 
         for cap in VAR_EXPAND_RE.captures_iter(&value) {
+            let cap = cap?;
+            let var = cap
+                .name("var")
+                .ok_or_else(|| anyhow!("variable expansion is missing a variable"))?
+                .as_str();
+            let expr = cap
+                .name("expr")
+                .ok_or_else(|| anyhow!("variable expansion is missing an expression"))?
+                .as_str();
             for (ctx_var, ctx_value) in context.iter().rev() {
-                if cap["var"] == *ctx_var {
-                    new_value = new_value.replace(&cap["expr"], &ctx_value.to_string());
+                if var == ctx_var {
+                    new_value = new_value.replace(expr, &ctx_value.to_string());
                     break;
                 }
             }
         }
-        EnvValue::new(new_value, self.is_incremental())
+        Ok(EnvValue::new(new_value, self.is_incremental()))
     }
 
     pub fn inner(&self) -> &[String] {
@@ -75,9 +85,9 @@ impl Inherit for EnvValue {
     ///
     /// Only Incremental values can be inherited, otherwise this method does nothing.
     /// See PMS 5.3.1 for the inheritance rules.
-    fn inherit_from(&mut self, parent: &Self) {
+    fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
         let (EnvValue::Incremental(values), EnvValue::Incremental(parent)) = (&self, parent) else {
-            return;
+            return Ok(());
         };
         let mut new_values = Vec::new();
         for value in parent.iter().chain(values) {
@@ -91,6 +101,7 @@ impl Inherit for EnvValue {
         }
         //values.sort_unstable();
         *self = EnvValue::Incremental(new_values);
+        Ok(())
     }
 }
 
@@ -115,14 +126,17 @@ mod tests {
             ("VAR2".into(), EnvValue::new("value2".into(), true)),
         ];
         let value = EnvValue::new("${VAR1} $VAR2 ${VAR3}".into(), false);
-        assert_eq!(value.expand(&context).to_string(), "value1 value2 ${VAR3}");
+        assert_eq!(
+            value.expand(&context).unwrap().to_string(),
+            "value1 value2 ${VAR3}"
+        );
     }
 
     #[test]
     fn test_env_value_inherit_from_incremental() {
         let parent = EnvValue::new("X branding -* asm accessibility".into(), true);
         let mut child = EnvValue::new("blas -accessibility".into(), true);
-        child.inherit_from(&parent);
+        child.inherit_from(&parent).unwrap();
         assert_eq!(child.to_string(), "asm blas");
     }
 
@@ -130,7 +144,7 @@ mod tests {
     fn test_env_value_inherit_from_literal() {
         let parent = EnvValue::new("X branding -*".into(), false);
         let mut child = EnvValue::new("blas".into(), false);
-        child.inherit_from(&parent);
+        child.inherit_from(&parent).unwrap();
         assert_eq!(child.to_string(), "blas");
     }
 

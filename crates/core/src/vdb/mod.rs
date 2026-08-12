@@ -6,8 +6,8 @@ use crate::package::{PackageView, cpv::CPV};
 use crate::regex::PV_REV;
 use crate::vdb::package::InstalledPackage;
 use anyhow::{Context, anyhow, bail};
+use fancy_regex::Regex;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use walkdir::WalkDir;
@@ -64,7 +64,7 @@ impl Vdb {
             .file_name()
             .and_then(|f| f.to_str())
             .with_context(|| "path contains invalid unicode")?;
-        let Some(caps) = VDB_PKG_RE.captures(pvr) else {
+        let Some(caps) = VDB_PKG_RE.captures(pvr)? else {
             return Ok(None);
         };
 

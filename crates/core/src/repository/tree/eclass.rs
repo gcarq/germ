@@ -1,6 +1,6 @@
 use anyhow::bail;
+use fancy_regex::Regex;
 use log::trace;
-use regex::Regex;
 use rkyv::with::AsString;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -11,7 +11,6 @@ use std::sync::LazyLock;
 use walkdir::WalkDir;
 
 /// Regex to validate eclass names according to PMS 3.1.6.
-/// NOTE: look-ahead to exclude "default" is not supported by the regex crate.
 static ECLASS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][a-zA-Z0-9_.-]*$").unwrap());
 
@@ -125,7 +124,7 @@ impl Eclass {
             !name.ends_with(".eclass"),
             "eclass name should not contain the .eclass suffix"
         );
-        if !ECLASS_RE.is_match(&name) || name == "default" {
+        if !ECLASS_RE.is_match(&name)? || name == "default" {
             bail!("invalid eclass name: '{name}'");
         }
         Ok(Self { name, path })

@@ -41,10 +41,10 @@ impl PortageConf {
         repo_set.validate_profile(&profile, &arch)?;
 
         let package_masks = PackageMasks::new(
-            repo_set.package_masks(),
+            repo_set.package_masks()?,
             &profile,
             UserPackageMasks::from_path(&path)?,
-        );
+        )?;
 
         let use_masks = UseMasks::new(
             &profile,
@@ -59,7 +59,7 @@ impl PortageConf {
                 Precedence::User,
                 true,
             )?,
-        );
+        )?;
 
         Ok(PortageConf {
             make_env,
@@ -78,9 +78,9 @@ impl PortageConf {
             .with_context(|| "unable to process make.conf")?;
 
         let env = MakeEnv::default()
-            .inherit(&make_globals)
-            .inherit(&profile.make_defaults)
-            .inherit(&make_conf);
+            .inherit(&make_globals)?
+            .inherit(&profile.make_defaults)?
+            .inherit(&make_conf)?;
         Ok(env)
     }
 }

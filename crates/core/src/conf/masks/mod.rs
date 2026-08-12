@@ -51,13 +51,17 @@ impl PackageMasks {
     /// 1. Repository
     /// 2. Profile
     /// 3. User defined
-    pub fn new(repository: RepoPackageMasks, profile: &Profile, user: UserPackageMasks) -> Self {
-        let mut mask = PackageEntries::default().inherit(&profile.package_mask);
-        let mut unmask = PackageEntries::default().inherit(&profile.package_unmask);
-        mask.inherit_from(&repository.mask);
-        unmask.inherit_from(&repository.unmask);
-        mask.inherit_from(&user.mask);
-        unmask.inherit_from(&user.unmask);
+    pub fn new(
+        repository: RepoPackageMasks,
+        profile: &Profile,
+        user: UserPackageMasks,
+    ) -> anyhow::Result<Self> {
+        let mut mask = PackageEntries::default().inherit(&profile.package_mask)?;
+        let mut unmask = PackageEntries::default().inherit(&profile.package_unmask)?;
+        mask.inherit_from(&repository.mask)?;
+        unmask.inherit_from(&repository.unmask)?;
+        mask.inherit_from(&user.mask)?;
+        unmask.inherit_from(&user.unmask)?;
 
         let mask = Self::map_from_entries(mask);
         let unmask = Self::map_from_entries(unmask);
@@ -67,7 +71,7 @@ impl PackageMasks {
             manager.mask.len(),
             manager.unmask.len()
         );
-        manager
+        Ok(manager)
     }
 
     /// Checks if the given `package` is masked.
@@ -129,7 +133,8 @@ mod tests {
                 mask: mask_lines,
                 unmask: unmask_lines,
             },
-        );
+        )
+        .unwrap();
 
         let cpv1 = CPV::new(
             "dev-lang",

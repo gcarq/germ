@@ -1,4 +1,5 @@
 use crate::deps::atom::{Atom, AtomIdent};
+
 use crate::package::version::PackageVersion;
 use crate::regex::{CATEGORY_RE, PKG_RE};
 use anyhow::bail;
@@ -20,10 +21,10 @@ pub struct CPV {
 impl CPV {
     /// Creates a new [`CPV`] from the given `category`, `package` and `version`.
     pub fn new(category: &str, package: &str, version: PackageVersion) -> anyhow::Result<Self> {
-        if !CATEGORY_RE.is_match(category) {
+        if !CATEGORY_RE.is_match(category)? {
             bail!("invalid category name: '{category}'");
         }
-        if !PKG_RE.is_match(package) {
+        if !PKG_RE.is_match(package)? {
             bail!("invalid package name: '{package}'");
         }
         Ok(Self::new_unchecked(category, package, version))
@@ -154,12 +155,14 @@ mod tests {
 
     #[test]
     fn test_cpv_new_err() {
-        let cpv = CPV::new(
-            "app-editors",
-            "memtest86-",
-            PackageVersion::try_from("1.0.0").unwrap(),
-        );
-        assert!(cpv.is_err());
+        for package in ["memtest86-", "pkg-1", "pkg-1-r2"] {
+            let cpv = CPV::new(
+                "app-editors",
+                package,
+                PackageVersion::try_from("1.0.0").unwrap(),
+            );
+            assert!(cpv.is_err());
+        }
     }
 
     #[test]

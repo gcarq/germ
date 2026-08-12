@@ -1,20 +1,23 @@
 use crate::deps::ExpressionItem;
 use crate::deps::useflag::UseFlag;
+
 use crate::package::slot::PackageSlot;
 use crate::package::version::PackageVersion;
-use crate::regex::{CATEGORY, PV_REV, REPOSITORY, V_REV};
+use crate::regex::{
+    CATEGORY, CATEGORY_COMPONENT, PACKAGE_COMPONENT, PKG_RE, PV_REV, REPOSITORY, V_REV,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use constcat::concat;
-use regex::{Captures, Regex};
+use fancy_regex::{Captures, Regex};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt::{self, Write};
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
 /// Matches a category name or `*` to indicate a wildcard.
-const ATOM_WC_CAT: &str = r"(?<category>([a-zA-Z0-9_][a-zA-Z0-9_+.-]*)|\*)";
+const ATOM_WC_CAT: &str = concat!(r"(?<category>(?:", CATEGORY_COMPONENT, r"|\*))");
 /// Matches a package name or `*` to indicate a wildcard.
-const ATOM_WC_PKG: &str = r"(?<package>([a-zA-Z0-9_]([a-zA-Z0-9_+-]*[a-zA-Z0-9_+])?)|\*)";
+const ATOM_WC_PKG: &str = concat!(r"(?<package>(?:", PACKAGE_COMPONENT, r"|\*))");
 /// Captures a wildcard category and wildcard package with optional version and revision.
 const ATOM_WC_CP: &str = concat!(ATOM_WC_CAT, "/", ATOM_WC_PKG, "(?:-", V_REV, ")?");
 
@@ -172,7 +175,7 @@ impl Atom {
     ///
     /// Returns `Err` if the string is not a valid atom.
     pub fn new(atom: &str) -> Result<Self> {
-        if let Some(caps) = ATOM_OPERATOR_RE.captures(atom) {
+        if let Some(caps) = ATOM_OPERATOR_RE.captures(atom)? {
             let atom = Self::from_regex_capture(&caps, AtomVariant::VersionOperator)
                 .with_context(|| anyhow!("unable to parse atom '{atom}'"))?
                 .with_operator(match caps.name("operator") {
@@ -181,13 +184,13 @@ impl Atom {
                 });
             return Ok(atom);
         }
-        if let Some(caps) = ATOM_WILDCARD_RE.captures(atom) {
+        if let Some(caps) = ATOM_WILDCARD_RE.captures(atom)? {
             let atom = Self::from_regex_capture(&caps, AtomVariant::VersionWildcard)
                 .with_context(|| anyhow!("unable to parse atom '{atom}'"))?
                 .with_operator(Some(AtomOperator::Equal));
             return Ok(atom);
         }
-        if let Some(caps) = ATOM_SIMPLE_RE.captures(atom) {
+        if let Some(caps) = ATOM_SIMPLE_RE.captures(atom)? {
             return Self::from_regex_capture(&caps, AtomVariant::Simple)
                 .with_context(|| anyhow!("unable to parse atom '{atom}'"));
         }
@@ -205,7 +208,7 @@ impl Atom {
     ///
     /// It assumes the correct regex has been used.
     /// NOTE: this does not set the operator field, see [`Self::with_operator`].
-    fn from_regex_capture(captures: &Captures, variant: AtomVariant) -> Result<Self> {
+    fn from_regex_capture(captures: &Captures<'_, str>, variant: AtomVariant) -> Result<Self> {
         let version =
             match Self::parse_version(captures).with_context(|| "unable to parse version")? {
                 Some(_) if variant == AtomVariant::Simple => {
@@ -213,6 +216,17 @@ impl Atom {
                 }
                 v => v,
             };
+        let package = captures
+            .name("package")
+            .ok_or_else(|| anyhow!("atom missing <package>"))?
+            .as_str()
+            .parse()?;
+
+        if let AtomIdent::Exact(name) = &package
+            && !PKG_RE.is_match(name)?
+        {
+            bail!("invalid package name: '{name}'");
+        }
 
         Ok(Self {
             operator: None,
@@ -221,11 +235,7 @@ impl Atom {
                 .ok_or_else(|| anyhow!("atom missing <category>"))?
                 .as_str()
                 .parse()?,
-            package: captures
-                .name("package")
-                .ok_or_else(|| anyhow!("atom missing <package>"))?
-                .as_str()
-                .parse()?,
+            package,
             version,
             slot: captures
                 .name("slot")
@@ -253,7 +263,7 @@ impl Atom {
     /// Parses the version including suffixes and revision from the given regex `captures`.
     ///
     /// Return `Ok(None)` if no version can be matched.
-    fn parse_version(captures: &Captures) -> Result<Option<PackageVersion>> {
+    fn parse_version(captures: &Captures<'_, str>) -> Result<Option<PackageVersion>> {
         let version = match captures.name("version") {
             Some(m) => m.as_str(),
             None => return Ok(None),
@@ -360,6 +370,14 @@ mod tests {
                 },
             ),
             (
+                "cat/foo-r2",
+                Atom {
+                    category: Exact("cat".into()),
+                    package: Exact("foo-r2".into()),
+                    ..Default::default()
+                },
+            ),
+            (
                 "net-misc/*:*::gentoo",
                 Atom {
                     category: Exact("net-misc".into()),
@@ -407,6 +425,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn test_atom_from_str_operator() {
         let test_cases = vec![
             (
@@ -416,6 +435,28 @@ mod tests {
                     category: Exact("sys-apps".into()),
                     package: Exact("memtest86+".into()),
                     version: PackageVersion::try_from("7.2.0").ok(),
+                    variant: AtomVariant::VersionOperator,
+                    ..Default::default()
+                },
+            ),
+            (
+                "=cat/pkg-1-r2",
+                Atom {
+                    operator: Some(AtomOperator::Equal),
+                    category: Exact("cat".into()),
+                    package: Exact("pkg".into()),
+                    version: PackageVersion::try_from("1-r2").ok(),
+                    variant: AtomVariant::VersionOperator,
+                    ..Default::default()
+                },
+            ),
+            (
+                "=cat/foo-r2-2",
+                Atom {
+                    operator: Some(AtomOperator::Equal),
+                    category: Exact("cat".into()),
+                    package: Exact("foo-r2".into()),
+                    version: PackageVersion::try_from("2").ok(),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -570,6 +611,10 @@ mod tests {
             "<=net-misc/*-3.0_p2",
             ">=dev-lang/rust-",
             "dev-lang/rust-1.70.0",
+            "cat/pkg-1-2",
+            "cat/pkg-1-r2",
+            "=cat/pkg-1-2",
+            "=cat/pkg-1-2*",
             "=dev-lang/rust-1.70.0_extra",
             "dev-lang/rust:::",
             "dev-lang/rust*",

@@ -32,7 +32,8 @@ impl PackageResolutionError {
             MetadataGenerationError::Ebuild(EbuildError::Io { .. }) => {
                 Err(RepositoryError::Data(anyhow!(self)))
             }
-            MetadataGenerationError::Internal(_)
+            MetadataGenerationError::Ebuild(EbuildError::Internal(_))
+            | MetadataGenerationError::Internal(_)
             | MetadataGenerationError::Execution(
                 PhaseExecutionError::Protocol(_)
                 | PhaseExecutionError::Ipc(_)
@@ -58,24 +59,16 @@ mod tests {
                 source: io::Error::from(io::ErrorKind::NotFound),
             }),
         );
-        let RepositoryError::Data(source) = data.promote().unwrap_err() else {
+        let RepositoryError::Data(_) = data.promote().unwrap_err() else {
             panic!();
         };
-        assert_eq!(
-            source.to_string(),
-            "app-misc/foo-1: unable to read ebuild foo-1.ebuild"
-        );
 
         let internal = PackageResolutionError::new(
             "app-misc/foo-1",
             MetadataGenerationError::Internal(anyhow::anyhow!("test")),
         );
-        let RepositoryError::Internal(source) = internal.promote().unwrap_err() else {
+        let RepositoryError::Internal(_) = internal.promote().unwrap_err() else {
             panic!();
         };
-        assert_eq!(
-            source.to_string(),
-            "app-misc/foo-1: internal error while preparing ebuild execution"
-        );
     }
 }

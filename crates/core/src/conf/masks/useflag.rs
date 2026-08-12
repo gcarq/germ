@@ -38,9 +38,9 @@ impl UseMasks {
         package_use: PackageUseEntries,
         use_mask: UseEntries,
         package_use_mask: PackageUseEntries,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let use_mask = use_mask
-            .inherit(&profile.use_mask)
+            .inherit(&profile.use_mask)?
             .into_iter()
             .map(Entry::into_inner)
             .collect::<FxHashSet<_>>();
@@ -60,16 +60,16 @@ impl UseMasks {
             .map(|flag| flag.clone().into_inner())
             .collect::<FxHashSet<_>>();
 
-        let package_use = package_use.inherit(&profile.package_use).into_inner();
+        let package_use = package_use.inherit(&profile.package_use)?.into_inner();
 
         let package_use_mask = package_use_mask
-            .inherit(&profile.package_use_mask)
+            .inherit(&profile.package_use_mask)?
             .into_inner();
         let package_use_force = profile.package_use_force.clone().into_inner();
         let package_use_stable_mask = profile.package_use_stable_mask.clone().into_inner();
         let package_use_stable_force = profile.package_use_stable_force.clone().into_inner();
 
-        Self {
+        Ok(Self {
             use_mask,
             use_force,
             use_stable_mask,
@@ -79,7 +79,7 @@ impl UseMasks {
             package_use_force,
             package_use_stable_mask,
             package_use_stable_force,
-        }
+        })
     }
 
     /// Checks if the given [`UseFlag`] is masked.

@@ -50,7 +50,7 @@ impl<T: FileEntry> Default for LineBasedFile<T> {
 }
 
 impl<T: FileEntry> Inherit for LineBasedFile<T> {
-    fn inherit_from(&mut self, parent: &LineBasedFile<T>) {
+    fn inherit_from(&mut self, parent: &LineBasedFile<T>) -> anyhow::Result<()> {
         let mut seen = FxHashSet::default();
         let mut result = Vec::new();
         for item in self.0.iter().rev().chain(parent.0.iter().rev()) {
@@ -60,6 +60,7 @@ impl<T: FileEntry> Inherit for LineBasedFile<T> {
         }
         result.reverse();
         self.0 = result;
+        Ok(())
     }
 }
 
@@ -125,7 +126,7 @@ mod tests {
             Precedence::Profile(1),
         )?;
 
-        child.inherit_from(&parent.inherit(&grand_parent));
+        child.inherit_from(&parent.inherit(&grand_parent)?)?;
 
         assert_eq!(
             child.0,
