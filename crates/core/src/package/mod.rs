@@ -1,20 +1,21 @@
 pub mod cpv;
 pub mod metadata;
+pub mod names;
 pub mod slot;
 pub mod version;
 
 use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
 use crate::package::slot::PackageSlot;
+use crate::repository::RepoName;
 use metadata::PackageMetadata;
 use std::fmt;
-use std::sync::Arc;
 
 /// Provides a trait for [`Package`] and [`InstalledPackage`] used for common operations
 /// like comparison and atom matching.
 pub trait PackageView {
     fn cpv(&self) -> &CPV;
-    fn repo(&self) -> &str;
+    fn repo(&self) -> &RepoName;
     fn slot(&self) -> &PackageSlot;
 
     /// Returns the qualified name of the package in the format `category/name`.
@@ -24,7 +25,7 @@ pub trait PackageView {
 
     /// Checks if the given [`Atom`] matches.
     fn matches_atom(&self, atom: &Atom) -> bool {
-        if let Some(repo) = atom.repo.as_deref()
+        if let Some(repo) = atom.repo.as_ref()
             && repo != self.repo()
         {
             return false;
@@ -43,13 +44,13 @@ pub trait PackageView {
 #[derive(Debug)]
 pub struct Package<'r> {
     pub cpv: &'r CPV,
-    pub repo: Arc<str>,
+    pub repo: &'r RepoName,
     pub metadata: PackageMetadata,
 }
 
 impl<'r> Package<'r> {
     /// Creates a new [`Package`] from the given `cpv`, `repo` and `metadata`.
-    pub const fn new(cpv: &'r CPV, repo: Arc<str>, metadata: PackageMetadata) -> Self {
+    pub const fn new(cpv: &'r CPV, repo: &'r RepoName, metadata: PackageMetadata) -> Self {
         Self {
             cpv,
             repo,
@@ -63,8 +64,8 @@ impl<'r> PackageView for Package<'r> {
         self.cpv
     }
 
-    fn repo(&self) -> &str {
-        &self.repo
+    fn repo(&self) -> &RepoName {
+        self.repo
     }
 
     fn slot(&self) -> &PackageSlot {
@@ -82,7 +83,7 @@ impl<'r> fmt::Display for Package<'r> {
 mod tests {
     use super::*;
     use crate::deps::useflag::UseFlag;
-    use crate::package::version::PackageVersion;
+    use crate::test_support::cpv;
     use crate::vdb::package::InstalledPackage;
 
     fn assert_package_view_matches_atoms<P: PackageView>(package: &P) {
@@ -114,15 +115,11 @@ mod tests {
 
     #[test]
     fn test_package_view_matches_repository_package() {
-        let cpv = CPV::new(
-            "sys-devel",
-            "gcc",
-            PackageVersion::try_from("15.2.1_p20251122-r1").unwrap(),
-        )
-        .unwrap();
+        let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
+        let repo = "gentoo".parse().unwrap();
         let package = Package::new(
             &cpv,
-            "gentoo".into(),
+            &repo,
             PackageMetadata {
                 slot: PackageSlot::Eq("15".into()),
                 ..Default::default()
@@ -135,13 +132,8 @@ mod tests {
     #[test]
     fn test_package_view_matches_installed_package() {
         let package = InstalledPackage {
-            cpv: CPV::new(
-                "sys-devel",
-                "gcc",
-                PackageVersion::try_from("15.2.1_p20251122-r1").unwrap(),
-            )
-            .unwrap(),
-            repo: "gentoo".into(),
+            cpv: cpv("sys-devel", "gcc", "15.2.1_p20251122-r1"),
+            repo: "gentoo".parse().unwrap(),
             metadata: PackageMetadata {
                 slot: PackageSlot::Eq("15".into()),
                 ..Default::default()
@@ -154,13 +146,9 @@ mod tests {
 
     #[test]
     fn test_package_fmt() {
-        let cpv = CPV::new(
-            "app-editors",
-            "vim",
-            PackageVersion::try_from("7.0.174-r1").unwrap(),
-        )
-        .unwrap();
-        let package = Package::new(&cpv, "gentoo".into(), PackageMetadata::default());
+        let cpv = cpv("app-editors", "vim", "7.0.174-r1");
+        let repo = "gentoo".parse().unwrap();
+        let package = Package::new(&cpv, &repo, PackageMetadata::default());
         assert_eq!(package.to_string(), "app-editors/vim-7.0.174-r1");
     }
 }

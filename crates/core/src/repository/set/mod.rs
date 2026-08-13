@@ -5,6 +5,7 @@ mod sync;
 use self::config::RepoSetConfig;
 pub use self::error::RepoSetError;
 use self::sync::{SyncHandler, build_sync_handler};
+use super::RepoName;
 use super::tree::{Repository, RepositoryError};
 use crate::SysConf;
 use crate::deps::atom::Atom;
@@ -28,7 +29,7 @@ use std::{fs, io};
 pub struct RepoSet {
     sysconf: Arc<SysConf>,
     config: RepoSetConfig,
-    entries: FxHashMap<String, RepositoryEntry>,
+    entries: FxHashMap<RepoName, RepositoryEntry>,
 }
 
 /// Holds repository package masks aggregated from all available repositories.
@@ -48,7 +49,7 @@ struct RepositoryEntry {
 }
 
 impl RepositoryEntry {
-    fn sync(&self, name: &str, force: bool) -> anyhow::Result<()> {
+    fn sync(&self, name: &RepoName, force: bool) -> anyhow::Result<()> {
         match &self.sync_handler {
             Some(handler) => handler.sync(name, force),
             None if force => Err(anyhow!("repository has no sync handler")),
@@ -84,7 +85,7 @@ impl RepoSet {
         atom: &Atom,
     ) -> Result<Vec<PackageResult<'r>>, RepoSetError> {
         let mut results = Vec::new();
-        for repo in self.select(atom.repo.as_deref()) {
+        for repo in self.select(atom.repo.as_ref().map(RepoName::as_str)) {
             results.extend(
                 repo.find_packages(atom)
                     .await
@@ -101,11 +102,12 @@ impl RepoSet {
     /// A sync failure is logged as error but doesn't return an `Err`.
     pub fn maybe_sync(&mut self, repo: Option<&str>) -> Result<(), RepoSetError> {
         if let Some(name) = repo {
+            let name = RepoName::new(name).map_err(RepoSetError::Sync)?;
             let entry = self
                 .entries
-                .get(name)
+                .get(&name)
                 .ok_or_else(|| RepoSetError::Sync(anyhow!("unknown repository '{name}'")))?;
-            return entry.sync(name, true).map_err(|err| {
+            return entry.sync(&name, true).map_err(|err| {
                 RepoSetError::Sync(err.context(anyhow!("unable to sync repository '{name}'")))
             });
         }
@@ -299,7 +301,9 @@ impl RepoSet {
         Ok(())
     }
 
-    fn validate_master_graph(graph: &FxHashMap<String, Vec<String>>) -> Result<(), RepoSetError> {
+    fn validate_master_graph(
+        graph: &FxHashMap<RepoName, Vec<RepoName>>,
+    ) -> Result<(), RepoSetError> {
         let mut visiting = FxHashSet::default();
         let mut visited = FxHashSet::default();
         for name in graph.keys() {
@@ -309,10 +313,10 @@ impl RepoSet {
     }
 
     fn validate_master(
-        name: &str,
-        graph: &FxHashMap<String, Vec<String>>,
-        visiting: &mut FxHashSet<String>,
-        visited: &mut FxHashSet<String>,
+        name: &RepoName,
+        graph: &FxHashMap<RepoName, Vec<RepoName>>,
+        visiting: &mut FxHashSet<RepoName>,
+        visited: &mut FxHashSet<RepoName>,
     ) -> Result<(), RepoSetError> {
         if visited.contains(name) {
             return Ok(());
@@ -321,7 +325,7 @@ impl RepoSet {
             return Ok(());
         };
         if !visiting.insert(name.to_owned()) {
-            return Err(RepoSetError::Cycle(name.to_owned()));
+            return Err(RepoSetError::Cycle(name.to_string()));
         }
 
         for master in masters {
@@ -333,10 +337,10 @@ impl RepoSet {
     }
 
     fn finalize(
-        name: &str,
-        graph: &FxHashMap<String, Vec<String>>,
-        pending: &mut FxHashMap<String, Repository>,
-        completed: &mut FxHashMap<String, Repository>,
+        name: &RepoName,
+        graph: &FxHashMap<RepoName, Vec<RepoName>>,
+        pending: &mut FxHashMap<RepoName, Repository>,
+        completed: &mut FxHashMap<RepoName, Repository>,
     ) -> Result<(), RepoSetError> {
         if completed.contains_key(name) || !pending.contains_key(name) {
             return Ok(());
@@ -558,7 +562,7 @@ mod tests {
 
         assert!(has_package);
         assert_eq!(overlay.categories.len(), 1);
-        assert!(overlay.categories.contains("app-misc"));
+        assert!(overlay.categories.contains(&"app-misc".parse().unwrap()));
         assert!(
             fixture
                 .get("overlay")

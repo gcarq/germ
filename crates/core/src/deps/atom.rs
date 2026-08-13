@@ -1,61 +1,49 @@
 use crate::deps::ExpressionItem;
 use crate::deps::useflag::UseFlag;
 
+use crate::grammar::{CATEGORY, PACKAGE, REPOSITORY, REVISION, VERSION, VERSION_SUFFIXES};
+use crate::package::names::{CatName, PkgName};
 use crate::package::slot::PackageSlot;
 use crate::package::version::PackageVersion;
-use crate::regex::{
-    CATEGORY, CATEGORY_COMPONENT, PACKAGE_COMPONENT, PKG_RE, PV_REV, REPOSITORY, V_REV,
-};
-use anyhow::{Context, Result, anyhow, bail};
-use constcat::concat;
+use crate::repository::RepoName;
+use anyhow::{Context, anyhow, bail};
 use fancy_regex::{Captures, Regex};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt::{self, Write};
 use std::str::FromStr;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
-/// Matches a category name or `*` to indicate a wildcard.
-const ATOM_WC_CAT: &str = concat!(r"(?<category>(?:", CATEGORY_COMPONENT, r"|\*))");
-/// Matches a package name or `*` to indicate a wildcard.
-const ATOM_WC_PKG: &str = concat!(r"(?<package>(?:", PACKAGE_COMPONENT, r"|\*))");
-/// Captures a wildcard category and wildcard package with optional version and revision.
-const ATOM_WC_CP: &str = concat!(ATOM_WC_CAT, "/", ATOM_WC_PKG, "(?:-", V_REV, ")?");
-
-/// Captures atom operators.
-const ATOM_OPERATOR: &str = r"(?<operator>[=~]|[><]=?)";
-/// Captures category, package, version and revision.
-const ATOM_CPV_REV: &str = concat!(CATEGORY, "/", PV_REV);
-/// Captures optional slot information in atoms.
-const ATOM_SLOT_LOOSE: &str = r"(?:\:(?P<slot>([a-zA-Z0-9_+./*=-]+)))?";
-/// Captures optional repository information in atoms.
-const ATOM_REPOSITORY: &str = concat!(r"(?:\:\:", REPOSITORY, ")?");
-/// Captures optional use flag in atoms, e.g. `=dev-lang/rust-1.70.0[clippy]`.
-const ATOM_USEDEP_LOOSE: &str = r"(\[(?P<use_deps>.*)\])?";
-
-/// Regex to capture simple atoms with category and package,
-/// optionally version, slot and repository e.g.: `dev-lang/rust-1.70.0`.
-/// This syntax also allows wildcards for `category` and/or `package`, e.g.: `dev-lang/*`.
-static ATOM_SIMPLE_RE: LazyLock<Regex> = LazyLock::new(|| {
+static ATOM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
-        r"^{ATOM_WC_CP}{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}{ATOM_USEDEP_LOOSE}$"
-    ))
-    .unwrap()
-});
+        r"(?x)
+        \A
+        (?:
+            (?<operator>[=~]|[><]=?)
+            (?<operator_category>{CATEGORY}) /
+            (?<operator_package>{PACKAGE}) -
+            (?<operator_version>{VERSION})
+            (?<operator_suffixes>{VERSION_SUFFIXES})
+            (?: -r (?<operator_revision>{REVISION}) )?
 
-/// Regex to capture atoms with operator, category, package,
-/// version, ... e.g.: `>=dev-lang/rust-1.70`
-static ATOM_OPERATOR_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!(
-        r"^{ATOM_OPERATOR}{ATOM_CPV_REV}{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}{ATOM_USEDEP_LOOSE}$"
-    ))
-    .unwrap()
-});
+          |
 
-/// Regex to capture atoms with an equal operator, category, package and a version wildcard, ...
-/// e.g.: `=dev-lang/rust-1.70*`
-static ATOM_WILDCARD_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!(
-        r"^={ATOM_CPV_REV}\*{ATOM_SLOT_LOOSE}{ATOM_REPOSITORY}{ATOM_USEDEP_LOOSE}$"
+            =
+            (?<wildcard_category>{CATEGORY}) /
+            (?<wildcard_package>{PACKAGE}) -
+            (?<wildcard_version>{VERSION})
+            (?<wildcard_suffixes>{VERSION_SUFFIXES})
+            (?: -r (?<wildcard_revision>{REVISION}) )?
+            \*
+
+          |
+
+            (?<simple_category>{CATEGORY}|\*) /
+            (?<simple_package>{PACKAGE}|\*)
+        )
+        (?: : (?<slot>[a-zA-Z0-9_+./*=-]+) )?
+        (?: :: (?<repo>{REPOSITORY}) )?
+        (?: \[ (?<use_deps>.*) \] )?
+        \z"
     ))
     .unwrap()
 });
@@ -72,7 +60,7 @@ pub enum AtomOperator {
 }
 
 impl AtomOperator {
-    pub fn new(operator: &str) -> Result<Self> {
+    pub fn new(operator: &str) -> anyhow::Result<Self> {
         let op = match operator {
             "<" => AtomOperator::Less,
             "<=" => AtomOperator::LessEqual,
@@ -89,7 +77,7 @@ impl AtomOperator {
 impl FromStr for AtomOperator {
     type Err = anyhow::Error;
 
-    fn from_str(operator: &str) -> Result<Self> {
+    fn from_str(operator: &str) -> anyhow::Result<Self> {
         Self::new(operator)
     }
 }
@@ -125,27 +113,39 @@ pub enum AtomVariant {
 #[derive(
     Archive, Serialize, Deserialize, Default, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug,
 )]
-pub enum AtomIdent {
-    Exact(String),
+pub enum AtomIdent<T> {
+    Exact(T),
     #[default]
     Any,
 }
 
-impl FromStr for AtomIdent {
+impl<T> FromStr for AtomIdent<T>
+where
+    T: FromStr<Err = anyhow::Error>,
+{
     type Err = anyhow::Error;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "*" => Ok(Self::Any),
-            _ => Ok(Self::Exact(value.to_owned())),
+            _ => Ok(Self::Exact(value.parse()?)),
         }
     }
 }
 
-impl fmt::Display for AtomIdent {
+impl<T: PartialEq> AtomIdent<T> {
+    pub fn matches(&self, value: &T) -> bool {
+        match self {
+            Self::Exact(expected) => expected == value,
+            Self::Any => true,
+        }
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for AtomIdent<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AtomIdent::Exact(inner) => f.write_str(inner),
+            AtomIdent::Exact(inner) => write!(f, "{inner}"),
             AtomIdent::Any => f.write_char('*'),
         }
     }
@@ -161,11 +161,11 @@ impl fmt::Display for AtomIdent {
 #[cfg_attr(test, derive(Default))]
 pub struct Atom {
     pub operator: Option<AtomOperator>,
-    pub category: AtomIdent,
-    pub package: AtomIdent,
+    pub category: AtomIdent<CatName>,
+    pub package: AtomIdent<PkgName>,
     pub version: Option<PackageVersion>,
     pub slot: Option<PackageSlot>,
-    pub repo: Option<Arc<str>>,
+    pub repo: Option<RepoName>,
     pub use_deps: Option<Vec<UseFlag>>,
     pub variant: AtomVariant,
 }
@@ -174,28 +174,13 @@ impl Atom {
     /// Creates an [`Atom`] from the given `atom` string.
     ///
     /// Returns `Err` if the string is not a valid atom.
-    pub fn new(atom: &str) -> Result<Self> {
-        if let Some(caps) = ATOM_OPERATOR_RE.captures(atom)? {
-            let atom = Self::from_regex_capture(&caps, AtomVariant::VersionOperator)
-                .with_context(|| anyhow!("unable to parse atom '{atom}'"))?
-                .with_operator(match caps.name("operator") {
-                    Some(m) => Some(m.as_str().parse()?),
-                    None => None,
-                });
-            return Ok(atom);
-        }
-        if let Some(caps) = ATOM_WILDCARD_RE.captures(atom)? {
-            let atom = Self::from_regex_capture(&caps, AtomVariant::VersionWildcard)
-                .with_context(|| anyhow!("unable to parse atom '{atom}'"))?
-                .with_operator(Some(AtomOperator::Equal));
-            return Ok(atom);
-        }
-        if let Some(caps) = ATOM_SIMPLE_RE.captures(atom)? {
-            return Self::from_regex_capture(&caps, AtomVariant::Simple)
-                .with_context(|| anyhow!("unable to parse atom '{atom}'"));
-        }
+    pub fn new(atom: &str) -> anyhow::Result<Self> {
+        let Some(captures) = ATOM_RE.captures(atom)? else {
+            bail!("'{atom}' is not a valid atom");
+        };
 
-        bail!("'{atom}' is not a valid package atom")
+        Self::from_regex_capture(&captures)
+            .with_context(|| anyhow!("unable to parse atom '{atom}'"))
     }
 
     /// Returns the qualified name for this atom in the format
@@ -204,81 +189,83 @@ impl Atom {
         format!("{}/{}", self.category, self.package)
     }
 
-    /// Creates an Atom from the given regex `captures` and `variant`.
-    ///
-    /// It assumes the correct regex has been used.
-    /// NOTE: this does not set the operator field, see [`Self::with_operator`].
-    fn from_regex_capture(captures: &Captures<'_, str>, variant: AtomVariant) -> Result<Self> {
-        let version =
-            match Self::parse_version(captures).with_context(|| "unable to parse version")? {
-                Some(_) if variant == AtomVariant::Simple => {
-                    bail!("atom must have an operator or be in format <category>/<package>")
-                }
-                v => v,
-            };
-        let package = captures
-            .name("package")
-            .ok_or_else(|| anyhow!("atom missing <package>"))?
-            .as_str()
-            .parse()?;
-
-        if let AtomIdent::Exact(name) = &package
-            && !PKG_RE.is_match(name)?
-        {
-            bail!("invalid package name: '{name}'");
-        }
+    /// Creates an [`Atom`] from the captures of the atom grammar.
+    fn from_regex_capture(captures: &Captures<'_, str>) -> anyhow::Result<Self> {
+        let variant = if captures.name("operator").is_some() {
+            AtomVariant::VersionOperator
+        } else if captures.name("wildcard_version").is_some() {
+            AtomVariant::VersionWildcard
+        } else {
+            AtomVariant::Simple
+        };
 
         Ok(Self {
-            operator: None,
-            category: captures
-                .name("category")
-                .ok_or_else(|| anyhow!("atom missing <category>"))?
-                .as_str()
-                .parse()?,
-            package,
-            version,
+            operator: captures
+                .name("operator")
+                .map(|capture| capture.as_str().parse())
+                .transpose()?
+                .or_else(|| {
+                    (variant == AtomVariant::VersionWildcard).then_some(AtomOperator::Equal)
+                }),
+            category: Self::first_capture(
+                captures,
+                ["operator_category", "wildcard_category", "simple_category"],
+            )
+            .ok_or_else(|| anyhow!("atom missing <category>"))?
+            .parse()?,
+            package: Self::first_capture(
+                captures,
+                ["operator_package", "wildcard_package", "simple_package"],
+            )
+            .ok_or_else(|| anyhow!("atom missing <package>"))?
+            .parse()?,
+            version: Self::parse_version(captures)?,
             slot: captures
                 .name("slot")
-                .map(|m| m.as_str().parse())
+                .map(|capture| capture.as_str().parse())
                 .transpose()?,
-            repo: captures.name("repo").map(|m| m.as_str().into()),
+            repo: captures
+                .name("repo")
+                .map(|capture| capture.as_str().parse())
+                .transpose()?,
             use_deps: captures
                 .name("use_deps")
-                .map(|m| {
-                    m.as_str()
-                        .split(',')
-                        .map(UseFlag::parse)
-                        .collect::<Result<Vec<_>>>()
-                })
+                .map(|capture| capture.as_str().split(',').map(UseFlag::parse).collect())
                 .transpose()?,
             variant,
         })
     }
 
-    const fn with_operator(mut self, operator: Option<AtomOperator>) -> Self {
-        self.operator = operator;
-        self
+    /// Parses the version based on the selected atom.
+    fn parse_version(captures: &Captures<'_, str>) -> anyhow::Result<Option<PackageVersion>> {
+        let Some(version) = Self::first_capture(captures, ["operator_version", "wildcard_version"])
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(PackageVersion::new(
+            version,
+            Self::first_capture(captures, ["operator_suffixes", "wildcard_suffixes"]),
+            Self::first_capture(captures, ["operator_revision", "wildcard_revision"]),
+        )?))
     }
 
-    /// Parses the version including suffixes and revision from the given regex `captures`.
-    ///
-    /// Return `Ok(None)` if no version can be matched.
-    fn parse_version(captures: &Captures<'_, str>) -> Result<Option<PackageVersion>> {
-        let version = match captures.name("version") {
-            Some(m) => m.as_str(),
-            None => return Ok(None),
-        };
-        let suffixes = captures.name("suffixes").map(|m| m.as_str());
-        let revision = captures.name("revision").map(|m| m.as_str());
-
-        Ok(Some(PackageVersion::new(version, suffixes, revision)?))
+    /// Returns the first capture from the given `names` that is present in `captures`.
+    fn first_capture<'a>(
+        captures: &'a Captures<'_, str>,
+        names: impl IntoIterator<Item = &'a str>,
+    ) -> Option<&'a str> {
+        names
+            .into_iter()
+            .find_map(|name| captures.name(name))
+            .map(|cap| cap.as_str())
     }
 }
 
 impl FromStr for Atom {
     type Err = anyhow::Error;
 
-    fn from_str(atom: &str) -> Result<Self> {
+    fn from_str(atom: &str) -> anyhow::Result<Self> {
         Atom::new(atom)
     }
 }
@@ -304,7 +291,7 @@ impl fmt::Display for Atom {
         }
         if let Some(repo) = &self.repo {
             f.write_str("::")?;
-            f.write_str(repo)?;
+            f.write_str(repo.as_str())?;
         }
         if let Some(use_deps) = &self.use_deps {
             f.write_char('[')?;
@@ -324,6 +311,18 @@ impl fmt::Display for Atom {
 mod tests {
     use super::AtomIdent::{Any, Exact};
     use super::*;
+
+    impl From<&str> for CatName {
+        fn from(value: &str) -> Self {
+            value.parse().unwrap()
+        }
+    }
+
+    impl From<&str> for PkgName {
+        fn from(value: &str) -> Self {
+            value.parse().unwrap()
+        }
+    }
 
     #[test]
     fn test_atom_from_str_simple() {
@@ -378,12 +377,21 @@ mod tests {
                 },
             ),
             (
+                "cat/foo-::repo-",
+                Atom {
+                    category: Exact("cat".into()),
+                    package: Exact("foo-".into()),
+                    repo: Some("repo-".parse().unwrap()),
+                    ..Default::default()
+                },
+            ),
+            (
                 "net-misc/*:*::gentoo",
                 Atom {
                     category: Exact("net-misc".into()),
                     package: Any,
                     slot: Some(PackageSlot::Any),
-                    repo: Some("gentoo".into()),
+                    repo: Some("gentoo".parse().unwrap()),
                     ..Default::default()
                 },
             ),
@@ -393,7 +401,7 @@ mod tests {
                     category: Exact("net-misc".into()),
                     package: Exact("dhcp".into()),
                     slot: Some(PackageSlot::Any),
-                    repo: Some("gentoo".into()),
+                    repo: Some("gentoo".parse().unwrap()),
                     ..Default::default()
                 },
             ),
@@ -514,7 +522,7 @@ mod tests {
                     package: Exact("rust".into()),
                     version: PackageVersion::try_from("1.70.0").ok(),
                     slot: Some(PackageSlot::EqSubSlot("1.70.0".into(), "1".into())),
-                    repo: Some("gentoo".into()),
+                    repo: Some("gentoo".parse().unwrap()),
                     variant: AtomVariant::VersionOperator,
                     ..Default::default()
                 },
@@ -527,7 +535,7 @@ mod tests {
                     package: Exact("glibc".into()),
                     version: PackageVersion::try_from("2.41-r10").ok(),
                     slot: Some(PackageSlot::Eq("2.2".into())),
-                    repo: Some("gentoo".into()),
+                    repo: Some("gentoo".parse().unwrap()),
                     variant: AtomVariant::VersionOperator,
                     use_deps: Some(vec!["cet".parse().unwrap(), "clang".parse().unwrap()]),
                 },
@@ -576,7 +584,7 @@ mod tests {
                     version: PackageVersion::try_from("6").ok(),
                     variant: AtomVariant::VersionWildcard,
                     slot: Some(PackageSlot::EqSubSlot("6".into(), "6.23".into())),
-                    repo: Some("gentoo".into()),
+                    repo: Some("gentoo".parse().unwrap()),
                     ..Default::default()
                 },
             ),
@@ -611,8 +619,10 @@ mod tests {
             "<=net-misc/*-3.0_p2",
             ">=dev-lang/rust-",
             "dev-lang/rust-1.70.0",
+            "cat/pkg-1",
             "cat/pkg-1-2",
             "cat/pkg-1-r2",
+            "cat/pkg::repo-1",
             "=cat/pkg-1-2",
             "=cat/pkg-1-2*",
             "=dev-lang/rust-1.70.0_extra",
@@ -667,7 +677,7 @@ mod tests {
                     category: Exact("dev-lang".into()),
                     package: Exact("python".into()),
                     variant: AtomVariant::Simple,
-                    repo: Some("gentoo".into()),
+                    repo: Some("gentoo".parse().unwrap()),
                     ..Default::default()
                 },
                 "dev-lang/python::gentoo",
@@ -690,7 +700,7 @@ mod tests {
                     package: Exact("rust".into()),
                     version: PackageVersion::try_from("1.70.0_beta_p11-r2").ok(),
                     slot: Some(PackageSlot::Eq("1.70".into())),
-                    repo: Some("gentoo".into()),
+                    repo: Some("gentoo".parse().unwrap()),
                     variant: AtomVariant::VersionOperator,
                     use_deps: Some(vec!["clippy".parse().unwrap()]),
                 },
@@ -754,7 +764,10 @@ mod tests {
 
     #[test]
     fn test_name_match_fmt() {
-        assert_eq!(Exact("sys-libs".into()).to_string(), "sys-libs");
-        assert_eq!(Any.to_string(), "*");
+        assert_eq!(
+            AtomIdent::<CatName>::Exact("sys-libs".into()).to_string(),
+            "sys-libs"
+        );
+        assert_eq!(Any::<CatName>.to_string(), "*");
     }
 }

@@ -310,7 +310,7 @@ mod tests {
         let test_data = [
             ("bar? sys-libs/db", "expected '(', got 'sys-libs/db'"),
             ("|| sys-libs/db", "expected '(', got 'sys-libs/db'"),
-            ("sys-libs/db)", "'sys-libs/db)' is not a valid package atom"),
+            ("sys-libs/db)", "'sys-libs/db)' is not a valid atom"),
             ("(sys-libs/db", "unexpected EOF while parsing group"),
             ("bar? ( sys-libs/db", "unexpected EOF while parsing group"),
             ("bar? sys-libs/db )", "expected '(', got 'sys-libs/db'"),

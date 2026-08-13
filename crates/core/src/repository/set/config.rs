@@ -1,4 +1,4 @@
-use crate::regex::REPO_RE;
+use crate::repository::RepoName;
 use crate::types::FxHashMap;
 use crate::utils;
 use anyhow::{Context, anyhow, bail};
@@ -64,14 +64,14 @@ impl RepoSetConfig {
 
 /// Represents the configuration of a single repository from `repos.conf`.
 #[derive(Clone)]
-#[cfg_attr(test, derive(Default, Debug))]
+#[cfg_attr(test, derive(Debug))]
 pub struct RepositoryConfig {
     // The path to the repository on the filesystem
     pub location: PathBuf,
     // The configured canonical repository name from the repos.conf section name
-    pub name: String,
+    pub name: RepoName,
     // Defines parent repositories from repos.conf, if explicitly configured
-    pub masters: Option<Vec<String>>,
+    pub masters: Option<Vec<RepoName>>,
     // Holds all raw properties from the repository section in repos.conf for potential future use
     pub raw_properties: FxHashMap<String, String>,
 }
@@ -83,9 +83,7 @@ impl RepositoryConfig {
         repo_name: &str,
         properties: FxHashMap<String, String>,
     ) -> anyhow::Result<RepositoryConfig> {
-        if !REPO_RE.is_match(repo_name)? {
-            bail!("Invalid repository name: {repo_name}");
-        }
+        let name = repo_name.parse::<RepoName>()?;
 
         for prop in UNSUPPORTED_CONF_PROPERTIES {
             if properties.contains_key(*prop) {
@@ -103,7 +101,7 @@ impl RepositoryConfig {
 
         if !location.exists() && !has_sync_defined {
             bail!(
-                "Repository '{repo_name}' has no complete sync configuration and location '{}' is inaccessible",
+                "Repository '{name}' has no complete sync configuration and location '{}' is inaccessible",
                 location.display()
             );
         }
@@ -119,11 +117,16 @@ impl RepositoryConfig {
 
         let masters = properties
             .get("masters")
-            .map(|m| m.split_ascii_whitespace().map(ToOwned::to_owned).collect());
+            .map(|m| {
+                m.split_ascii_whitespace()
+                    .map(str::parse)
+                    .collect::<anyhow::Result<Vec<_>>>()
+            })
+            .transpose()?;
 
         let config = RepositoryConfig {
             location,
-            name: repo_name.to_owned(),
+            name,
             masters,
             raw_properties,
         };
@@ -192,8 +195,8 @@ mod tests {
         let config = RepoSetConfig::load(&repos_conf)?;
 
         assert_eq!(config.repo_confs.len(), 2);
-        assert_eq!(config.repo_confs[0].name, "gentoo");
-        assert_eq!(config.repo_confs[1].name, "guru");
+        assert_eq!(config.repo_confs[0].name.as_str(), "gentoo");
+        assert_eq!(config.repo_confs[1].name.as_str(), "guru");
         Ok(())
     }
 }

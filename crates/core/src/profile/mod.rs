@@ -322,9 +322,9 @@ mod tests {
     #[test]
     fn test_profile_directories() -> Result<()> {
         let cases = [
-            ("pms-eapi-0", "pms", "0", false),
-            ("portage-1-eapi-0", "portage-1", "0", true),
-            ("pms-eapi-7", "pms", "7", true),
+            ("pms-eapi", "pms", "0", false),
+            ("portage-one-eapi", "portage-1", "0", true),
+            ("pms-eapi-seven", "pms", "7", true),
         ];
 
         for (name, format, eapi, succeeds) in cases {

@@ -1,3 +1,4 @@
+use crate::repository::RepoName;
 use anyhow::{Context, anyhow};
 use ini::Ini;
 use log::warn;
@@ -41,9 +42,9 @@ impl TryFrom<&str> for ProfileFormat {
 #[cfg_attr(test, derive(Default))]
 pub struct Layout {
     // Allows overriding `profiles/repo_name`, although discouraged
-    pub name: Option<String>,
+    pub name: Option<RepoName>,
     // Defines parent repositories to resolve ebuilds, eclasses and profiles from
-    pub masters: Vec<String>,
+    pub masters: Vec<RepoName>,
     profile_formats: Vec<ProfileFormat>,
 }
 
@@ -61,11 +62,15 @@ impl Layout {
             .section(None::<String>)
             .with_context(|| "no global properties defined")?;
 
-        let name = properties.get("name").map(ToOwned::to_owned);
+        let name = properties.get("name").map(str::parse).transpose()?;
         let masters = properties
             .get("masters")
-            .map(|s| s.split_ascii_whitespace().map(ToOwned::to_owned).collect())
-            .ok_or_else(|| anyhow!("missing 'masters' property"))?;
+            .map(|s| {
+                s.split_ascii_whitespace()
+                    .map(str::parse)
+                    .collect::<anyhow::Result<Vec<_>>>()
+            })
+            .ok_or_else(|| anyhow!("missing 'masters' property"))??;
         let profile_formats =
             Self::parse_profile_formats(properties.get("profile-formats").unwrap_or_default());
 
@@ -116,6 +121,7 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repository::RepoName;
 
     fn parse_layout(profile_formats: Option<&str>) -> Layout {
         let profile_formats = profile_formats
@@ -131,8 +137,15 @@ mod tests {
     #[test]
     fn test_layout_from_ini_ok() {
         let layout = parse_layout(None);
-        assert_eq!(layout.name, Some("local".to_owned()));
-        assert_eq!(layout.masters, vec!["kde".to_owned(), "gentoo".to_owned()]);
+        assert_eq!(layout.name.as_ref().map(RepoName::as_str), Some("local"));
+        assert_eq!(
+            layout
+                .masters
+                .iter()
+                .map(RepoName::as_str)
+                .collect::<Vec<_>>(),
+            vec!["kde", "gentoo"]
+        );
     }
 
     #[test]

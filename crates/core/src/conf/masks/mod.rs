@@ -115,9 +115,8 @@ mod tests {
     use super::*;
     use crate::files::entry::Precedence;
     use crate::package::Package;
-    use crate::package::cpv::CPV;
     use crate::package::metadata::PackageMetadata;
-    use crate::package::version::PackageVersion;
+    use crate::test_support::cpv;
 
     #[test]
     fn test_is_masked() {
@@ -136,40 +135,21 @@ mod tests {
         )
         .unwrap();
 
-        let cpv1 = CPV::new(
-            "dev-lang",
-            "rust",
-            PackageVersion::try_from("1.50-r2").unwrap(),
-        )
-        .unwrap();
-        let pkg1 = Package::new(&cpv1, "gentoo".into(), PackageMetadata::default());
+        let repo = "gentoo".parse().unwrap();
+        let cpv1 = cpv("dev-lang", "rust", "1.50-r2");
+        let pkg1 = Package::new(&cpv1, &repo, PackageMetadata::default());
         assert!(!manager.is_masked(&pkg1), "{pkg1} should not be masked");
 
-        let cpv2 = CPV::new(
-            "dev-lang",
-            "rust",
-            PackageVersion::try_from("1.60-r1").unwrap(),
-        )
-        .unwrap();
-        let pkg2 = Package::new(&cpv2, "gentoo".into(), PackageMetadata::default());
+        let cpv2 = cpv("dev-lang", "rust", "1.60-r1");
+        let pkg2 = Package::new(&cpv2, &repo, PackageMetadata::default());
         assert!(manager.is_masked(&pkg2), "{pkg2} should be masked");
 
-        let cpv3 = CPV::new(
-            "app-editors",
-            "vim",
-            PackageVersion::try_from("8.2").unwrap(),
-        )
-        .unwrap();
-        let pkg3 = Package::new(&cpv3, "gentoo".into(), PackageMetadata::default());
+        let cpv3 = cpv("app-editors", "vim", "8.2");
+        let pkg3 = Package::new(&cpv3, &repo, PackageMetadata::default());
         assert!(manager.is_masked(&pkg3), "{pkg3} should be masked");
 
-        let cpv4 = CPV::new(
-            "app-editors",
-            "nano",
-            PackageVersion::try_from("5.0").unwrap(),
-        )
-        .unwrap();
-        let pkg4 = Package::new(&cpv4, "gentoo".into(), PackageMetadata::default());
+        let cpv4 = cpv("app-editors", "nano", "5.0");
+        let pkg4 = Package::new(&cpv4, &repo, PackageMetadata::default());
         assert!(!manager.is_masked(&pkg4), "{pkg4} should not be masked");
     }
 }

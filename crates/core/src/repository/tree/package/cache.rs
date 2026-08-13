@@ -133,21 +133,21 @@ impl MetadataCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::package::version::PackageVersion;
+    use crate::test_support::cpv;
 
     #[test]
     fn test_metadata_cache_get_missing() {
         let temp = tempfile::tempdir().unwrap();
 
         let cache = MetadataCache::new(temp.path()).unwrap();
-        let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
+        let cpv = cpv("app-misc", "foo", "1");
         assert_eq!(cache.get(&cpv).unwrap(), None);
     }
 
     #[test]
     fn test_metadata_cache_persists_metadata() {
         let temp = tempfile::tempdir().unwrap();
-        let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
+        let cpv = cpv("app-misc", "foo", "1");
         let metadata = PackageMetadata {
             description: "cached metadata".into(),
             ..Default::default()
@@ -165,7 +165,7 @@ mod tests {
     #[test]
     fn test_metadata_cache_recreate() {
         let temp = tempfile::tempdir().unwrap();
-        let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
+        let cpv = cpv("app-misc", "foo", "1");
 
         let mut cache = MetadataCache::new(temp.path()).unwrap();
         cache
@@ -180,8 +180,8 @@ mod tests {
     #[test]
     fn test_metadata_cache_retain_removes_unknown_entries() {
         let temp = tempfile::tempdir().unwrap();
-        let known = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
-        let unknown = CPV::new("app-misc", "bar", PackageVersion::try_from("1").unwrap()).unwrap();
+        let known = cpv("app-misc", "foo", "1");
+        let unknown = cpv("app-misc", "bar", "1");
 
         let cache = MetadataCache::new(temp.path()).unwrap();
         cache
@@ -200,7 +200,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
 
         let cache = MetadataCache::new(temp.path()).unwrap();
-        let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
+        let cpv = cpv("app-misc", "foo", "1");
         cache
             .insert_batch([(&cpv, &PackageMetadata::default())])
             .unwrap();
@@ -213,7 +213,7 @@ mod tests {
     fn test_metadata_cache_discards_corrupt_metadata() {
         let temp = tempfile::tempdir().unwrap();
         let cache = MetadataCache::new(temp.path()).unwrap();
-        let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
+        let cpv = cpv("app-misc", "foo", "1");
 
         let tx = cache.db.begin_write().unwrap();
         tx.open_table(METADATA_TABLE)

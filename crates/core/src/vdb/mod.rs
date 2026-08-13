@@ -1,9 +1,9 @@
 pub mod package;
 
 use crate::deps::atom::Atom;
+use crate::grammar::{PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
 use crate::package::version::PackageVersion;
 use crate::package::{PackageView, cpv::CPV};
-use crate::regex::PV_REV;
 use crate::vdb::package::InstalledPackage;
 use anyhow::{Context, anyhow, bail};
 use fancy_regex::Regex;
@@ -13,7 +13,12 @@ use std::sync::LazyLock;
 use walkdir::WalkDir;
 
 /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision` from VDB.
-static VDB_PKG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{PV_REV}$")).unwrap());
+static VDB_PKG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"\A(?<package>{PACKAGE})-(?<version>{VERSION})(?<suffixes>{VERSION_SUFFIXES})(?:-r(?<revision>{REVISION}))?\z"
+    ))
+    .unwrap()
+});
 
 /// Represents a portage compatible VDB containing [`Package`].
 pub struct Vdb {
@@ -72,16 +77,51 @@ impl Vdb {
             .parent()
             .and_then(|p| p.file_name())
             .and_then(|f| f.to_str())
-            .with_context(|| "path contains invalid unicode")?;
-        let package = &caps["package"];
+            .with_context(|| "path contains invalid unicode")?
+            .parse()
+            .with_context(|| format!("unable to process VDB at {}", path.display()))?;
+        let package = caps["package"].parse()?;
         let version = PackageVersion::new(
             &caps["version"],
             Some(&caps["suffixes"]),
             caps.name("revision").map(|m| m.as_str()),
         )?;
-        let cpv = CPV::new(category, package, version)?;
+        let cpv = CPV::new(category, package, version);
         let pkg = InstalledPackage::new(cpv, path)
             .with_context(|| anyhow!("failed to collect package from {}", path.display()))?;
         Ok(Some(pkg))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::cpv;
+    use std::fs;
+
+    fn write_vdb_package(path: &Path, repository: &str) {
+        fs::create_dir_all(path).unwrap();
+        fs::write(path.join("repository"), repository).unwrap();
+        fs::write(path.join("USE"), "").unwrap();
+        fs::write(path.join("EAPI"), "8").unwrap();
+        fs::write(path.join("SLOT"), "0").unwrap();
+    }
+
+    #[test]
+    fn test_package_from_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("dev-libs").join("foo--1");
+        write_vdb_package(&path, "repo-");
+
+        let package = Vdb::package_from_path(&path).unwrap().unwrap();
+        assert_eq!(package.cpv, cpv("dev-libs", "foo-", "1"));
+        assert_eq!(package.repo.as_str(), "repo-");
+
+        for repository in ["", "repo-1", "invalid name"] {
+            let path = temp.path().join("dev-libs").join("foo-1");
+            write_vdb_package(&path, repository);
+
+            assert!(Vdb::package_from_path(&path).is_err());
+        }
     }
 }

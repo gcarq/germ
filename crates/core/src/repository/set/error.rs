@@ -1,3 +1,5 @@
+use crate::repository::RepoName;
+
 use super::super::tree::RepositoryError;
 use thiserror::Error;
 
@@ -11,9 +13,9 @@ pub enum RepoSetError {
     Cycle(String),
 
     /// A repository operation failed while processing the set.
-    #[error("operation failed for repository '{repository}'")]
+    #[error("operation failed for repository '{repo}'")]
     Repository {
-        repository: String,
+        repo: RepoName,
         #[source]
         source: RepositoryError,
     },
@@ -26,9 +28,9 @@ pub enum RepoSetError {
 }
 
 impl RepoSetError {
-    pub fn repo_failure(repository: &str, source: RepositoryError) -> Self {
+    pub fn repo_failure(repo: &RepoName, source: RepositoryError) -> Self {
         Self::Repository {
-            repository: repository.to_owned(),
+            repo: repo.clone(),
             source,
         }
     }

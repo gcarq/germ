@@ -1,5 +1,5 @@
-use crate::regex::SLOT;
-use anyhow::{Result, bail};
+use crate::grammar::SLOT;
+use anyhow::bail;
 use fancy_regex::Regex;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -9,7 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-pub static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{SLOT}$")).unwrap());
+static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"\A{SLOT}\z")).unwrap());
 
 /// Represents all possible slot definitions a [`Package`] can have.
 ///
@@ -38,7 +38,7 @@ pub enum PackageSlot {
 
 impl PackageSlot {
     /// Creates a new [`Slot`] from the given `slot` string.
-    fn new(slot_str: &str) -> Result<Self> {
+    fn new(slot_str: &str) -> anyhow::Result<Self> {
         match slot_str {
             "*" => return Ok(Self::Any),
             "=" => return Ok(Self::AnyRebuild),
@@ -73,7 +73,7 @@ impl PackageSlot {
 impl FromStr for PackageSlot {
     type Err = anyhow::Error;
 
-    fn from_str(slot_str: &str) -> Result<Self> {
+    fn from_str(slot_str: &str) -> anyhow::Result<Self> {
         Self::new(slot_str)
     }
 }

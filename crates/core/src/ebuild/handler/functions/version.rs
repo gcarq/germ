@@ -192,6 +192,8 @@ fn parse_range(range: &str, max: usize) -> anyhow::Result<(usize, usize)> {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::cpv;
+
     use super::*;
 
     #[test]
@@ -217,12 +219,7 @@ mod tests {
             ("0", Some("1.2.3"), ""),
             ("4-", Some("1.2.3"), ""),
         ];
-        let cpv = CPV::new(
-            "app-editors",
-            "vim",
-            PackageVersion::try_from("1.2.3b_alpha4").unwrap(),
-        )
-        .unwrap();
+        let cpv = cpv("app-editors", "vim", "1.2.3b_alpha4");
         for (range, version, expected) in test_cases {
             let response = FunctionReply::Ok(Some(expected.to_owned()));
             assert_eq!(
@@ -237,12 +234,7 @@ mod tests {
 
     #[test]
     fn test_ver_cut_err() {
-        let pkg = CPV::new(
-            "app-editors",
-            "vim",
-            PackageVersion::try_from("1.2.3b_alpha4").unwrap(),
-        )
-        .unwrap();
+        let pkg = cpv("app-editors", "vim", "1.2.3b_alpha4");
         let test_cases = ["-2", "3-2", "foo", "2-bar"];
         for range in test_cases {
             assert!(
@@ -274,12 +266,7 @@ mod tests {
             (vec!["3-5", ".", "1.2.3"], "1.2.3"),
             (vec!["2-3", "-"], "1.2-alpha-4"),
         ];
-        let cpv = CPV::new(
-            "app-editors",
-            "vim",
-            PackageVersion::try_from("1.2_alpha4").unwrap(),
-        )
-        .unwrap();
+        let cpv = cpv("app-editors", "vim", "1.2_alpha4");
         for (args, expected) in test_cases {
             let response = FunctionReply::Ok(Some(expected.to_owned()));
             let args = args.into_iter().map(String::from).collect::<Vec<_>>();
@@ -293,12 +280,7 @@ mod tests {
 
     #[test]
     fn test_ver_rs_err() {
-        let pkg = CPV::new(
-            "app-editors",
-            "vim",
-            PackageVersion::try_from("1.2b_alpha4").unwrap(),
-        )
-        .unwrap();
+        let pkg = cpv("app-editors", "vim", "1.2b_alpha4");
         let test_cases = [vec![], vec!["1"], vec!["foo", "-"]];
         for args in test_cases {
             let args = args.into_iter().map(String::from).collect::<Vec<_>>();
@@ -405,12 +387,7 @@ mod tests {
             (None, "-eq", "1.0", true),
         ];
 
-        let cpv = CPV::new(
-            "sys-apps",
-            "coreutils",
-            PackageVersion::try_from("1.0").unwrap(),
-        )
-        .unwrap();
+        let cpv = cpv("sys-apps", "coreutils", "1.0");
         for (version1, op, version2, expected) in test_cases {
             let response = FunctionReply::from_bool(expected);
             assert_eq!(
@@ -425,12 +402,7 @@ mod tests {
 
     #[test]
     fn test_ver_test_err() {
-        let cpv = CPV::new(
-            "sys-apps",
-            "coreutils",
-            PackageVersion::try_from("1.0").unwrap(),
-        )
-        .unwrap();
+        let cpv = cpv("sys-apps", "coreutils", "1.0");
         let test_cases = [
             // Invalid argument order
             (Some("-lt"), "1", "2"),

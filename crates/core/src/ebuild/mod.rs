@@ -159,9 +159,9 @@ impl fmt::Display for Ebuild<'_> {
 #[cfg(test)]
 mod tests {
     use crate::repository::test_support::RepoBuilder;
+    use crate::test_support::cpv;
 
     use super::*;
-    use crate::package::version::PackageVersion;
     use std::path::PathBuf;
 
     #[test]
@@ -188,12 +188,7 @@ mod tests {
         let repo = builder.finalize().unwrap();
 
         for (index, _) in contents.iter().enumerate() {
-            let cpv = CPV::new(
-                "cat",
-                "pkg",
-                PackageVersion::try_from((index + 1).to_string().as_str()).unwrap(),
-            )
-            .unwrap();
+            let cpv = cpv("cat", "pkg", &(index + 1).to_string());
             assert!(matches!(
                 Ebuild::new(&cpv, &repo).unwrap_err(),
                 EbuildError::UnsupportedEapi(Eapi::Zero)
@@ -207,7 +202,7 @@ mod tests {
             .ebuild("cat", "pkg", "1", "EAPI=abc")
             .finalize()
             .unwrap();
-        let cpv = CPV::new("cat", "pkg", PackageVersion::try_from("1").unwrap()).unwrap();
+        let cpv = cpv("cat", "pkg", "1");
         let err = Ebuild::new(&cpv, &repo).unwrap_err();
         assert!(matches!(
             err,
@@ -221,7 +216,7 @@ mod tests {
             .ebuild("cat", "pkg", "1", "EAPI=6")
             .finalize()
             .unwrap();
-        let cpv = CPV::new("cat", "pkg", PackageVersion::try_from("1").unwrap()).unwrap();
+        let cpv = cpv("cat", "pkg", "1");
         let err = Ebuild::new(&cpv, &repo).unwrap_err();
         assert!(matches!(err, EbuildError::UnsupportedEapi(Eapi::Six)));
     }
@@ -229,24 +224,27 @@ mod tests {
     #[test]
     fn test_ebuild_io_error() {
         let repo = RepoBuilder::new("repo").finalize().unwrap();
-        let err = Ebuild::new(&CPV::default(), &repo).unwrap_err();
+        let cpv = cpv("cat", "pkg", "1");
+        let err = Ebuild::new(&cpv, &repo).unwrap_err();
         assert!(matches!(err, EbuildError::Io { .. }));
     }
 
     #[test]
     fn test_ebuild_eq() {
         let path = PathBuf::from("/dev/null");
+        let cpv = cpv("cat", "pkg", "1");
+        let repo = Repository::default();
         let ebuild1 = Ebuild {
             path: path.clone(),
             eapi: Eapi::Eight,
-            cpv: &CPV::default(),
-            repo: &Repository::default(),
+            cpv: &cpv,
+            repo: &repo,
         };
         let ebuild2 = Ebuild {
             path: path.clone(),
             eapi: Eapi::Eight,
-            cpv: &CPV::default(),
-            repo: &Repository::default(),
+            cpv: &cpv,
+            repo: &repo,
         };
         assert_eq!(ebuild1, ebuild2);
     }

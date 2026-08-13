@@ -51,19 +51,13 @@ mod tests {
     use crate::ebuild::handler::protocol::{FuncCall, FuncType};
     use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
     use crate::makenv::MakeEnv;
-    use crate::package::cpv::CPV;
-    use crate::package::version::PackageVersion;
     use crate::repository::test_support::{RepoBuilder, repo_set};
+    use crate::test_support::cpv;
     use std::path::PathBuf;
 
     fn with_handler(eapi: Eapi, test: impl FnOnce(&EbuildPhaseHandler)) {
         let fixture = repo_set(vec![RepoBuilder::new("repo")]).unwrap();
-        let cpv = CPV::new(
-            "app-editors",
-            "vim",
-            PackageVersion::try_from("1.2.3b_alpha4").unwrap(),
-        )
-        .unwrap();
+        let cpv = cpv("app-editors", "vim", "1.2.3b_alpha4");
         let ebuild = Ebuild {
             eapi,
             cpv: &cpv,

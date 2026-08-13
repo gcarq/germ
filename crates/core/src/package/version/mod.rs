@@ -5,7 +5,7 @@ mod revision;
 mod suffix;
 
 use crate::deps::atom::{Atom, AtomOperator, AtomVariant};
-use crate::regex::V_REV;
+use crate::grammar::{REVISION, VERSION, VERSION_SUFFIXES};
 use anyhow::anyhow;
 use base::VersionNumber;
 use fancy_regex::Regex;
@@ -17,7 +17,12 @@ use std::sync::LazyLock;
 use suffix::VersionSuffixes;
 
 /// Regex to validate and parse `version`, `suffixes` and the `revision`.
-static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^{V_REV}$")).unwrap());
+static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"\A(?<version>{VERSION})(?<suffixes>{VERSION_SUFFIXES})(?:-r(?<revision>{REVISION}))?\z"
+    ))
+    .unwrap()
+});
 
 /// Represents a package version according to PMS section 3.2 and 3.3.
 ///
@@ -186,6 +191,10 @@ mod tests {
     #[test]
     fn test_package_version_parse() {
         for input in [
+            "1",
+            "1-r2",
+            "1_alpha",
+            "1_alpha0",
             "1.0.0",
             "1.0.0-r0",
             "1.2.3a_alpha1",

@@ -279,6 +279,7 @@ impl GitSyncHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repository::RepoName;
     use crate::repository::test_support::RepoBuilder;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -375,7 +376,7 @@ mod tests {
             props.insert("clone-depth".into(), clone_depth.into());
 
             let handler = GitSyncHandler::new(&props).unwrap();
-            handler.sync("gentoo", false).unwrap();
+            handler.sync(&RepoName::default(), false).unwrap();
 
             let output = git_in(&dest, &["rev-parse", "--is-shallow-repository"]);
             assert_eq!(
@@ -394,7 +395,7 @@ mod tests {
         props.insert("clone-depth".into(), "0".into());
         props.insert("sync-depth".into(), "0".into());
         let handler = GitSyncHandler::new(&props).unwrap();
-        handler.sync("gentoo", false).unwrap();
+        handler.sync(&RepoName::default(), false).unwrap();
 
         fs::write(dest.join("MARKER"), "local commit").unwrap();
         commit_all(&dest, "local commit");
@@ -403,7 +404,7 @@ mod tests {
         commit_all(&work, "remote update");
         git_in(&work, &["push", "origin", "main"]);
 
-        handler.sync("gentoo", false).unwrap();
+        handler.sync(&RepoName::default(), false).unwrap();
 
         assert_eq!(
             fs::read_to_string(dest.join("MARKER")).unwrap(),
@@ -428,12 +429,12 @@ mod tests {
         let mut init_props = properties(&destination, &origin_one_url);
         init_props.insert("clone-depth".into(), "0".into());
         let handler = GitSyncHandler::new(&init_props).unwrap();
-        handler.sync("gentoo", false).unwrap();
+        handler.sync(&RepoName::default(), false).unwrap();
 
         let mut new_props = properties(&destination, &origin_two_url);
         new_props.insert("sync-depth".into(), "0".into());
         let handler = GitSyncHandler::new(&new_props).unwrap();
-        handler.sync("gentoo", false).unwrap();
+        handler.sync(&RepoName::default(), false).unwrap();
 
         let output = git_in(&destination, &["remote", "get-url", "origin"]);
         assert_eq!(

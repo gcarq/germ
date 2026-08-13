@@ -93,32 +93,17 @@ impl CPVIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::package::version::PackageVersion;
+    use crate::test_support::cpv;
 
     #[test]
     fn test_available_package_index() {
         let mut index = CPVIndex::default();
-        let python_3_13 = CPV::new(
-            "dev-lang",
-            "python",
-            PackageVersion::try_from("3.13.12").unwrap(),
-        )
-        .unwrap();
+        let python_3_13 = cpv("dev-lang", "python", "3.13.12");
         index.insert(python_3_13.clone());
-        let python3_14 = CPV::new(
-            "dev-lang",
-            "python",
-            PackageVersion::try_from("3.14.3").unwrap(),
-        )
-        .unwrap();
+        let python3_14 = cpv("dev-lang", "python", "3.14.3");
         index.insert(python3_14.clone());
 
-        let rust = CPV::new(
-            "dev-lang",
-            "rust",
-            PackageVersion::try_from("1.94.0").unwrap(),
-        )
-        .unwrap();
+        let rust = cpv("dev-lang", "rust", "1.94.0");
         assert!(!index.iter().any(|existing| existing == &rust));
         index.insert(rust.clone());
 
@@ -133,30 +118,9 @@ mod tests {
     #[test]
     fn test_available_package_index_wildcards() {
         let mut index = CPVIndex::default();
-        index.insert(
-            CPV::new(
-                "dev-lang",
-                "python",
-                PackageVersion::try_from("3.14.3").unwrap(),
-            )
-            .unwrap(),
-        );
-        index.insert(
-            CPV::new(
-                "dev-lang",
-                "rust",
-                PackageVersion::try_from("1.94.0").unwrap(),
-            )
-            .unwrap(),
-        );
-        index.insert(
-            CPV::new(
-                "dev-libs",
-                "libfoo",
-                PackageVersion::try_from("1.0.0").unwrap(),
-            )
-            .unwrap(),
-        );
+        index.insert(cpv("dev-lang", "python", "3.14.3"));
+        index.insert(cpv("dev-lang", "rust", "1.94.0"));
+        index.insert(cpv("dev-libs", "libfoo", "1.0.0"));
 
         let atom = Atom::new("dev-lang/*").unwrap();
         assert_eq!(index.find_packages(&atom).count(), 2);
@@ -168,20 +132,9 @@ mod tests {
 
     #[test]
     fn test_available_package_index_r0_collision() {
-        let implicit =
-            CPV::new("dev-libs", "pkg", PackageVersion::try_from("1.0").unwrap()).unwrap();
-        let explicit = CPV::new(
-            "dev-libs",
-            "pkg",
-            PackageVersion::try_from("1.0-r0").unwrap(),
-        )
-        .unwrap();
-        let r1 = CPV::new(
-            "dev-libs",
-            "pkg",
-            PackageVersion::try_from("1.0-r1").unwrap(),
-        )
-        .unwrap();
+        let implicit = cpv("dev-libs", "pkg", "1.0");
+        let explicit = cpv("dev-libs", "pkg", "1.0-r0");
+        let r1 = cpv("dev-libs", "pkg", "1.0-r1");
 
         let mut index = CPVIndex::default();
         index.insert_all(vec![explicit, implicit, r1]);

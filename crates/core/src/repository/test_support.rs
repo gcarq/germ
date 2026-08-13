@@ -8,8 +8,8 @@ use std::{
 use anyhow::{Context, bail};
 
 use super::{RepoSet, Repository};
-use crate::SysConf;
 use crate::types::FxHashSet;
+use crate::{SysConf, repository::RepoName};
 
 /// Owns a temporary directory together with a value that depends on it.
 pub struct Temp<T> {
@@ -55,7 +55,7 @@ fn write_file(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<
 
 #[derive(Default)]
 pub struct RepoBuilder {
-    repo_name: String,
+    repo_name: RepoName,
     repos_conf: BTreeMap<String, String>,
     masters: Option<Vec<String>>,
     formats: Option<Vec<String>>,
@@ -71,7 +71,7 @@ impl RepoBuilder {
     /// Creates a new [`RepositoryBuilder`] definition with the given `repo_name`.
     pub fn new(repo_name: impl Into<String>) -> Self {
         Self {
-            repo_name: repo_name.into(),
+            repo_name: repo_name.into().parse().expect("invalid repository name"),
             ..Default::default()
         }
     }
@@ -240,12 +240,12 @@ impl RepoBuilder {
     /// Writes and loads a repository in an owned temporary directory.
     pub fn finalize(self) -> anyhow::Result<Temp<Repository>> {
         let temp_dir = tempfile::tempdir().context("failed to create temp dir")?;
-        let repo_name = self.repo_name.clone();
-        let location = temp_dir.path().join(&repo_name);
+        let name = self.repo_name.clone();
+        let location = temp_dir.path().join(name.as_str());
 
         self.write_to(&location)
-            .with_context(|| format!("failed to write repository '{repo_name}'"))?;
-        let repository = Repository::load(&repo_name, &location, SysConf::default().into())?;
+            .with_context(|| format!("failed to write repository '{name}'"))?;
+        let repository = Repository::load(&name, &location, SysConf::default().into())?;
         Ok(Temp::new(repository, temp_dir))
     }
 }
@@ -264,7 +264,7 @@ pub fn repo_set(repos: impl IntoIterator<Item = RepoBuilder>) -> anyhow::Result<
             bail!("tried to insert duplicate repository {name}");
         }
 
-        let location = temp.path().join("repositories").join(&name);
+        let location = temp.path().join("repositories").join(name.as_str());
         conf.push_str(&format!("[{name}]\nlocation = {}\n", location.display()));
         for (key, value) in &repo.repos_conf {
             conf.push_str(&format!("{key} = {value}\n"));

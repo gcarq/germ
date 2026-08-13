@@ -5,7 +5,6 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-constcat.workspace = true
 either.workspace = true
 futures-util.workspace = true
 fxhash.workspace = true

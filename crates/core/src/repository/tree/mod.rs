@@ -18,11 +18,12 @@ use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
 use crate::ebuild::Ebuild;
 use crate::files::{PackageEntries, entry::Precedence};
+use crate::package::names::CatName;
 use crate::package::{Package, cpv::CPV};
-use crate::regex::REPO_RE;
+use crate::repository::RepoName;
 use crate::repository::tree::package::cache::MetadataCache;
 use crate::types::FxHashSet;
-use crate::utils::Inherit;
+use crate::utils::{Inherit, is_blank_or_comment};
 use anyhow::{Context, anyhow};
 use log::{debug, warn};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -38,13 +39,13 @@ pub use package::cache::CacheError;
 #[derive(Debug)]
 pub struct Repository {
     pub location: PathBuf,
-    pub name: Arc<str>,
+    pub name: RepoName,
     pub layout: Layout,
     pub eclasses: Eclasses,
     pub package_mask: PackageEntries,
     pub package_unmask: PackageEntries,
     pub arch_list: ArchList,
-    pub categories: FxHashSet<String>,
+    pub categories: FxHashSet<CatName>,
     profiles_desc: ProfileDescriptions,
     cpv_index: CPVIndex,
     metadata_cache: MetadataCache,
@@ -54,7 +55,7 @@ pub struct Repository {
 impl Repository {
     /// Loads repository data from disk with the given [`SysConf`].
     pub fn load(
-        name: &str,
+        name: &RepoName,
         location: &Path,
         sysconf: Arc<SysConf>,
     ) -> Result<Self, RepositoryError> {
@@ -76,7 +77,7 @@ impl Repository {
         )
         .map_err(|err| ProfileError::from(err.context("unable to load package.unmask")))?;
 
-        let name = Self::resolve_repo_name(name, &layout, &profiles)?.into();
+        let name = Self::resolve_repo_name(name, &layout, &profiles)?;
 
         Ok(Self {
             location: location.to_owned(),
@@ -166,7 +167,7 @@ impl Repository {
         };
 
         match ebuild.generate_metadata().await {
-            Ok(metadata) => Ok(Package::new(cpv, self.name.clone(), metadata)),
+            Ok(metadata) => Ok(Package::new(cpv, &self.name, metadata)),
             Err(source) => Err(PackageResolutionError::new(cpv.fqn(), source)),
         }
     }
@@ -182,7 +183,7 @@ impl Repository {
         for cpv in cpvs {
             match self.metadata_cache.get(cpv)? {
                 Some(metadata) => {
-                    cached.push(Ok(Package::new(cpv, self.name.clone(), metadata)));
+                    cached.push(Ok(Package::new(cpv, &self.name, metadata)));
                 }
                 None => missing.push(cpv),
             }
@@ -223,8 +224,18 @@ impl Repository {
     fn collect_categories(&mut self) {
         let path = self.location.join("profiles").join("categories");
         if let Ok(content) = fs::read_to_string(&path) {
-            self.categories
-                .extend(content.lines().map(ToOwned::to_owned));
+            let iter = content
+                .lines()
+                .map(str::trim)
+                .filter(|line| !is_blank_or_comment(line))
+                .filter_map(|category| match category.parse() {
+                    Ok(cat) => Some(cat),
+                    Err(err) => {
+                        warn!("invalid category in {}: {err}. Skipping...", path.display());
+                        None
+                    }
+                });
+            self.categories.extend(iter);
         }
     }
 
@@ -248,11 +259,11 @@ impl Repository {
     /// Resolves the repo name and validates it against `profiles/repo_name` and `layout.conf`.
     ///
     /// The given `name` should be the name of the repository as defined in `repos.conf`.
-    fn resolve_repo_name<'a>(
-        name: &'a str,
+    fn resolve_repo_name(
+        name: &RepoName,
         layout: &Layout,
         profiles: &Path,
-    ) -> Result<&'a str, ProfileError> {
+    ) -> Result<RepoName, ProfileError> {
         let declared_name = if let Some(declared_name) = &layout.name {
             declared_name.clone()
         } else {
@@ -265,17 +276,15 @@ impl Repository {
                 .lines()
                 .next()
                 .ok_or_else(|| ProfileError::from(anyhow!("empty repo_name file")))
-                .map(ToOwned::to_owned)?
+                .map(str::trim)
+                .map(str::parse)??
         };
-        if declared_name != name {
+        if declared_name != *name {
             warn!(
                 "Repository name mismatch: repo_name='{declared_name}' vs repos.conf='{name}'! Using {name}..."
             );
         }
-        if !REPO_RE.is_match(name).map_err(anyhow::Error::from)? {
-            return Err(anyhow!("invalid repository name: '{name}'").into());
-        }
-        Ok(name)
+        Ok(name.clone())
     }
 }
 
@@ -305,7 +314,7 @@ impl Hash for Repository {
 
 impl fmt::Display for Repository {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.name)
+        f.write_str(self.name.as_str())
     }
 }
 
@@ -318,7 +327,7 @@ impl Default for Repository {
         let metadata_cache = MetadataCache::new(&temp_dir.path().join("metadata")).unwrap();
         Self {
             location: temp_dir.path().to_owned(),
-            name: "".into(),
+            name: "repo".parse().unwrap(),
             layout: Layout::default(),
             categories: FxHashSet::default(),
             package_mask: PackageEntries::default(),
@@ -340,12 +349,13 @@ mod tests {
     use super::*;
 
     use super::super::test_support::RepoBuilder;
-    use crate::package::{metadata::PackageMetadata, version::PackageVersion};
+    use crate::package::metadata::PackageMetadata;
+    use crate::test_support::cpv;
 
     #[tokio::test]
     async fn test_repository_resolves_cached_metadata() {
         let repository = RepoBuilder::new("repo").finalize().unwrap();
-        let cpv = CPV::new("app-misc", "foo", PackageVersion::try_from("1").unwrap()).unwrap();
+        let cpv = cpv("app-misc", "foo", "1");
         let metadata = PackageMetadata {
             description: "cached metadata".into(),
             ..Default::default()
@@ -368,18 +378,18 @@ mod tests {
     #[test]
     fn test_repository_equality() {
         let gentoo = Repository {
-            name: "gentoo".into(),
+            name: "gentoo".parse().unwrap(),
             ..Default::default()
         };
         let guru = Repository {
-            name: "guru".into(),
+            name: "guru".parse().unwrap(),
             ..Default::default()
         };
         assert_ne!(gentoo, guru);
         assert_eq!(
             gentoo,
             Repository {
-                name: "gentoo".into(),
+                name: "gentoo".parse().unwrap(),
                 ..Default::default()
             }
         );
@@ -388,10 +398,36 @@ mod tests {
     #[test]
     fn test_repository_display() {
         let repo = Repository {
-            name: "gentoo".into(),
+            name: "gentoo".parse().unwrap(),
             ..Default::default()
         };
         assert_eq!(repo.to_string(), "gentoo");
+    }
+
+    #[test]
+    fn test_repository_collect_categories() {
+        let temp = tempfile::tempdir().unwrap();
+        let location = temp.path().join("repo");
+        RepoBuilder::new("repo")
+            .categories(["app-misc"])
+            .write_to(&location)
+            .unwrap();
+        fs::write(
+            location.join("profiles/categories"),
+            "\n# comment\napp-misc\ninvalid category\n",
+        )
+        .unwrap();
+
+        let mut repository = Repository::load(
+            &RepoName::default(),
+            &location,
+            Arc::new(SysConf::default()),
+        )
+        .unwrap();
+        repository.populate().unwrap();
+
+        assert!(repository.categories.contains(&"app-misc".parse().unwrap()));
+        assert_eq!(repository.categories.len(), 1);
     }
 
     #[test]
@@ -408,8 +444,8 @@ mod tests {
             .unwrap();
 
         let sysconf = Arc::new(SysConf::default());
-        let valid = Repository::load("valid", &valid_location, sysconf.clone());
-        let invalid = Repository::load("invalid", &invalid_location, sysconf.clone());
+        let valid = Repository::load(&RepoName::default(), &valid_location, sysconf.clone());
+        let invalid = Repository::load(&RepoName::default(), &invalid_location, sysconf.clone());
 
         assert!(valid.is_ok());
         assert!(matches!(invalid, Err(RepositoryError::Profile(_))));

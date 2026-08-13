@@ -3,15 +3,15 @@ use crate::package::PackageView;
 use crate::package::cpv::CPV;
 use crate::package::metadata::PackageMetadata;
 use crate::package::slot::PackageSlot;
+use crate::repository::RepoName;
 use anyhow::Context;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::{fmt, fs};
 
 pub struct InstalledPackage {
     pub cpv: CPV,
-    pub repo: Arc<str>,
+    pub repo: RepoName,
     pub metadata: PackageMetadata,
     pub use_flags: Vec<UseFlag>,
 }
@@ -24,7 +24,7 @@ impl InstalledPackage {
         let repo = fs::read_to_string(path.join("repository"))
             .with_context(|| "unable to read repo")?
             .trim()
-            .into();
+            .parse()?;
         let use_flags = fs::read_to_string(path.join("USE"))
             .with_context(|| "unable to read USE flags")?
             .split_whitespace()
@@ -47,7 +47,7 @@ impl PackageView for InstalledPackage {
         &self.cpv
     }
 
-    fn repo(&self) -> &str {
+    fn repo(&self) -> &RepoName {
         &self.repo
     }
 
@@ -65,19 +65,14 @@ impl fmt::Display for InstalledPackage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::package::version::PackageVersion;
+    use crate::test_support::cpv;
 
     #[test]
     fn test_installed_package_fmt() {
-        let cpv = CPV::new(
-            "app-editors",
-            "vim",
-            PackageVersion::try_from("7.0.174-r1").unwrap(),
-        )
-        .unwrap();
+        let cpv = cpv("app-editors", "vim", "7.0.174-r1");
         let pkg = InstalledPackage {
             cpv,
-            repo: "gentoo".into(),
+            repo: "gentoo".parse().unwrap(),
             metadata: PackageMetadata::default(),
             use_flags: Vec::new(),
         };

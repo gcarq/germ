@@ -4,6 +4,7 @@
 mod git;
 
 use self::git::GitSyncHandler;
+use crate::repository::RepoName;
 use crate::types::FxHashMap;
 use anyhow::{Context, anyhow, bail};
 use log::{debug, info};
@@ -93,7 +94,7 @@ pub trait SyncHandler: fmt::Debug + Send + Sync {
     /// Conditionally syncs the repository using either `init` or `update`.
     ///
     /// If `force` is true, the sync will be performed regardless of the `auto_sync` setting.
-    fn sync(&self, name: &str, force: bool) -> anyhow::Result<()> {
+    fn sync(&self, name: &RepoName, force: bool) -> anyhow::Result<()> {
         if !self.auto_sync() && !force {
             debug!("auto-sync disabled for {name}");
             return Ok(());
@@ -171,8 +172,8 @@ mod tests {
             auto_sync: false,
             sync_calls: AtomicUsize::new(0),
         };
-        handler.sync("gentoo", false).unwrap();
-        handler.sync("gentoo", true).unwrap();
+        handler.sync(&RepoName::default(), false).unwrap();
+        handler.sync(&RepoName::default(), true).unwrap();
         assert_eq!(handler.sync_calls.load(Ordering::Relaxed), 1);
     }
 

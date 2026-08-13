@@ -1,7 +1,7 @@
 use super::ProfileSource;
-use crate::repository::RepoSet;
+use crate::repository::{RepoName, RepoSet};
 use crate::utils::is_blank_or_comment;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use std::{
     fmt, fs,
     path::{Path, PathBuf},
@@ -16,7 +16,7 @@ pub enum ParentEntry {
     RootRelative(PathBuf),
     // format: <repository>:<path>
     CrossRepository {
-        repo_name: String,
+        repo_name: RepoName,
         profile_path: PathBuf,
     },
 }
@@ -25,7 +25,7 @@ impl ParentEntry {
     /// Reads the parent file at the given `path` and returns its entries.
     ///
     /// Returns an empty vec if `path` doesn't exist.
-    pub fn from_parent_file(path: &Path) -> Result<Vec<Self>> {
+    pub fn from_parent_file(path: &Path) -> anyhow::Result<Vec<Self>> {
         if !path.exists() {
             return Ok(Vec::new());
         }
@@ -37,7 +37,7 @@ impl ParentEntry {
             .map(str::trim)
             .filter(|line| !is_blank_or_comment(line))
             .map(Self::try_from)
-            .collect::<Result<_>>()
+            .collect::<anyhow::Result<_>>()
             .with_context(|| anyhow!("unable to parse parent file {}", path.display()))
     }
 
@@ -48,7 +48,7 @@ impl ParentEntry {
         &self,
         referring_profile: &ProfileSource<'repo>,
         repo_set: &'repo RepoSet,
-    ) -> Result<ProfileSource<'repo>> {
+    ) -> anyhow::Result<ProfileSource<'repo>> {
         let owning_repo = referring_profile.owning_repo;
         match self {
             Self::RelativePath(profile_path) => {
@@ -90,7 +90,7 @@ impl ParentEntry {
                 if !owning_repo.layout.supports_cross_repo_parents() {
                     bail!("cross-repository parent requires profile-format 'portage-2'");
                 }
-                let parent_repo = repo_set.get(repo_name).ok_or_else(|| {
+                let parent_repo = repo_set.get(repo_name.as_str()).ok_or_else(|| {
                     anyhow!("repository '{repo_name}' is not available for parent '{self}'")
                 })?;
                 let path =
@@ -104,7 +104,7 @@ impl ParentEntry {
     }
 
     /// Resolves the given `profile_path` relative to the `profiles_root` and ensures that it doesn't escape it.
-    fn resolve_contained(profiles_root: &Path, profile_path: &Path) -> Result<PathBuf> {
+    fn resolve_contained(profiles_root: &Path, profile_path: &Path) -> anyhow::Result<PathBuf> {
         if profile_path.as_os_str().is_empty() {
             bail!("parent path must not be empty");
         }
@@ -142,7 +142,7 @@ impl TryFrom<&str> for ParentEntry {
 
         if let Some((repo_name, profile_path)) = value.split_once(':') {
             return Ok(Self::CrossRepository {
-                repo_name: repo_name.to_owned(),
+                repo_name: repo_name.parse()?,
                 profile_path: PathBuf::from(profile_path),
             });
         }

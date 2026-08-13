@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use crate::SysConf;
 use crate::conf::masks::useflag::UseMasks;
 use crate::conf::masks::{PackageMasks, UserPackageMasks};
@@ -31,7 +29,7 @@ impl PortageConf {
             .resolve_profile(&profile_path)
             .with_context(|| anyhow!("unable to build profile from {}", profile_path.display()))?;
 
-        let make_env = Self::init_make_env(&profile, &path)?;
+        let make_env = Self::init_make_env(&profile, sysconf)?;
 
         let arch = make_env
             .get("ARCH")
@@ -70,11 +68,11 @@ impl PortageConf {
 
     /// Initializes and returns the make environment by processing make.globals,
     /// make.defaults from profile and make.conf (in this order).
-    fn init_make_env(profile: &Profile, path: &Path) -> anyhow::Result<MakeEnv> {
-        let globals_path = path.join("make.globals");
+    fn init_make_env(profile: &Profile, sysconf: &SysConf) -> anyhow::Result<MakeEnv> {
+        let globals_path = sysconf.default_portage_conf().join("make.globals");
         let make_globals = MakeEnv::from_path(&globals_path, true, false)
             .with_context(|| "unable to process make.globals")?;
-        let make_conf = MakeEnv::from_path(&path.join("make.conf"), true, false)
+        let make_conf = MakeEnv::from_path(&sysconf.portage_conf().join("make.conf"), true, false)
             .with_context(|| "unable to process make.conf")?;
 
         let env = MakeEnv::default()
