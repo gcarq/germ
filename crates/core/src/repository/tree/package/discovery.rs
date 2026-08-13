@@ -1,48 +1,50 @@
-use crate::grammar::{PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
+use crate::grammar::{REVISION, VERSION, VERSION_SUFFIXES};
 use crate::package::cpv::CPV;
 use crate::package::names::{CatName, PkgName};
 use crate::package::version::PackageVersion;
 use fancy_regex::Regex;
 use log::debug;
+use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
-use walkdir::WalkDir;
 
-/// Regex to validate and parse `package`, `version`, `suffixes` and the `revision`
-/// from an ebuild name.
-static EBUILD_RE: LazyLock<Regex> = LazyLock::new(|| {
+/// Regex to validate and parse `version`, `suffixes` and the `revision` from an ebuild file name.
+static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(
-        r"\A(?<package>{PACKAGE})-(?<version>{VERSION})(?<suffixes>{VERSION_SUFFIXES})(?:-r(?<revision>{REVISION}))?\.ebuild\z"
+        r"\A(?<version>{VERSION})(?<suffixes>{VERSION_SUFFIXES})(?:-r(?<revision>{REVISION}))?\z"
     ))
     .unwrap()
 });
 
-/// Resolves all available [`CPV`] on-disk for the given `repo_path` and `category`.
+/// Resolves all available [`CPV`] at the given `repo_path` and `category`.
 pub fn resolve_cpv_from_category(
     repo_path: &Path,
     category: &CatName,
 ) -> impl Iterator<Item = anyhow::Result<CPV>> {
-    WalkDir::new(repo_path.join(category.as_str()))
-        .min_depth(2)
-        .max_depth(2)
+    fs::read_dir(repo_path.join(category.as_str()))
+        .ok()
         .into_iter()
-        .filter_entry(|e| {
-            e.file_type().is_file()
-                && e.file_name()
-                    .to_str()
-                    .is_some_and(|s| s.ends_with(".ebuild"))
-        })
+        .flatten()
         .filter_map(|entry| {
-            let ebuild = entry.ok()?;
-            let package = ebuild
-                .path()
-                .parent()?
-                .file_name()?
-                .to_str()?
-                .parse()
-                .ok()?;
-            let filename = ebuild.file_name().to_str()?;
-            cpv_from_fs_parts(category, package, filename).transpose()
+            let pkg_entry = entry.ok()?;
+            if !pkg_entry.file_type().ok()?.is_dir() {
+                return None;
+            }
+
+            let pkg: PkgName = pkg_entry.file_name().to_str()?.parse().ok()?;
+            let entries = fs::read_dir(pkg_entry.path()).ok()?;
+            Some((pkg, entries))
+        })
+        .flat_map(move |(package, ebuilds)| {
+            ebuilds.filter_map(move |entry| {
+                let entry = entry.ok()?;
+                if !entry.file_type().ok()?.is_file() {
+                    return None;
+                }
+
+                let ebuild = entry.file_name().into_string().ok()?;
+                cpv_from_fs_parts(category, package.clone(), &ebuild).transpose()
+            })
         })
 }
 
@@ -55,14 +57,20 @@ fn cpv_from_fs_parts(
     package: PkgName,
     ebuild: &str,
 ) -> anyhow::Result<Option<CPV>> {
-    let Some(caps) = EBUILD_RE.captures(ebuild)? else {
+    let Some(stem) = ebuild.strip_suffix(".ebuild") else {
         return Ok(None);
     };
-    if package.as_str() != &caps["package"] {
+    let Some(version) = stem
+        .strip_prefix(package.as_str())
+        .and_then(|rem| rem.strip_prefix('-'))
+    else {
         debug!("ebuild is not in the correct directory: {category}/{package}/{ebuild}");
         return Ok(None);
-    }
+    };
 
+    let Some(caps) = VERSION_RE.captures(version)? else {
+        return Ok(None);
+    };
     let revision = caps.name("revision").map(|m| m.as_str());
     match PackageVersion::new(&caps["version"], Some(&caps["suffixes"]), revision) {
         Ok(version) => Ok(Some(CPV::new(category.clone(), package, version))),
