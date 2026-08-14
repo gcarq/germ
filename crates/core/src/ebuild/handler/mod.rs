@@ -233,7 +233,7 @@ mod tests {
                     .recv_bytes()
                     .await?
                     .ok_or_else(|| ProtocolError::InvalidRequest("".into()))?;
-                Err(PhaseExecutionError::Invariant(anyhow!("test")))
+                Err(PhaseExecutionError::Lifecycle(anyhow!("unable to cleanup")))
             })
             .await;
 

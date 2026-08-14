@@ -6,11 +6,9 @@ use crate::types::FxHashMap;
 use either::Either;
 use log::warn;
 
-type PackagesByName = FxHashMap<PkgName, Vec<CPV>>;
-
 /// Holds all available packages in a repository, grouped by category and package name.
 #[derive(Default, Debug)]
-pub struct CPVIndex(FxHashMap<CatName, PackagesByName>);
+pub struct CPVIndex(FxHashMap<CatName, FxHashMap<PkgName, Vec<CPV>>>);
 
 impl CPVIndex {
     /// Inserts the given [`CPV`] into the index.

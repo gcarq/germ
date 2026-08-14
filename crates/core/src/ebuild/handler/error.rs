@@ -47,8 +47,11 @@ pub enum PhaseExecutionError {
     #[error("ebuild process exited with non-zero status: {0}")]
     NonZeroExit(ExitStatus),
 
-    #[error("internal execution error")]
-    Invariant(#[from] anyhow::Error),
+    #[error("ebuild process failed")]
+    Lifecycle(#[source] anyhow::Error),
+
+    #[error("ebuild process failed")]
+    Invariant(#[source] anyhow::Error),
 }
 
 /// Errors returned when generating package metadata for a [`CPV`].

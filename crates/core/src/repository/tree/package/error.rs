@@ -11,7 +11,7 @@ use crate::{
 
 /// Defines failures while resolving packages from repositories.
 #[derive(Debug, Error)]
-#[error("{cpv}: {source}")]
+#[error("resolving metadata for {cpv} failed")]
 pub struct PackageResolutionError {
     pub cpv: String,
     #[source]
@@ -70,5 +70,13 @@ mod tests {
         let RepositoryError::Internal(_) = internal.promote().unwrap_err() else {
             panic!();
         };
+
+        let lifecycle = PackageResolutionError::new(
+            "app-misc/foo-1",
+            MetadataGenerationError::Execution(PhaseExecutionError::Lifecycle(anyhow::anyhow!(
+                "test"
+            ))),
+        );
+        assert!(lifecycle.promote().is_ok());
     }
 }

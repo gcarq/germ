@@ -1,6 +1,6 @@
 use super::error::PhaseExecutionError;
 use super::ipc::IpcHandler;
-use anyhow::{Context, bail};
+use anyhow::{Context, anyhow};
 use log::warn;
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill, killpg};
@@ -62,12 +62,16 @@ pub struct EbuildExecution {
 
 impl EbuildExecution {
     /// Creates an ebuild execution that owns the given `ipc` channel and direct `child`.
-    pub fn new(ipc: IpcHandler, child: Child) -> anyhow::Result<Self> {
+    pub fn new(ipc: IpcHandler, child: Child) -> Result<Self, PhaseExecutionError> {
         let pid = child
             .id()
-            .with_context(|| "spawned ebuild process has no longer a PID")?;
-        let process_group =
-            Pid::from_raw(i32::try_from(pid).with_context(|| "ebuild PID does not fit in i32")?);
+            .with_context(|| "spawned process has no PID")
+            .map_err(PhaseExecutionError::Lifecycle)?;
+        let process_group = Pid::from_raw(
+            i32::try_from(pid)
+                .with_context(|| "ebuild PID does not fit in i32")
+                .map_err(PhaseExecutionError::Lifecycle)?,
+        );
         Ok(Self {
             ipc: Some(ipc),
             child,
@@ -88,7 +92,8 @@ impl EbuildExecution {
         let ipc = self
             .ipc
             .as_mut()
-            .context("ebuild execution IPC is already closed")?;
+            .context("execution IPC is already closed")
+            .map_err(PhaseExecutionError::Invariant)?;
 
         match handler(ipc).await {
             Ok(data) => {
@@ -129,7 +134,8 @@ impl EbuildExecution {
 
         let status = self
             .exit_status
-            .ok_or_else(|| anyhow::anyhow!("ebuild process was not reaped"))?;
+            .ok_or_else(|| anyhow::anyhow!("process was not reaped"))
+            .map_err(PhaseExecutionError::Lifecycle)?;
         if status.success() {
             Ok(())
         } else {
@@ -138,9 +144,11 @@ impl EbuildExecution {
     }
 
     /// Allows the process to exit naturally before escalating cleanup.
-    async fn natural_exit_or_escalate(&mut self) -> anyhow::Result<()> {
+    async fn natural_exit_or_escalate(&mut self) -> Result<(), PhaseExecutionError> {
         let status = match tokio::time::timeout(NATURAL_EXIT_PERIOD, self.child.wait()).await {
-            Ok(status) => status.with_context(|| "unable to wait for ebuild process")?,
+            Ok(status) => status
+                .with_context(|| "unable to wait for process")
+                .map_err(PhaseExecutionError::Lifecycle)?,
             Err(_) => return self.escalate().await,
         };
         self.exit_status = Some(status);
@@ -154,10 +162,14 @@ impl EbuildExecution {
     }
 
     /// Stops the process with SIGTERM, then uses SIGKILL if it doesn't exit.
-    async fn escalate(&mut self) -> anyhow::Result<()> {
+    async fn escalate(&mut self) -> Result<(), PhaseExecutionError> {
         match kill(self.process_group, Signal::SIGTERM) {
             Ok(()) | Err(Errno::ESRCH) => (),
-            Err(err) => bail!("unable to signal ebuild process: {err}"),
+            Err(err) => {
+                return Err(PhaseExecutionError::Lifecycle(anyhow!(
+                    "unable to signal process: {err}"
+                )));
+            }
         };
 
         let state = self.wait_for(self.timeouts.sigterm_grace, false).await?;
@@ -170,12 +182,13 @@ impl EbuildExecution {
     }
 
     /// Checks whether the child and its process group have exited.
-    fn observe(&mut self) -> anyhow::Result<ProcessState> {
+    fn observe(&mut self) -> Result<ProcessState, PhaseExecutionError> {
         if self.exit_status.is_none() {
             self.exit_status = self
                 .child
                 .try_wait()
-                .with_context(|| "unable to inspect ebuild process")?;
+                .with_context(|| "unable to inspect process")
+                .map_err(PhaseExecutionError::Lifecycle)?;
         }
         let group_empty = !process_group_exists(self.process_group)?;
         Ok(ProcessState {
@@ -185,21 +198,29 @@ impl EbuildExecution {
     }
 
     /// Kills the process group with SIGKILL and waits for it to exit.
-    async fn kill_group_and_wait(&mut self) -> anyhow::Result<()> {
+    async fn kill_group_and_wait(&mut self) -> Result<(), PhaseExecutionError> {
         match killpg(self.process_group, Signal::SIGKILL) {
             Ok(()) | Err(Errno::ESRCH) => (),
-            Err(err) => bail!("unable to signal ebuild process group: {err}"),
+            Err(err) => {
+                return Err(PhaseExecutionError::Lifecycle(anyhow!(
+                    "unable to signal ebuild process group: {err}"
+                )));
+            }
         };
 
         let is_complete = self
             .wait_for(self.timeouts.sigkill_wait, true)
             .await?
             .is_complete();
-        self.finalized = true;
         match is_complete {
-            true => Ok(()),
-            false => bail!("ebuild process group did not exit after SIGKILL"),
+            true => self.finalized = true,
+            false => {
+                return Err(PhaseExecutionError::Lifecycle(anyhow!(
+                    "process group did not exit after SIGKILL"
+                )));
+            }
         }
+        Ok(())
     }
 
     /// Waits for the child, and optionally its process group to exit.
@@ -207,7 +228,7 @@ impl EbuildExecution {
         &mut self,
         timeout: Duration,
         require_group_empty: bool,
-    ) -> anyhow::Result<ProcessState> {
+    ) -> Result<ProcessState, PhaseExecutionError> {
         let deadline = Instant::now() + timeout;
         loop {
             let state = self.observe()?;
@@ -239,11 +260,13 @@ impl Drop for EbuildExecution {
     }
 }
 
-fn process_group_exists(pgroup: Pid) -> anyhow::Result<bool> {
+fn process_group_exists(pgroup: Pid) -> Result<bool, PhaseExecutionError> {
     match killpg(pgroup, None) {
         Ok(()) | Err(Errno::EPERM) => Ok(true),
         Err(Errno::ESRCH) => Ok(false),
-        Err(err) => Err(err).with_context(|| "unable to inspect ebuild process group"),
+        Err(err) => Err(err)
+            .with_context(|| "unable to inspect process group")
+            .map_err(PhaseExecutionError::Lifecycle),
     }
 }
 

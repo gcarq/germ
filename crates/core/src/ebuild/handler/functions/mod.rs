@@ -38,7 +38,8 @@ pub fn resolve_eclass(
     let path = eclass
         .path
         .to_str()
-        .ok_or_else(|| anyhow!("eclass path contains invalid unicode"))?
+        .ok_or_else(|| anyhow!("eclass path contains invalid unicode"))
+        .map_err(PhaseExecutionError::Invariant)?
         .to_owned();
     Ok(FunctionReply::Ok(Some(path)))
 }
