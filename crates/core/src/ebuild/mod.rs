@@ -66,8 +66,8 @@ impl<'r> Ebuild<'r> {
     pub fn new(cpv: &'r CPV, repo: &'r Repository) -> Result<Self, EbuildError> {
         let path = repo
             .location
-            .join(cpv.category())
-            .join(cpv.package())
+            .join(cpv.category().as_str())
+            .join(cpv.package().as_str())
             .join(format!("{}.ebuild", cpv.pf()));
 
         let eapi = Self::parse_eapi(&path)?;

@@ -35,13 +35,13 @@ impl CPV {
     }
 
     /// Returns the package name, e.g.: `python`.
-    pub fn package(&self) -> &str {
-        self.package.as_str()
+    pub const fn package(&self) -> &PkgName {
+        &self.package
     }
 
-    /// Returns the category of the package, e.g.: `dev-lang`.
-    pub fn category(&self) -> &str {
-        self.category.as_str()
+    /// Returns the category name, e.g.: `dev-lang`.
+    pub const fn category(&self) -> &CatName {
+        &self.category
     }
 
     /// Returns the package version, e.g.: `3.14.3-r1`.
@@ -73,7 +73,7 @@ impl CPV {
 
     /// Returns the package name, for example `vim`.
     pub fn pn(&self) -> &str {
-        self.package()
+        self.package().as_str()
     }
 
     /// Returns the package version, with no revision. For example `7.0.174`.

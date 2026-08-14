@@ -252,7 +252,8 @@ impl Repository {
             .with_context(|| {
                 format!("unable to collect packages at {}", self.location.display())
             })?;
-        self.cpv_index.insert_all(packages);
+        self.cpv_index.insert(packages);
+        self.cpv_index.sort();
         Ok(())
     }
 

@@ -199,7 +199,10 @@ impl EbuildEnv {
                 ("P".to_owned(), ebuild.cpv.p()),
                 ("PF".to_owned(), ebuild.cpv.pf()),
                 ("PN".to_owned(), ebuild.cpv.pn().to_owned()),
-                ("CATEGORY".to_owned(), ebuild.cpv.category().to_owned()),
+                (
+                    "CATEGORY".to_owned(),
+                    ebuild.cpv.category().as_str().to_owned(),
+                ),
                 ("PV".to_owned(), ebuild.cpv.pv()),
                 ("PR".to_owned(), ebuild.cpv.pr()),
                 ("PVR".to_owned(), ebuild.cpv.pvr()),
