@@ -32,6 +32,10 @@ pub struct DepExpression<T: ExpressionItem> {
 impl<T: ExpressionItem> DepExpression<T> {
     /// Parses the given `input` string and returns a [`DepExpression`].
     pub fn parse(input: &str) -> Result<Self> {
+        if input.is_empty() {
+            return Ok(Self::default());
+        }
+
         let arena = ExpressionParser::parse(input)?;
         Ok(Self { arena })
     }

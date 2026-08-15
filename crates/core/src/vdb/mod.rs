@@ -104,6 +104,7 @@ mod tests {
         fs::write(path.join("repository"), repository).unwrap();
         fs::write(path.join("USE"), "").unwrap();
         fs::write(path.join("EAPI"), "8").unwrap();
+        fs::write(path.join("DESCRIPTION"), "Test package").unwrap();
         fs::write(path.join("SLOT"), "0").unwrap();
     }
 

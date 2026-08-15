@@ -7,7 +7,7 @@ use thiserror::Error;
 
 /// An EAPI can be thought of as a ‘version’ of the PMS to which a package conforms.
 /// See PMS section 2 for more details.
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Default, Debug)]
+#[derive(Archive, Serialize, Deserialize, Copy, Clone, Eq, PartialEq, Hash, Default, Debug)]
 pub enum Eapi {
     #[default]
     Zero,
@@ -60,6 +60,16 @@ impl Eapi {
     /// Returns `true` if this EAPI is supported for ebuilds.
     pub const fn is_supported_for_ebuilds(&self) -> bool {
         matches!(self, Self::Seven | Self::Eight | Self::Nine)
+    }
+
+    /// Returns `true` if this EAPI supports the `BDEPEND` metadata variable.
+    pub const fn supports_bdepend(&self) -> bool {
+        matches!(self, Self::Seven | Self::Eight | Self::Nine)
+    }
+
+    /// Returns `true` if this EAPI supports the `IDEPEND` metadata variable.
+    pub const fn supports_idepend(&self) -> bool {
+        matches!(self, Self::Eight | Self::Nine)
     }
 
     /// Returns the minimum supported bash version for this EAPI.
@@ -159,6 +169,20 @@ mod tests {
         ];
         for (eapi, exp_supported) in test_cases {
             assert_eq!(eapi.is_supported_for_ebuilds(), exp_supported);
+        }
+    }
+
+    #[test]
+    fn test_eapi_metadata_dependency_support() {
+        // eapi, supports_bdepend, supports_idepend
+        let test_cases = [
+            (Eapi::Seven, true, false),
+            (Eapi::Eight, true, true),
+            (Eapi::Nine, true, true),
+        ];
+        for (eapi, exp_bdepend, exp_idepend) in test_cases {
+            assert_eq!(eapi.supports_bdepend(), exp_bdepend);
+            assert_eq!(eapi.supports_idepend(), exp_idepend);
         }
     }
 

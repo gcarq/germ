@@ -172,7 +172,7 @@ impl<'r> EbuildPhaseHandler<'r> {
             }
             FuncType::HasV | FuncType::HasQ => Err(FuncCallError::Unsupported {
                 func,
-                eapi: self.ebuild.eapi.clone(),
+                eapi: self.ebuild.eapi,
             }
             .into()),
         }

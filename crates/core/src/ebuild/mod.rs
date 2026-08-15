@@ -98,7 +98,7 @@ impl<'r> Ebuild<'r> {
             })
             .collect::<Result<FxHashMap<_, _>, _>>();
 
-        Ok(PackageMetadata::from_map(data?)?)
+        Ok(PackageMetadata::from_map(data?, &self.eapi)?)
     }
 
     /// Parses the EAPI from the ebuild file at the given `path`.
