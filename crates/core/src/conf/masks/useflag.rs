@@ -1,11 +1,11 @@
 use crate::deps::atom::Atom;
-use crate::deps::useflag::UseFlag;
 use crate::files::UseEntries;
 use crate::files::entry::Entry;
 use crate::files::pkguse::{EntryUseFlags, PackageUseEntries};
 use crate::package::PackageView;
 use crate::profile::Profile;
 use crate::types::{FxHashMap, FxHashSet};
+use crate::useflag::UseFlag;
 use crate::utils::Inherit;
 
 /// This struct is the only truth whether a USE flag is masked or forced.

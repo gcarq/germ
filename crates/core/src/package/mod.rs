@@ -82,8 +82,8 @@ impl<'r> fmt::Display for Package<'r> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deps::useflag::UseFlag;
     use crate::test_support::cpv;
+    use crate::useflag::UseFlag;
     use crate::vdb::package::InstalledPackage;
 
     fn assert_package_view_matches_atoms<P: PackageView>(package: &P) {

@@ -1,9 +1,9 @@
-use crate::deps::useflag::UseFlag;
 use crate::package::PackageView;
 use crate::package::cpv::CPV;
 use crate::package::metadata::PackageMetadata;
 use crate::package::slot::PackageSlot;
 use crate::repository::RepoName;
+use crate::useflag::UseFlag;
 use anyhow::Context;
 use std::path::Path;
 use std::str::FromStr;

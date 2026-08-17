@@ -1,6 +1,6 @@
 use crate::deps::atom::Atom;
-use crate::deps::useflag::UseFlag;
-use anyhow::{Result, bail};
+use crate::useflag::UseFlag;
+use anyhow::bail;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
@@ -86,7 +86,7 @@ pub struct Entry<T: FileEntry> {
 }
 
 impl<T: FileEntry> Entry<T> {
-    pub fn from_str(value: &str, prec: Precedence) -> Result<Self> {
+    pub fn from_str(value: &str, prec: Precedence) -> anyhow::Result<Self> {
         let (op, inner) = match value.strip_prefix('-') {
             Some(value) => (Operation::Unset, value.parse()?),
             None => (Operation::Set, value.parse()?),
@@ -120,7 +120,7 @@ pub struct SysAtom(Atom);
 impl FromStr for SysAtom {
     type Err = anyhow::Error;
 
-    fn from_str(value: &str) -> Result<Self> {
+    fn from_str(value: &str) -> anyhow::Result<Self> {
         match value.strip_prefix('*') {
             Some(atom) => Ok(Self(atom.parse()?)),
             None => bail!("invalid system package syntax: {value}"),
@@ -133,7 +133,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ordered_from_str_ok() -> Result<()> {
+    fn test_ordered_from_str_ok() -> anyhow::Result<()> {
         assert_eq!(
             Entry::from_str("foo", Precedence::User)?,
             Entry {

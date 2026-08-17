@@ -1,13 +1,13 @@
 use crate::deps::DepExpression;
 use crate::deps::atom::Atom;
-use crate::deps::useflag::{PrefixedUseFlag, UseFlag};
 use crate::eapi::Eapi;
 use crate::package::slot::PackageSlot;
 use crate::repository::Eclass;
 use crate::types::FxHashMap;
+use crate::useflag::{IUseEntry, UseFlag};
 use anyhow::{anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
-use std::{fmt, fs, io, path::Path, str::FromStr};
+use std::{fmt, fs, io, path::Path};
 use thiserror::Error;
 
 /// Errors returned when constructing package metadata from ebuild output.
@@ -44,9 +44,10 @@ pub struct PackageMetadata {
     // TODO: enforce valid keywords
     pub keywords: Vec<String>,
     pub inherit: Vec<String>,
+    // TODO: use a string instead of UseFlag
     pub restrict: DepExpression<UseFlag>,
     pub defined_phases: Vec<String>,
-    pub iuse: Vec<PrefixedUseFlag>,
+    pub iuse: Vec<IUseEntry>,
     pub required_use: DepExpression<UseFlag>,
     pub slot: PackageSlot,
     pub depend: DepExpression<Atom>,
@@ -196,7 +197,7 @@ impl PackageMetadata {
     pub fn iuse(mut self, value: &str) -> anyhow::Result<Self> {
         self.iuse = value
             .split_whitespace()
-            .map(PrefixedUseFlag::from_str)
+            .map(str::parse)
             .collect::<anyhow::Result<_>>()?;
         Ok(self)
     }
@@ -420,6 +421,13 @@ mod tests {
         assert!(matches!(
             PackageMetadata::from_map(data, &Eapi::Eight).unwrap_err(),
             PackageMetadataError::Invalid { field: "SLOT", .. }
+        ));
+
+        let mut data = metadata_map();
+        data.insert("IUSE", "foo?");
+        assert!(matches!(
+            PackageMetadata::from_map(data, &Eapi::Eight).unwrap_err(),
+            PackageMetadataError::Invalid { field: "IUSE", .. }
         ));
     }
 }

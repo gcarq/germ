@@ -1,12 +1,11 @@
 pub mod atom;
 mod parser;
-pub mod useflag;
 
 use crate::deps::atom::Atom;
 use crate::deps::parser::ExpressionParser;
 use crate::deps::parser::arena::ExpressionArena;
-use crate::deps::useflag::UseFlag;
-use anyhow::Result;
+use crate::useflag::UseFlag;
+
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -14,7 +13,7 @@ use std::str::FromStr;
 /// This trait defines an item that can be used in a dependency expression,
 /// such as [`UseFlag`] and [`Atom`].
 pub trait ExpressionItem: FromStr<Err = anyhow::Error> + fmt::Display {
-    fn parse(input: &str) -> Result<Self> {
+    fn parse(input: &str) -> anyhow::Result<Self> {
         Self::from_str(input)
     }
 }
@@ -31,7 +30,7 @@ pub struct DepExpression<T: ExpressionItem> {
 
 impl<T: ExpressionItem> DepExpression<T> {
     /// Parses the given `input` string and returns a [`DepExpression`].
-    pub fn parse(input: &str) -> Result<Self> {
+    pub fn parse(input: &str) -> anyhow::Result<Self> {
         if input.is_empty() {
             return Ok(Self::default());
         }

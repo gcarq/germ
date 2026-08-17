@@ -52,8 +52,8 @@ fn print_use_flags(package: &InstalledPackage, conf: &PortageConf) {
     let mut enabled = Vec::new();
     let mut disabled = Vec::new();
 
-    for flag in &package.metadata.iuse {
-        let flag = flag.inner();
+    for entry in &package.metadata.iuse {
+        let flag = entry.flag();
         if package.use_flags.contains(flag) {
             enabled.push(flag);
         } else {

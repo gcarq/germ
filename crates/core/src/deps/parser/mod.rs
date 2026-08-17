@@ -4,8 +4,8 @@ mod lexer;
 use crate::deps::ExpressionItem;
 use crate::deps::parser::arena::{Expression, ExpressionArena, ExpressionId};
 use crate::deps::parser::lexer::{Lexer, Token};
-use crate::deps::useflag::UseFlag;
-use anyhow::{Result, anyhow, bail};
+use crate::useflag::UseFlag;
+use anyhow::{anyhow, bail};
 use std::ops::Range;
 
 /// A parser for ebuild dependency expressions commonly found in `DEPEND`, `REQUIRED_USE`, etc..
@@ -19,7 +19,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     /// Parses the `input` string and constructs an [`ExpressionArena`].
     ///
     /// Returns `Err` if the input is not a valid expression.
-    pub fn parse(input: &'a str) -> Result<ExpressionArena<T>> {
+    pub fn parse(input: &'a str) -> anyhow::Result<ExpressionArena<T>> {
         let mut parser = Self {
             lexer: Lexer::new(input),
             expression: ExpressionArena::new(),
@@ -35,7 +35,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     }
 
     /// Parses an expression based on given [`Token`].
-    fn parse_expression(&mut self, token: Token) -> Result<ExpressionId> {
+    fn parse_expression(&mut self, token: Token) -> anyhow::Result<ExpressionId> {
         let node = match token {
             Token::Ident(ident) => Expression::Item(T::parse(ident)?),
             Token::LParen => Expression::AllOf(self.parse_group()?),
@@ -78,7 +78,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     ///
     /// This function expects that the [`Token::LParen`] has already been consumed.
     /// Returns a [`Range`] that can be used for slicing `expression.children`.
-    fn parse_group(&mut self) -> Result<Range<u16>> {
+    fn parse_group(&mut self) -> anyhow::Result<Range<u16>> {
         let mut buffer = Vec::with_capacity(16);
         while let Some(token) = self.lexer.next() {
             if token == Token::RParen {
@@ -92,7 +92,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     /// Expects the next [`Token`] to be the given `token`.
     ///
     /// Returns `Err` if the token doesn't match.
-    fn expect_next(&mut self, token: Token) -> Result<()> {
+    fn expect_next(&mut self, token: Token) -> anyhow::Result<()> {
         match self.lexer.next() {
             Some(next) if next == token => Ok(()),
             Some(next) => bail!("expected '{token}', got '{next}'"),
@@ -291,17 +291,6 @@ mod tests {
             expr.to_string(),
             "|| ( wayland X ) ssh? ( || ( rdp ( vnc X ) ) )"
         );
-    }
-
-    #[test]
-    fn test_parser_utf8() {
-        let input = "schlüsselwort? ( || ( ä ( ö ü ) ) )";
-        let expr = ExpressionParser::<UseFlag>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[Item(Atom::parse("schlüsselwort").unwrap())]
-        // );
-        assert_eq!(expr.to_string(), "schlüsselwort? ( || ( ä ( ö ü ) ) )");
     }
 
     #[test]

@@ -11,6 +11,7 @@ pub mod makenv;
 pub mod package;
 mod profile;
 pub mod repository;
+pub mod useflag;
 pub use conf::system::SysConf;
 #[cfg(test)]
 mod test_support;

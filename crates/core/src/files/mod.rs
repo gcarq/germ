@@ -9,10 +9,10 @@ mod linefile;
 pub mod pkguse;
 
 use crate::deps::atom::Atom;
-use crate::deps::useflag::UseFlag;
 use crate::files::entry::SysAtom;
+use crate::useflag::UseFlag;
 use crate::utils;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use linefile::LineBasedFile;
 use std::fs;
 use std::path::Path;
@@ -27,7 +27,7 @@ pub type UseEntries = LineBasedFile<UseFlag>;
 /// If the `path` is a directory and `recursive` is true, all files in the directory
 /// are concatenated together in order of their filename.
 /// If `optional` is true, the absence of the [`Path`] does not result in an `Err`.
-pub fn content_from_path(path: &Path, recursive: bool, optional: bool) -> Result<String> {
+pub fn content_from_path(path: &Path, recursive: bool, optional: bool) -> anyhow::Result<String> {
     let metadata = match path.metadata() {
         Ok(metadata) => metadata,
         Err(_) if optional => return Ok(String::default()),
@@ -48,7 +48,7 @@ pub fn content_from_path(path: &Path, recursive: bool, optional: bool) -> Result
                 .with_context(|| anyhow!("unable to read file '{}'", p.display())),
             Err(err) => bail!(err),
         })
-        .collect::<Result<Vec<_>>>()?
+        .collect::<anyhow::Result<Vec<_>>>()?
         .join("\n");
     Ok(content)
 }

@@ -1,10 +1,10 @@
 use crate::deps::atom::Atom;
-use crate::deps::useflag::UseFlag;
 use crate::files::content_from_path;
 use crate::files::entry::{Entry, Precedence};
 use crate::types::{FxHashMap, FxHashSet};
+use crate::useflag::UseFlag;
 use crate::utils::{Inherit, is_blank_or_comment};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, bail};
 use std::path::Path;
 
 #[derive(Clone, Default)]
@@ -12,12 +12,12 @@ use std::path::Path;
 pub struct PackageUseEntries(FxHashMap<Atom, EntryUseFlags>);
 
 impl PackageUseEntries {
-    pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> Result<Self> {
+    pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
         let content = content_from_path(path, recursive, true)?;
         Self::from_string(content, order)
     }
 
-    pub fn from_string(content: String, order: Precedence) -> Result<Self> {
+    pub fn from_string(content: String, order: Precedence) -> anyhow::Result<Self> {
         let mut map = FxHashMap::default();
 
         for (lineno, line) in content.lines().enumerate() {
@@ -38,7 +38,7 @@ impl PackageUseEntries {
         self.0
     }
 
-    fn parse_line(line: &str, order: Precedence) -> Result<(Atom, EntryUseFlags)> {
+    fn parse_line(line: &str, order: Precedence) -> anyhow::Result<(Atom, EntryUseFlags)> {
         match line.split_once(char::is_whitespace) {
             Some((atom, flags)) => Ok((atom.parse()?, EntryUseFlags::from_str(flags, order)?)),
             None => bail!("invalid package.use definition: {line}"),
@@ -59,13 +59,13 @@ impl Inherit for PackageUseEntries {
     }
 }
 
-/// Helper struct to manage unique USE flags with their prefixes for a single package.
+/// Helper struct to manage unique USE flags for a single package.
 #[derive(Eq, PartialEq, Hash, Clone, Default)]
 #[cfg_attr(test, derive(Debug))]
 pub struct EntryUseFlags(Vec<Entry<UseFlag>>);
 
 impl EntryUseFlags {
-    pub fn from_str(value: &str, order: Precedence) -> Result<Self> {
+    pub fn from_str(value: &str, order: Precedence) -> anyhow::Result<Self> {
         let mut flags = EntryUseFlags::default();
         for flag in value.split_whitespace().map(|f| Entry::from_str(f, order)) {
             flags.update(&flag?);
@@ -124,7 +124,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_pkg_use_entries_from_string() -> Result<()> {
+    fn test_pkg_use_entries_from_string() -> anyhow::Result<()> {
         let content = "
             # Enable sysvinit symlinks by default.
             sys-apps/systemd sysv-utils
@@ -155,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pkg_use_entries_inherit_from() -> Result<()> {
+    fn test_pkg_use_entries_inherit_from() -> anyhow::Result<()> {
         let grand_parent = PackageUseEntries::from_string(
             "
             dev-libs/libffi foo -bar baz foobar
@@ -224,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prefixed_use_flags_inherit_from() -> Result<()> {
+    fn test_prefixed_use_flags_inherit_from() -> anyhow::Result<()> {
         let parent = EntryUseFlags(vec![
             Entry::from_str("foo", Precedence::Profile(0))?,
             Entry::from_str("-qux", Precedence::Profile(0))?,

@@ -1,5 +1,4 @@
-use crate::deps::ExpressionItem;
-use crate::deps::useflag::UseFlag;
+use crate::useflag::UseDep;
 
 use crate::grammar::{CATEGORY, PACKAGE, REPOSITORY, REVISION, VERSION, VERSION_SUFFIXES};
 use crate::package::names::{CatName, PkgName};
@@ -166,7 +165,7 @@ pub struct Atom {
     pub version: Option<PackageVersion>,
     pub slot: Option<PackageSlot>,
     pub repo: Option<RepoName>,
-    pub use_deps: Option<Vec<UseFlag>>,
+    pub use_deps: Vec<UseDep>,
     pub variant: AtomVariant,
 }
 
@@ -230,8 +229,15 @@ impl Atom {
                 .transpose()?,
             use_deps: captures
                 .name("use_deps")
-                .map(|capture| capture.as_str().split(',').map(UseFlag::parse).collect())
-                .transpose()?,
+                .map(|capture| {
+                    capture
+                        .as_str()
+                        .split(',')
+                        .map(str::parse::<UseDep>)
+                        .collect::<anyhow::Result<Vec<_>>>()
+                })
+                .transpose()?
+                .unwrap_or_default(),
             variant,
         })
     }
@@ -277,12 +283,9 @@ impl fmt::Display for Atom {
         }
         write!(f, "{}/{}", self.category, self.package)?;
         if let Some(version) = &self.version {
-            f.write_char('-')?;
+            write!(f, "-{version}")?;
             if self.variant == AtomVariant::VersionWildcard {
-                write!(f, "{version}")?;
                 f.write_char('*')?;
-            } else {
-                write!(f, "{version}")?;
             }
         }
         if let Some(slot) = &self.slot {
@@ -293,9 +296,9 @@ impl fmt::Display for Atom {
             f.write_str("::")?;
             f.write_str(repo.as_str())?;
         }
-        if let Some(use_deps) = &self.use_deps {
+        if !self.use_deps.is_empty() {
             f.write_char('[')?;
-            for (i, use_dep) in use_deps.iter().enumerate() {
+            for (i, use_dep) in self.use_deps.iter().enumerate() {
                 if i > 0 {
                     f.write_str(",")?;
                 }
@@ -419,7 +422,7 @@ mod tests {
                 Atom {
                     category: Exact("sys-libs".into()),
                     package: Exact("glibc".into()),
-                    use_deps: Some(vec!["audit".parse().unwrap(), "caps(-)".parse().unwrap()]),
+                    use_deps: vec!["audit".parse().unwrap(), "caps(-)".parse().unwrap()],
                     ..Default::default()
                 },
             ),
@@ -537,7 +540,7 @@ mod tests {
                     slot: Some(PackageSlot::Eq("2.2".into())),
                     repo: Some("gentoo".parse().unwrap()),
                     variant: AtomVariant::VersionOperator,
-                    use_deps: Some(vec!["cet".parse().unwrap(), "clang".parse().unwrap()]),
+                    use_deps: vec!["cet".parse().unwrap(), "clang".parse().unwrap()],
                 },
             ),
         ];
@@ -596,7 +599,7 @@ mod tests {
                     package: Exact("7zip".into()),
                     version: PackageVersion::try_from("26").ok(),
                     variant: AtomVariant::VersionWildcard,
-                    use_deps: Some(vec!["rar".parse().unwrap()]),
+                    use_deps: vec!["rar".parse().unwrap()],
                     ..Default::default()
                 },
             ),
@@ -606,6 +609,31 @@ mod tests {
             let atom = Atom::new(atom_str).unwrap();
             assert_eq!(atom, expected_atom);
             assert_eq!(atom.to_string(), atom_str);
+        }
+    }
+
+    #[test]
+    fn test_atom_use_deps() {
+        let atom = Atom::new("cat/pkg[foo,-bar,!baz?,qux(-)=]").unwrap();
+        assert_eq!(
+            atom.use_deps
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["foo", "-bar", "!baz?", "qux(-)="]
+        );
+        assert_eq!(atom.to_string(), "cat/pkg[foo,-bar,!baz?,qux(-)=]");
+        assert!(Atom::new("cat/pkg").unwrap().use_deps.is_empty());
+
+        for atom in [
+            "cat/pkg[]",
+            "cat/pkg[foo,]",
+            "cat/pkg[foo bar]",
+            "cat/pkg[foo, -bar]",
+            "cat/pkg[!foo]",
+            "cat/pkg[-foo?]",
+        ] {
+            assert!(Atom::new(atom).is_err(), "{atom} should be invalid");
         }
     }
 
@@ -702,7 +730,7 @@ mod tests {
                     slot: Some(PackageSlot::Eq("1.70".into())),
                     repo: Some("gentoo".parse().unwrap()),
                     variant: AtomVariant::VersionOperator,
-                    use_deps: Some(vec!["clippy".parse().unwrap()]),
+                    use_deps: vec!["clippy".parse().unwrap()],
                 },
                 ">=dev-lang/rust-1.70.0_beta_p11-r2:1.70::gentoo[clippy]",
             ),
