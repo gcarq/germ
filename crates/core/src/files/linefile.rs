@@ -1,8 +1,8 @@
 use crate::files::content_from_path;
 use crate::files::entry::{Entry, FileEntry, Precedence};
 use crate::types::FxHashSet;
-use crate::utils::{Inherit, is_blank_or_comment};
-use anyhow::{Context, Result};
+use crate::utils::{Inherit, strip_line_comment};
+use anyhow::Context;
 use std::path::Path;
 
 /// Represents a one-item-per-line file.
@@ -15,23 +15,24 @@ use std::path::Path;
 pub struct LineBasedFile<T: FileEntry>(Vec<Entry<T>>);
 
 impl<T: FileEntry> LineBasedFile<T> {
-    pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> Result<Self> {
+    pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
         let content = content_from_path(path, recursive, true)?;
         Self::from_string(content, order)
+            .with_context(|| format!("failed to parse {}", path.display()))
     }
 
-    pub fn from_string(content: String, order: Precedence) -> Result<Self> {
-        let lines = content
+    pub fn from_string(content: String, order: Precedence) -> anyhow::Result<Self> {
+        let entries = content
             .lines()
             .enumerate()
-            .map(|(lineno, line)| (lineno, line.trim()))
-            .filter(|(_, line)| !is_blank_or_comment(line))
-            .map(|(lineno, line)| {
-                Entry::from_str(line, order)
-                    .with_context(|| format!("failed to parse line {}: {line}", lineno + 1))
+            .map(|(lineno, entry)| (lineno + 1, strip_line_comment(entry)))
+            .filter(|(_, entry)| !entry.is_empty())
+            .map(|(lineno, entry)| {
+                Entry::from_str(entry, order)
+                    .with_context(|| format!("error in line {lineno}: {entry}"))
             })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Self(lines))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(Self(entries))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Entry<T>> {
@@ -70,14 +71,14 @@ mod tests {
     use crate::files::PackageEntries;
 
     #[test]
-    fn test_from_string() -> Result<()> {
+    fn test_from_string() -> anyhow::Result<()> {
         let content = "
-            dev-libs/libffi
+            dev-libs/libffi # inline comment
 
             # this is a comment
-            app-arch/xz-utils
+            app-arch/xz-utils # added because of XY
             app-arch/zstd
-            -app-arch/rpm
+            -app-arch/rpm # removal comment
         ";
 
         let file = PackageEntries::from_string(content.into(), Precedence::Repository)?;
@@ -94,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inherit_from() -> Result<()> {
+    fn test_inherit_from() -> anyhow::Result<()> {
         let grand_parent = PackageEntries::from_string(
             "
             dev-libs/libffi

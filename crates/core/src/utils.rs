@@ -1,14 +1,20 @@
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail};
 use md5::{Digest, Md5};
 use std::fmt::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-/// Checks whether a line is blank or a comment after ASCII trimming.
+/// Removes a trailing comment from the given `line` and returns a trimmed str.
+pub fn strip_line_comment(line: &str) -> &str {
+    line.split_once('#')
+        .map_or(line, |(content, _)| content)
+        .trim()
+}
+
+/// Checks whether a line is blank or a comment.
 pub fn is_blank_or_comment(line: &str) -> bool {
-    let line = line.trim_ascii_start();
-    line.is_empty() || line.starts_with('#')
+    strip_line_comment(line).is_empty()
 }
 
 /// Trait for inheriting configurations from another instance.
@@ -30,7 +36,7 @@ pub trait Inherit {
 
 /// Calculates and returns the MD5 hash of the given `file` as a hexadecimal `String`.
 #[allow(unused)]
-pub fn md5sum(data: &[u8]) -> Result<String> {
+pub fn md5sum(data: &[u8]) -> anyhow::Result<String> {
     let hash = Md5::digest(data);
     let mut checksum = String::with_capacity(hash.len() * 2);
 
@@ -42,7 +48,7 @@ pub fn md5sum(data: &[u8]) -> Result<String> {
 }
 
 /// Uses [`shlex`] to analyze and split the given [`String`] into key-value pairs.
-pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
+pub fn shlex_split(content: String) -> anyhow::Result<Vec<(String, String)>> {
     shlex::split(&content)
         .ok_or_else(|| anyhow!("Unable to split text due to syntax errors"))?
         .into_iter()
@@ -55,7 +61,7 @@ pub fn shlex_split(content: String) -> Result<Vec<(String, String)>> {
 
 /// Reads all files for the given `path`, ignoring subdirectories and files starting
 /// with `.` or ending with `~`.
-pub fn list_files(path: &Path) -> impl Iterator<Item = Result<PathBuf>> {
+pub fn list_files(path: &Path) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
     WalkDir::new(path)
         .min_depth(1)
         .max_depth(1)
@@ -86,6 +92,11 @@ mod tests {
         ] {
             assert_eq!(is_blank_or_comment(line), expected, "{line:?}");
         }
+    }
+
+    #[test]
+    fn test_strip_line_comment() {
+        assert_eq!(strip_line_comment("value # comment"), "value");
     }
 
     #[test]

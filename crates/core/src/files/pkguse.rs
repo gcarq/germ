@@ -3,7 +3,7 @@ use crate::files::content_from_path;
 use crate::files::entry::{Entry, Precedence};
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::UseFlag;
-use crate::utils::{Inherit, is_blank_or_comment};
+use crate::utils::{Inherit, strip_line_comment};
 use anyhow::{Context, bail};
 use std::path::Path;
 
@@ -15,18 +15,19 @@ impl PackageUseEntries {
     pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
         let content = content_from_path(path, recursive, true)?;
         Self::from_string(content, order)
+            .with_context(|| format!("failed to parse {}", path.display()))
     }
 
     pub fn from_string(content: String, order: Precedence) -> anyhow::Result<Self> {
         let mut map = FxHashMap::default();
 
-        for (lineno, line) in content.lines().enumerate() {
-            let line = line.trim();
-            if is_blank_or_comment(line) {
+        for (lineno, entry) in content.lines().enumerate() {
+            let entry = strip_line_comment(entry);
+            if entry.is_empty() {
                 continue;
             }
-            let (atom, flags) = Self::parse_line(line, order)
-                .with_context(|| format!("failed to parse line {}: {line}", lineno + 1))?;
+            let (atom, flags) = Self::parse_line(entry, order)
+                .with_context(|| format!("error in line {}: {entry}", lineno + 1))?;
 
             let entry: &mut EntryUseFlags = map.entry(atom).or_default();
             entry.update_from(&flags);
@@ -128,6 +129,7 @@ mod tests {
         let content = "
             # Enable sysvinit symlinks by default.
             sys-apps/systemd sysv-utils
+            media-libs/mesa -opencl # ROCm should be the opencl provider
 
             app-admin/sudo foo -bar baz
             app-admin/sudo foo
@@ -146,6 +148,10 @@ mod tests {
                     Entry::from_str("baz", Precedence::User)?,
                     Entry::from_str("foo", Precedence::User)?,
                 ]),
+            ),
+            (
+                Atom::new("media-libs/mesa")?,
+                EntryUseFlags(vec![Entry::from_str("-opencl", Precedence::User)?]),
             ),
         ]
         .into_iter()
