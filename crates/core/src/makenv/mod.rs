@@ -1,18 +1,17 @@
 mod value;
 
 use crate::files::content_from_path;
-use crate::types::FxHashMap;
+use crate::types::{FxHashMap, FxHashSet};
 use crate::utils;
 use crate::utils::Inherit;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, bail};
 use std::ops::Deref;
 use std::path::Path;
 use value::EnvValue;
 
 /// List of variables that are incremental as per PMS section 5.3 and
 /// <https://github.com/gentoo/portage/blob/0783d820e6eecffa3adff52c4669fc715d65dbaa/lib/portage/const.py#L121>
-/// NOTE: This list must be kept sorted for [`core::slice::binary_search`] to work correctly.
-const INCREMENTAL_VARIABLES: [&str; 14] = [
+const INCREMENTAL_VARS: [&str; 14] = [
     "ACCEPT_KEYWORDS",
     "CONFIG_PROTECT",
     "CONFIG_PROTECT_MASK",
@@ -29,23 +28,42 @@ const INCREMENTAL_VARIABLES: [&str; 14] = [
     "USE_EXPAND_UNPREFIXED",
 ];
 
-/// Returns true if the given variable is incremental, false otherwise.
-fn is_incremental_var(var: &str) -> bool {
-    INCREMENTAL_VARIABLES.binary_search(&var).is_ok()
+/// Holds all variable names that must be considered incremental.
+#[derive(Default)]
+pub(crate) struct IncrementalVars {
+    vars: FxHashSet<Box<str>>,
+}
+
+impl IncrementalVars {
+    /// Builds a classification from dynamic incremental variable values.
+    pub(crate) fn from(values: impl IntoIterator<Item = String>) -> Self {
+        let mut vars = FxHashSet::default();
+        for value in values {
+            let mut normalized = EnvValue::default();
+            normalized.inherit(&EnvValue::new(value.as_str()));
+            vars.extend(normalized.into_inner());
+        }
+        Self { vars }
+    }
+
+    /// Returns `true` if the given `name` is an incremental variable.
+    fn contains(&self, name: &str) -> bool {
+        INCREMENTAL_VARS.contains(&name) || self.vars.contains(name)
+    }
 }
 
 /// Holds all environment variables defined in a make.conf or make.defaults file.
 #[derive(Default, Clone)]
-pub struct MakeEnv(FxHashMap<String, EnvValue>);
+pub struct MakeEnv(FxHashMap<Box<str>, EnvValue>);
 
 impl MakeEnv {
-    pub fn from_path(path: &Path, recursive: bool, optional: bool) -> Result<Self> {
+    pub fn from_path(path: &Path, recursive: bool, optional: bool) -> anyhow::Result<Self> {
         let content = content_from_path(path, recursive, optional)?;
         Self::from_string(content)
     }
 
     /// Builds a [`MakeEnv`] from the given content of a make.conf or make.defaults file.
-    pub fn from_string(content: String) -> Result<Self> {
+    pub fn from_string(content: String) -> anyhow::Result<Self> {
         let mut vars = utils::shlex_split(content)?
             .into_iter()
             .map(|(key, value)| {
@@ -55,13 +73,12 @@ impl MakeEnv {
                     .with_context(|| "variable name cannot be empty")?
                     .is_ascii_alphabetic()
                 {
-                    let value = EnvValue::new(value, is_incremental_var(&key));
-                    Ok((key, value))
+                    Ok((key.into_boxed_str(), EnvValue::new(value.as_str())))
                 } else {
                     bail!("invalid variable name: {key}")
                 }
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         for i in 0..vars.len() {
             vars[i].1 = vars[i].1.expand(&vars[..i])?;
@@ -70,37 +87,59 @@ impl MakeEnv {
         Ok(Self(vars.into_iter().collect()))
     }
 
+    /// Inherits a parent environment using supplied incremental variables.
+    pub(crate) fn inherit_vars(
+        &mut self,
+        parent: &MakeEnv,
+        vars: &IncrementalVars,
+    ) -> anyhow::Result<()> {
+        let context = parent
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<Vec<_>>();
+
+        for value in self.0.values_mut() {
+            *value = value.expand(&context)?;
+        }
+
+        for (key, parent_value) in parent.iter() {
+            match self.0.get_mut(key) {
+                Some(value) if vars.contains(key) => {
+                    value.inherit(parent_value);
+                }
+                Some(_) => {}
+                None => {
+                    let mut value = parent_value.clone();
+                    if vars.contains(key) {
+                        value.normalize();
+                    }
+                    self.0.insert(key.clone(), value);
+                }
+            }
+        }
+
+        for (key, value) in &mut self.0 {
+            if vars.contains(key) && !parent.contains_key(key) {
+                value.normalize();
+            }
+        }
+        Ok(())
+    }
+
     /// Consumes self and returns the inner map.
-    pub fn into_inner(self) -> FxHashMap<String, EnvValue> {
+    pub fn into_inner(self) -> FxHashMap<Box<str>, EnvValue> {
         self.0
     }
 }
 
 impl Inherit for MakeEnv {
     fn inherit_from(&mut self, parent: &MakeEnv) -> anyhow::Result<()> {
-        let parent_ctx = parent
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect::<Vec<_>>();
-        for (key, parent_value) in parent.iter() {
-            // If the variable exists, expand it with the parent's context and take care of
-            // incremental variables, otherwise just insert it.
-            match self.0.get_mut(key) {
-                Some(self_value) => {
-                    *self_value = self_value.expand(&parent_ctx)?;
-                    self_value.inherit_from(parent_value)?;
-                }
-                None => {
-                    self.0.insert(key.clone(), parent_value.clone());
-                }
-            }
-        }
-        Ok(())
+        self.inherit_vars(parent, &IncrementalVars::default())
     }
 }
 
 impl Deref for MakeEnv {
-    type Target = FxHashMap<String, EnvValue>;
+    type Target = FxHashMap<Box<str>, EnvValue>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

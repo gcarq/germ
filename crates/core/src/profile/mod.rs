@@ -1,4 +1,5 @@
 mod deprecation;
+mod make;
 mod parent;
 
 use crate::eapi::Eapi;
@@ -11,7 +12,7 @@ use crate::profile::parent::ParentEntry;
 use crate::repository::RepoSet;
 use crate::repository::Repository;
 use crate::utils::Inherit;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use log::warn;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -24,7 +25,7 @@ struct ProfileSource<'repo> {
 
 impl<'repo> ProfileSource<'repo> {
     /// Resolves a profile path and identifies its owning repository.
-    fn from_path(path: &Path, repo_set: &'repo RepoSet) -> Result<Self> {
+    fn from_path(path: &Path, repo_set: &'repo RepoSet) -> anyhow::Result<Self> {
         let path = path
             .canonicalize()
             .with_context(|| anyhow!("unable to resolve profile {}", path.display()))?;
@@ -92,29 +93,27 @@ impl Profile {
     ///
     /// Returns `Err` if `location` doesn't exist, the profile directory is invalid or
     /// if the profile is not valid.
-    pub fn resolve(location: &Path, repo_set: &RepoSet) -> Result<Self> {
+    pub fn resolve(location: &Path, repo_set: &RepoSet) -> anyhow::Result<Self> {
         let source = ProfileSource::from_path(location, repo_set)?;
 
         let mut parents = Vec::new();
         Self::build_parents(&source, repo_set, &mut parents)
             .with_context(|| anyhow!("unable to resolve parents for {source}"))?;
 
-        let profile = Self::load(&source, Precedence::Profile(parents.len()))?;
-        if parents.is_empty() {
-            return Ok(profile);
-        }
+        let mut profile = Self::load(&source, Precedence::Profile(parents.len()))?;
+        profile.make_defaults = make::fold_defaults(&parents, &profile)?;
 
-        let mut inherited = parents.remove(0);
-        for parent in parents {
-            inherited = parent.inherit(&inherited)?;
-        }
+        let resolved = parents
+            .into_iter()
+            .rev()
+            .try_fold(profile, |resolved, parent| resolved.inherit(&parent))?;
 
-        profile.inherit(&inherited)
+        Ok(resolved)
     }
 
     /// Loads one profile directory without resolving its parents.
     /// The passed `order` must be the order in the inheritance chain.
-    fn load(source: &ProfileSource<'_>, order: Precedence) -> Result<Self> {
+    fn load(source: &ProfileSource<'_>, order: Precedence) -> anyhow::Result<Self> {
         let path = &source.path;
         let eapi = Eapi::from_eapi_file(&path.join("eapi"))?;
         let supports_file_dirs = eapi.supports_profile_file_dirs()
@@ -182,31 +181,10 @@ impl Profile {
         Ok(profile)
     }
 
-    /// Builds all parent profiles in inheritance order.
-    fn build_parents<'repo>(
-        source: &ProfileSource<'repo>,
-        repo_set: &'repo RepoSet,
-        profiles: &mut Vec<Self>,
-    ) -> Result<()> {
-        for parent in ParentEntry::from_parent_file(&source.path.join("parent"))? {
-            let parent_source = parent.resolve(source, repo_set).with_context(|| {
-                anyhow!("invalid parent reference '{parent}' in profile {source}")
-            })?;
-            Self::build_parents(&parent_source, repo_set, profiles)?;
-
-            let order = Precedence::Profile(profiles.len());
-            let profile = Self::load(&parent_source, order)
-                .with_context(|| anyhow!("unable to build profile from {parent_source}"))?;
-            profiles.push(profile);
-        }
-        Ok(())
-    }
-}
-
-impl Inherit for Profile {
-    /// Inherits relevant configurations from the given parent profile.
-    fn inherit_from(&mut self, parent: &Profile) -> anyhow::Result<()> {
-        self.make_defaults.inherit_from(&parent.make_defaults)?;
+    /// Inherits the given `parent` profile, except `make_defaults`
+    /// which needs to be handled beforehand to distinguish between
+    /// incremental and literal variables.
+    fn inherit(mut self, parent: &Profile) -> anyhow::Result<Self> {
         self.packages.inherit_from(&parent.packages)?;
         self.package_mask.inherit_from(&parent.package_mask)?;
         self.package_unmask.inherit_from(&parent.package_unmask)?;
@@ -224,6 +202,26 @@ impl Inherit for Profile {
             .inherit_from(&parent.package_use_stable_mask)?;
         self.package_use_stable_force
             .inherit_from(&parent.package_use_stable_force)?;
+        Ok(self)
+    }
+
+    /// Builds all parent profiles in inheritance order.
+    fn build_parents<'repo>(
+        source: &ProfileSource<'repo>,
+        repo_set: &'repo RepoSet,
+        profiles: &mut Vec<Self>,
+    ) -> anyhow::Result<()> {
+        for parent in ParentEntry::from_parent_file(&source.path.join("parent"))? {
+            let source = parent.resolve(source, repo_set).with_context(|| {
+                anyhow!("invalid parent reference '{parent}' in profile {source}")
+            })?;
+            Self::build_parents(&source, repo_set, profiles)?;
+
+            let order = Precedence::Profile(profiles.len());
+            let profile = Self::load(&source, order)
+                .with_context(|| anyhow!("unable to build profile from {source}"))?;
+            profiles.push(profile);
+        }
         Ok(())
     }
 }
@@ -247,7 +245,7 @@ mod tests {
         repository.join("profiles").join(profile)
     }
 
-    fn assert_parent_case(format: &str, parent: &str, succeeds: bool) -> Result<()> {
+    fn assert_parent_case(format: &str, parent: &str, succeeds: bool) -> anyhow::Result<()> {
         let fixture = repo_set(vec![
             RepoBuilder::new("source")
                 .formats([format])
@@ -264,9 +262,8 @@ mod tests {
     }
 
     #[test]
-    fn test_profile_inherit_from() -> Result<()> {
+    fn test_profile_inherit_data() -> anyhow::Result<()> {
         let parent = Profile {
-            make_defaults: MakeEnv::from_string("USE=\"foo\"".into())?,
             package_use_mask: PackageUseEntries::from_string(
                 "sys-libs/glibc cet stack-realign".into(),
                 Precedence::Profile(0),
@@ -275,8 +272,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut child = Profile {
-            make_defaults: MakeEnv::from_string("USE=\"bar\"".into())?,
+        let child = Profile {
             use_mask: UseEntries::from_string("-bar\nbaz".into(), Precedence::Profile(1))?,
             package_use_mask: PackageUseEntries::from_string(
                 "sys-libs/glibc -stack-realign\ndev-lang/rust baz".into(),
@@ -285,11 +281,7 @@ mod tests {
             ..Default::default()
         };
 
-        child.inherit_from(&parent)?;
-        assert_eq!(
-            child.make_defaults.get("USE").unwrap().to_string(),
-            "foo bar"
-        );
+        let child = child.inherit(&parent)?;
         assert_eq!(
             child.use_mask.into_iter().collect::<Vec<_>>(),
             vec![
@@ -320,7 +312,32 @@ mod tests {
     }
 
     #[test]
-    fn test_profile_directories() -> Result<()> {
+    fn test_profile_resolve_make_defaults() -> anyhow::Result<()> {
+        let fixture = repo_set(vec![
+            RepoBuilder::new("repo")
+                .formats(["pms"])
+                .profile("base")
+                .profile("selected")
+                .parents("selected", ["../base"])
+                .profile_file(
+                    "base/make.defaults",
+                    "USE_EXPAND=\"CAMERAS\"\nCAMERAS=\"canon ptp2\"\n",
+                )
+                .profile_file("selected/make.defaults", "CAMERAS=\"-canon nikon\"\n"),
+        ])?;
+
+        let repository = fixture.get("repo").unwrap();
+        let selected = profile_path(&repository.location, "selected");
+        let profile = Profile::resolve(&selected, &fixture)?;
+        assert_eq!(
+            profile.make_defaults.get("CAMERAS").unwrap().to_string(),
+            "ptp2 nikon"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_profile_directories() -> anyhow::Result<()> {
         let cases = [
             ("pms-eapi", "pms", "0", false),
             ("portage-one-eapi", "portage-1", "0", true),
@@ -344,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn test_packages_are_file_only() -> Result<()> {
+    fn test_packages_are_file_only() -> anyhow::Result<()> {
         let fixture = repo_set(vec![
             RepoBuilder::new("repo")
                 .formats(["portage-2"])
@@ -360,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parent_formats() -> Result<()> {
+    fn test_parent_formats() -> anyhow::Result<()> {
         for format in ["pms", "portage-1", "portage-2"] {
             assert_parent_case(format, "../base", true)?;
             assert_parent_case(format, "target:base", format == "portage-2")?;
@@ -370,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn test_root_parent_escape() -> Result<()> {
+    fn test_root_parent_escape() -> anyhow::Result<()> {
         let fixture = repo_set(vec![
             RepoBuilder::new("source")
                 .formats(["portage-2"])

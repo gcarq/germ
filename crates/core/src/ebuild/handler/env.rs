@@ -185,7 +185,7 @@ impl EbuildEnv {
         let mut env = make_env
             .iter()
             .filter_map(|(name, value)| {
-                Self::filter_var(name).then_some((name.clone(), value.to_string()))
+                Self::filter_var(name).then_some((name.to_string(), value.to_string()))
             })
             .chain([
                 ("PORTAGE_ECLASS_LOCATIONS".to_owned(), repo_paths),
@@ -216,7 +216,7 @@ impl EbuildEnv {
 
         if let Some(env_unset) = make_env.get("ENV_UNSET") {
             for name in env_unset.inner() {
-                env.remove(name);
+                env.remove(name.as_ref());
             }
         }
         Ok(Self(env))
