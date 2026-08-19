@@ -100,15 +100,13 @@ impl Profile {
         Self::build_parents(&source, repo_set, &mut parents)
             .with_context(|| anyhow!("unable to resolve parents for {source}"))?;
 
+        // Load the profile and fold its `make.defaults` before inheriting the parents.
+        // This is needed to properly handle `USE_EXPAND` and `USE_EXPAND_UNPREFIXED`.
         let mut profile = Self::load(&source, Precedence::Profile(parents.len()))?;
         profile.make_defaults = make::fold_defaults(&parents, &profile)?;
 
-        let resolved = parents
-            .into_iter()
-            .rev()
-            .try_fold(profile, |resolved, parent| resolved.inherit(&parent))?;
-
-        Ok(resolved)
+        let parents = Self::resolve_parents(parents)?;
+        profile.inherit(&parents)
     }
 
     /// Loads one profile directory without resolving its parents.
@@ -205,7 +203,8 @@ impl Profile {
         Ok(self)
     }
 
-    /// Builds all parent profiles in inheritance order.
+    /// Builds all parent profiles in inheritance order (depth first, left to right)
+    /// and stores them in `profiles`.
     fn build_parents<'repo>(
         source: &ProfileSource<'repo>,
         repo_set: &'repo RepoSet,
@@ -224,6 +223,18 @@ impl Profile {
         }
         Ok(())
     }
+
+    /// Inherits all given `parents` and returns a resolved parent [`Profile`].
+    ///
+    /// NOTE: The caller must make sure the parents are in the correct order:
+    /// depth first, left to right.
+    fn resolve_parents(parents: Vec<Self>) -> anyhow::Result<Self> {
+        parents
+            .into_iter()
+            .try_fold(Self::default(), |resolved_parent, parent| {
+                parent.inherit(&resolved_parent)
+            })
+    }
 }
 
 impl fmt::Display for Profile {
@@ -236,7 +247,7 @@ impl fmt::Display for Profile {
 mod tests {
     use super::*;
     use crate::files::entry::Entry;
-    use crate::files::pkguse::EntryUseFlags;
+
     use crate::repository::test_support::{RepoBuilder, repo_set};
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -262,76 +273,77 @@ mod tests {
     }
 
     #[test]
-    fn test_profile_inherit_data() -> anyhow::Result<()> {
-        let parent = Profile {
-            package_use_mask: PackageUseEntries::from_string(
-                "sys-libs/glibc cet stack-realign".into(),
-                Precedence::Profile(0),
-            )?,
-            use_mask: UseEntries::from_string("foo\nbar".into(), Precedence::Profile(0))?,
-            ..Default::default()
-        };
-
-        let child = Profile {
-            use_mask: UseEntries::from_string("-bar\nbaz".into(), Precedence::Profile(1))?,
-            package_use_mask: PackageUseEntries::from_string(
-                "sys-libs/glibc -stack-realign\ndev-lang/rust baz".into(),
-                Precedence::Profile(1),
-            )?,
-            ..Default::default()
-        };
-
-        let child = child.inherit(&parent)?;
-        assert_eq!(
-            child.use_mask.into_iter().collect::<Vec<_>>(),
-            vec![
-                Entry::from_str("foo", Precedence::Profile(0))?,
-                Entry::from_str("-bar", Precedence::Profile(1))?,
-                Entry::from_str("baz", Precedence::Profile(1))?,
-            ]
-        );
-        assert_eq!(
-            child.package_use_mask.into_inner(),
-            [
-                (
-                    "sys-libs/glibc".parse()?,
-                    EntryUseFlags::from_raw(vec![
-                        Entry::from_str("cet", Precedence::Profile(0))?,
-                        Entry::from_str("-stack-realign", Precedence::Profile(1))?,
-                    ])
-                ),
-                (
-                    "dev-lang/rust".parse()?,
-                    EntryUseFlags::from_raw(vec![Entry::from_str("baz", Precedence::Profile(1))?])
-                )
-            ]
-            .into_iter()
-            .collect()
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_profile_resolve_make_defaults() -> anyhow::Result<()> {
+    fn test_profile_resolve() -> anyhow::Result<()> {
         let fixture = repo_set(vec![
             RepoBuilder::new("repo")
                 .formats(["pms"])
                 .profile("base")
+                .profile("parent")
                 .profile("selected")
-                .parents("selected", ["../base"])
+                .parents("parent", ["../base"])
+                .parents("selected", ["../parent"])
                 .profile_file(
                     "base/make.defaults",
                     "USE_EXPAND=\"CAMERAS\"\nCAMERAS=\"canon ptp2\"\n",
                 )
-                .profile_file("selected/make.defaults", "CAMERAS=\"-canon nikon\"\n"),
+                .profile_file("parent/make.defaults", "CAMERAS=\"-canon nikon\"\n")
+                .profile_file("base/use.mask", "foo\nbar\n")
+                .profile_file("parent/use.mask", "-bar\nbaz\n")
+                .profile_file("selected/use.mask", "-bar\nqux\n")
+                .profile_file(
+                    "base/package.use.mask",
+                    "sys-libs/glibc cet stack-realign\n\
+                     dev-lang/rust LLVM_TARGETS: X86\n",
+                )
+                .profile_file(
+                    "parent/package.use.mask",
+                    "sys-libs/glibc -stack-realign\n\
+                     dev-lang/rust LLVM_TARGETS: -* AMDGPU\n",
+                )
+                .profile_file("selected/package.use.mask", "dev-lang/rust baz\n"),
         ])?;
 
         let repository = fixture.get("repo").unwrap();
         let selected = profile_path(&repository.location, "selected");
         let profile = Profile::resolve(&selected, &fixture)?;
+
         assert_eq!(
             profile.make_defaults.get("CAMERAS").unwrap().to_string(),
             "ptp2 nikon"
+        );
+        assert_eq!(
+            profile.use_mask.into_iter().collect::<Vec<_>>(),
+            vec![
+                Entry::from_str("foo", Precedence::Profile(0))?,
+                Entry::from_str("baz", Precedence::Profile(1))?,
+                Entry::from_str("-bar", Precedence::Profile(2))?,
+                Entry::from_str("qux", Precedence::Profile(2))?,
+            ]
+        );
+
+        let package_use_mask = profile.package_use_mask.into_inner();
+        let glibc = package_use_mask.get(&"sys-libs/glibc".parse()?).unwrap();
+        assert_eq!(
+            glibc.get_match(&"cet".parse()?),
+            Some(&Entry::from_str("cet", Precedence::Profile(0))?)
+        );
+        assert_eq!(
+            glibc.get_match(&"stack-realign".parse()?),
+            Some(&Entry::from_str("-stack-realign", Precedence::Profile(1))?)
+        );
+
+        let rust = package_use_mask.get(&"dev-lang/rust".parse()?).unwrap();
+        assert_eq!(
+            rust.get_match(&"llvm_targets_AMDGPU".parse()?),
+            Some(&Entry::from_str(
+                "llvm_targets_AMDGPU",
+                Precedence::Profile(1)
+            )?)
+        );
+        assert_eq!(rust.get_match(&"llvm_targets_X86".parse()?), None);
+        assert_eq!(
+            rust.get_match(&"baz".parse()?),
+            Some(&Entry::from_str("baz", Precedence::Profile(2))?)
         );
         Ok(())
     }
