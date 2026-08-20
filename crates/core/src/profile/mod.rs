@@ -247,6 +247,7 @@ impl fmt::Display for Profile {
 mod tests {
     use super::*;
     use crate::files::entry::Entry;
+    use crate::useflag::UseExpandConfig;
 
     use crate::repository::test_support::{RepoBuilder, repo_set};
     use std::fs;
@@ -284,7 +285,7 @@ mod tests {
                 .parents("selected", ["../parent"])
                 .profile_file(
                     "base/make.defaults",
-                    "USE_EXPAND=\"CAMERAS\"\nCAMERAS=\"canon ptp2\"\n",
+                    "USE_EXPAND=\"CAMERAS LLVM_TARGETS\"\nCAMERAS=\"canon ptp2\"\n",
                 )
                 .profile_file("parent/make.defaults", "CAMERAS=\"-canon nikon\"\n")
                 .profile_file("base/use.mask", "foo\nbar\n")
@@ -311,6 +312,7 @@ mod tests {
             profile.make_defaults.get("CAMERAS").unwrap().to_string(),
             "ptp2 nikon"
         );
+        let groups = UseExpandConfig::from_make_env(&profile.make_defaults)?;
         assert_eq!(
             profile.use_mask.into_iter().collect::<Vec<_>>(),
             vec![
@@ -320,29 +322,28 @@ mod tests {
                 Entry::from_str("qux", Precedence::Profile(2))?,
             ]
         );
-
-        let package_use_mask = profile.package_use_mask.into_inner();
+        let package_use_mask = profile.package_use_mask.expand(&groups)?;
         let glibc = package_use_mask.get(&"sys-libs/glibc".parse()?).unwrap();
         assert_eq!(
-            glibc.get_match(&"cet".parse()?),
+            glibc.get(&"cet".parse()?),
             Some(&Entry::from_str("cet", Precedence::Profile(0))?)
         );
         assert_eq!(
-            glibc.get_match(&"stack-realign".parse()?),
+            glibc.get(&"stack-realign".parse()?),
             Some(&Entry::from_str("-stack-realign", Precedence::Profile(1))?)
         );
 
         let rust = package_use_mask.get(&"dev-lang/rust".parse()?).unwrap();
         assert_eq!(
-            rust.get_match(&"llvm_targets_AMDGPU".parse()?),
+            rust.get(&"llvm_targets_AMDGPU".parse()?),
             Some(&Entry::from_str(
                 "llvm_targets_AMDGPU",
                 Precedence::Profile(1)
             )?)
         );
-        assert_eq!(rust.get_match(&"llvm_targets_X86".parse()?), None);
+        assert_eq!(rust.get(&"llvm_targets_X86".parse()?), None);
         assert_eq!(
-            rust.get_match(&"baz".parse()?),
+            rust.get(&"baz".parse()?),
             Some(&Entry::from_str("baz", Precedence::Profile(2))?)
         );
         Ok(())

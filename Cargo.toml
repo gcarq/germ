@@ -71,3 +71,4 @@ codegen-units = 1
 inherits = "release"
 debug = true
 strip = false
+lto = false

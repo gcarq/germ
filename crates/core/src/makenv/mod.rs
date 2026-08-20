@@ -7,7 +7,7 @@ use crate::utils::Inherit;
 use anyhow::{Context, bail};
 use std::ops::Deref;
 use std::path::Path;
-use value::EnvValue;
+pub use value::EnvValue;
 
 /// List of variables that are incremental as per PMS section 5.3 and
 /// <https://github.com/gentoo/portage/blob/0783d820e6eecffa3adff52c4669fc715d65dbaa/lib/portage/const.py#L121>
