@@ -107,13 +107,14 @@ impl RepoSet {
                 .entries
                 .get(&name)
                 .ok_or_else(|| RepoSetError::Sync(anyhow!("unknown repository '{name}'")))?;
-            return entry.sync(&name, true).map_err(|err| {
+            entry.sync(&name, true).map_err(|err| {
                 RepoSetError::Sync(err.context(anyhow!("unable to sync repository '{name}'")))
-            });
-        }
-        for (name, entry) in &self.entries {
-            if let Err(err) = entry.sync(name, false) {
-                error!("Failed to sync repository '{name}': {err}");
+            })?;
+        } else {
+            for (name, entry) in &self.entries {
+                if let Err(err) = entry.sync(name, false) {
+                    error!("Failed to sync repository '{name}': {err}");
+                }
             }
         }
 
