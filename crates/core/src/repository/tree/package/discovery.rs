@@ -16,65 +16,85 @@ static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// Resolves all available [`CPV`] at the given `repo_path` and `category`.
-pub fn resolve_cpv_from_category(
-    repo_path: &Path,
-    category: &CatName,
-) -> impl Iterator<Item = anyhow::Result<CPV>> {
-    fs::read_dir(repo_path.join(category.as_str()))
-        .ok()
+/// Resolves all [`CPV`] from the given repository path and categories.
+pub fn resolve_from_repo_path<'r>(
+    repo_path: &'r Path,
+    categories: impl IntoIterator<Item = &'r CatName>,
+) -> impl Iterator<Item = CPV> {
+    categories
+        .into_iter()
+        .flat_map(|cat| resolve_from_category_path(cat, &repo_path.join(cat.as_str())))
+}
+
+/// Resolves all [`CPV`] from the given category path.
+pub fn resolve_from_category_path<'c>(
+    category: &'c CatName,
+    cat_path: &Path,
+) -> impl Iterator<Item = CPV> + use<'c> {
+    fs::read_dir(cat_path)
         .into_iter()
         .flatten()
-        .filter_map(|entry| {
-            let pkg_entry = entry.ok()?;
-            if !pkg_entry.file_type().ok()?.is_dir() {
+        .filter_map(move |entry| {
+            let entry = entry.ok()?;
+            if !entry.file_type().ok()?.is_dir() {
+                return None;
+            }
+            let package: PkgName = entry.file_name().into_string().ok()?.parse().ok()?;
+            Some(resolve_from_pkg_path(category, package, &entry.path()))
+        })
+        .flatten()
+}
+
+/// Resolves all [`CPV`] from the given package path.
+pub fn resolve_from_pkg_path<'c>(
+    category: &'c CatName,
+    package: PkgName,
+    pkg_path: &Path,
+) -> impl Iterator<Item = CPV> + use<'c> {
+    fs::read_dir(pkg_path)
+        .into_iter()
+        .flatten()
+        .filter_map(move |entry| {
+            let entry = entry.ok()?;
+            if !entry.file_type().ok()?.is_file() {
                 return None;
             }
 
-            let pkg: PkgName = pkg_entry.file_name().to_str()?.parse().ok()?;
-            let entries = fs::read_dir(pkg_entry.path()).ok()?;
-            Some((pkg, entries))
-        })
-        .flat_map(move |(package, ebuilds)| {
-            ebuilds.filter_map(move |entry| {
-                let entry = entry.ok()?;
-                if !entry.file_type().ok()?.is_file() {
-                    return None;
-                }
-
-                let ebuild = entry.file_name().into_string().ok()?;
-                cpv_from_fs_parts(category, package.clone(), &ebuild).transpose()
-            })
+            let ebuild = entry.file_name().into_string().ok()?;
+            cpv_from_fs_parts(category, package.clone(), &ebuild)
         })
 }
 
-/// Parses a `CPV` from the given `category`, `package` and `ebuild`.
+/// Parses a [`CPV`] from the given `category`, `package` and `ebuild_filename`.
 ///
-/// Returns `Ok(None)` if the file is not a valid ebuild or the package name
-/// doesn't match the ebuild name.
-fn cpv_from_fs_parts(
-    category: &CatName,
-    package: PkgName,
-    ebuild: &str,
-) -> anyhow::Result<Option<CPV>> {
-    let Some(stem) = ebuild.strip_suffix(".ebuild") else {
-        return Ok(None);
-    };
-    let Some(version) = stem
+/// Returns `None` if the file is not a valid ebuild or the package name doesn't match the ebuild name.
+///
+/// # Panics
+///
+/// Will panic if the regex engine fails e.g. backtracking limit is exceeded.
+fn cpv_from_fs_parts(category: &CatName, package: PkgName, ebuild_filename: &str) -> Option<CPV> {
+    let Some(version) = ebuild_filename
+        .strip_suffix(".ebuild")?
         .strip_prefix(package.as_str())
         .and_then(|rem| rem.strip_prefix('-'))
     else {
-        debug!("ebuild is not in the correct directory: {category}/{package}/{ebuild}");
-        return Ok(None);
+        debug!("ebuild is not in the correct directory: {category}/{package}/{ebuild_filename}");
+        return None;
     };
 
-    let Some(caps) = VERSION_RE.captures(version)? else {
-        return Ok(None);
+    let caps = match VERSION_RE.captures(version) {
+        Ok(caps) => caps?,
+        Err(err) => {
+            panic!(
+                "BUG: regex engine error while parsing version from ebuild filename {ebuild_filename}: {err}"
+            );
+        }
     };
+
     let revision = caps.name("revision").map(|m| m.as_str());
     match PackageVersion::new(&caps["version"], Some(&caps["suffixes"]), revision) {
-        Ok(version) => Ok(Some(CPV::new(category.clone(), package, version))),
-        Err(_) => Ok(None),
+        Ok(version) => Some(CPV::new(category.clone(), package, version)),
+        Err(_) => None,
     }
 }
 
@@ -106,7 +126,6 @@ mod tests {
                 package.parse().unwrap(),
                 ebuild,
             )
-            .unwrap()
             .unwrap();
 
             assert_eq!(parsed, cpv("dev-libs", expected_package, expected_version));
@@ -122,8 +141,7 @@ mod tests {
                 &"dev-libs".parse().unwrap(),
                 package.parse().unwrap(),
                 ebuild,
-            )
-            .unwrap();
+            );
 
             assert_eq!(parsed, None);
         }

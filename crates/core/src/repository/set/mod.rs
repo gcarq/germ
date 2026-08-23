@@ -80,16 +80,17 @@ impl RepoSet {
 
     /// Eagerly resolves and returns all packages that match the given `atom`.
     /// TODO: Order the returned packages by version
-    pub async fn find_packages<'r>(
-        &'r self,
+    pub async fn find_packages(
+        &mut self,
         atom: &Atom,
-    ) -> Result<Vec<PackageResult<'r>>, RepoSetError> {
+    ) -> Result<Vec<PackageResult>, RepoSetError> {
         let mut results = Vec::new();
-        for repo in self.select(atom.repo.as_ref().map(RepoName::as_str)) {
+        for repo in self.select_mut(atom.repo.as_ref().map(RepoName::as_str)) {
+            let repo_name = repo.name.clone();
             results.extend(
                 repo.find_packages(atom)
                     .await
-                    .map_err(|err| RepoSetError::repo_failure(&repo.name, err))?,
+                    .map_err(|err| RepoSetError::repo_failure(&repo_name, err))?,
             );
         }
         Ok(results)
@@ -367,12 +368,9 @@ impl RepoSet {
             }
         }
 
-        match repository.populate() {
+        match repository.finalize() {
             Ok(()) => {
-                debug!(
-                    "Loaded repository '{name}' with {} ebuilds",
-                    repository.cpvs().count()
-                );
+                debug!("Loaded repository '{name}'");
                 completed.insert(name.to_owned(), repository);
             }
             Err(
@@ -499,9 +497,8 @@ mod tests {
         set.maybe_sync(None).unwrap();
 
         assert!(
-            set.get("repo").is_some_and(|repository| repository
-                .cpvs()
-                .any(|cpv| cpv.fqn() == "app-misc/foo-1"))
+            set.get_mut("repo")
+                .is_some_and(|repo| repo.cpvs().any(|cpv| cpv.fqn() == "app-misc/foo-1"))
         );
     }
 
@@ -547,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_layout_masters_are_used() {
-        let fixture = repo_set(vec![
+        let mut fixture = repo_set(vec![
             RepoBuilder::new("master")
                 .categories(["app-misc"])
                 .eclass("master"),
@@ -558,7 +555,7 @@ mod tests {
         ])
         .unwrap();
 
-        let overlay = fixture.get("overlay").unwrap();
+        let overlay = fixture.get_mut("overlay").unwrap();
         let has_package = overlay.cpvs().any(|cpv| cpv.fqn() == "app-misc/foo-1");
 
         assert!(has_package);
@@ -575,7 +572,7 @@ mod tests {
 
     #[test]
     fn test_empty_masters_override() {
-        let fixture = repo_set(vec![
+        let mut fixture = repo_set(vec![
             RepoBuilder::new("master")
                 .categories(["app-misc"])
                 .eclass("master"),
@@ -587,7 +584,7 @@ mod tests {
         .unwrap();
 
         let has_package = fixture
-            .get("overlay")
+            .get_mut("overlay")
             .unwrap()
             .cpvs()
             .any(|cpv| cpv.fqn() == "app-misc/foo-1");
@@ -613,7 +610,7 @@ mod tests {
         ])
         .unwrap();
 
-        let overlay_before = fixture.get("overlay").unwrap();
+        let overlay_before = fixture.get_mut("overlay").unwrap();
         assert!(
             !overlay_before
                 .cpvs()
@@ -630,7 +627,7 @@ mod tests {
         fs::write(master_path.join("eclass").join("refreshed.eclass"), "").unwrap();
         fixture.reload_from_disk().unwrap();
 
-        let overlay_after = fixture.get("overlay").unwrap();
+        let overlay_after = fixture.get_mut("overlay").unwrap();
         assert!(
             overlay_after
                 .cpvs()
@@ -696,10 +693,9 @@ mod tests {
         let unavailable_path = fixture.get("unavailable").unwrap().location.clone();
         fs::remove_dir_all(unavailable_path).unwrap();
         fixture.reload_from_disk().unwrap();
+        assert!(fixture.get_mut("unavailable").is_none());
 
-        let child = fixture.get("child").unwrap();
-
-        assert!(fixture.get("unavailable").is_none());
+        let child = fixture.get_mut("child").unwrap();
         assert!(child.eclasses.contains_key("available"));
         assert!(child.cpvs().any(|cpv| cpv.fqn() == "app-misc/foo-1"));
     }

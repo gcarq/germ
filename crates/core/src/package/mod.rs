@@ -42,15 +42,15 @@ pub trait PackageView {
 /// Represents a package within a [`Repository`] with its category, name, version and additional
 /// metadata required to install it.
 #[derive(Debug)]
-pub struct Package<'r> {
-    pub cpv: &'r CPV,
-    pub repo: &'r RepoName,
+pub struct Package {
+    pub cpv: CPV,
+    pub repo: RepoName,
     pub metadata: PackageMetadata,
 }
 
-impl<'r> Package<'r> {
+impl Package {
     /// Creates a new [`Package`] from the given `cpv`, `repo` and `metadata`.
-    pub const fn new(cpv: &'r CPV, repo: &'r RepoName, metadata: PackageMetadata) -> Self {
+    pub const fn new(cpv: CPV, repo: RepoName, metadata: PackageMetadata) -> Self {
         Self {
             cpv,
             repo,
@@ -59,13 +59,13 @@ impl<'r> Package<'r> {
     }
 }
 
-impl<'r> PackageView for Package<'r> {
+impl PackageView for Package {
     fn cpv(&self) -> &CPV {
-        self.cpv
+        &self.cpv
     }
 
     fn repo(&self) -> &RepoName {
-        self.repo
+        &self.repo
     }
 
     fn slot(&self) -> &PackageSlot {
@@ -73,7 +73,7 @@ impl<'r> PackageView for Package<'r> {
     }
 }
 
-impl<'r> fmt::Display for Package<'r> {
+impl fmt::Display for Package {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.cpv)
     }
@@ -118,8 +118,8 @@ mod tests {
         let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
         let repo = "gentoo".parse().unwrap();
         let package = Package::new(
-            &cpv,
-            &repo,
+            cpv,
+            repo,
             PackageMetadata {
                 slot: PackageSlot::Eq("15".into()),
                 ..Default::default()
@@ -148,7 +148,7 @@ mod tests {
     fn test_package_fmt() {
         let cpv = cpv("app-editors", "vim", "7.0.174-r1");
         let repo = "gentoo".parse().unwrap();
-        let package = Package::new(&cpv, &repo, PackageMetadata::default());
+        let package = Package::new(cpv, repo, PackageMetadata::default());
         assert_eq!(package.to_string(), "app-editors/vim-7.0.174-r1");
     }
 }

@@ -188,7 +188,7 @@ mod tests {
 
         let cpv = cpv("dev-lang", "rust", "1.97.1");
         let repo = "gentoo".parse().unwrap();
-        let package = Package::new(&cpv, &repo, PackageMetadata::default());
+        let package = Package::new(cpv, repo, PackageMetadata::default());
         assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("wasm")?));
         assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("llvm_targets_AMDGPU")?));
         assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("amd64")?));
@@ -211,7 +211,7 @@ mod tests {
 
         let cpv = cpv("dev-lang", "rust", "1.97.1");
         let repo = "gentoo".parse().unwrap();
-        let package = Package::new(&cpv, &repo, PackageMetadata::default());
+        let package = Package::new(cpv, repo, PackageMetadata::default());
         assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("wasm")?));
         assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("llvm_targets_AMDGPU")?));
         assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("amd64")?));
@@ -238,7 +238,7 @@ mod tests {
 
         let cpv = cpv("dev-lang", "rust", "1.97.1");
         let repo = "gentoo".parse().unwrap();
-        let package = Package::new(&cpv, &repo, PackageMetadata::default());
+        let package = Package::new(cpv, repo, PackageMetadata::default());
         assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("llvm_targets_AMDGPU")?));
         assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("amd64")?));
         Ok(())

@@ -116,6 +116,7 @@ mod tests {
     use crate::files::entry::Precedence;
     use crate::package::Package;
     use crate::package::metadata::PackageMetadata;
+    use crate::repository::RepoName;
     use crate::test_support::cpv;
 
     #[test]
@@ -135,21 +136,21 @@ mod tests {
         )
         .unwrap();
 
-        let repo = "gentoo".parse().unwrap();
+        let repo = RepoName::new("gentoo").unwrap();
         let cpv1 = cpv("dev-lang", "rust", "1.50-r2");
-        let pkg1 = Package::new(&cpv1, &repo, PackageMetadata::default());
+        let pkg1 = Package::new(cpv1, repo.clone(), PackageMetadata::default());
         assert!(!manager.is_masked(&pkg1), "{pkg1} should not be masked");
 
         let cpv2 = cpv("dev-lang", "rust", "1.60-r1");
-        let pkg2 = Package::new(&cpv2, &repo, PackageMetadata::default());
+        let pkg2 = Package::new(cpv2, repo.clone(), PackageMetadata::default());
         assert!(manager.is_masked(&pkg2), "{pkg2} should be masked");
 
         let cpv3 = cpv("app-editors", "vim", "8.2");
-        let pkg3 = Package::new(&cpv3, &repo, PackageMetadata::default());
+        let pkg3 = Package::new(cpv3, repo.clone(), PackageMetadata::default());
         assert!(manager.is_masked(&pkg3), "{pkg3} should be masked");
 
         let cpv4 = cpv("app-editors", "nano", "5.0");
-        let pkg4 = Package::new(&cpv4, &repo, PackageMetadata::default());
+        let pkg4 = Package::new(cpv4, repo.clone(), PackageMetadata::default());
         assert!(!manager.is_masked(&pkg4), "{pkg4} should not be masked");
     }
 }

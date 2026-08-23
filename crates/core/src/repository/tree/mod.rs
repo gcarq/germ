@@ -5,16 +5,17 @@ mod package;
 mod profiles;
 
 pub use eclass::{Eclass, Eclasses};
+use either::Either;
 pub use error::RepositoryError;
 use futures_util::{StreamExt, TryStreamExt, stream};
 pub use layout::{Layout, LayoutError};
 pub use package::{PackageResolutionError, PackageResult};
 pub use profiles::{ArchList, ProfileError};
 
-use self::package::{CPVIndex, resolve_cpv_from_category};
+use self::package::CPVIndex;
 use self::profiles::ProfileDescriptions;
 use crate::SysConf;
-use crate::deps::atom::Atom;
+use crate::deps::atom::{Atom, AtomIdent};
 use crate::eapi::Eapi;
 use crate::ebuild::Ebuild;
 use crate::files::{PackageEntries, entry::Precedence};
@@ -22,11 +23,13 @@ use crate::package::names::CatName;
 use crate::package::{Package, cpv::CPV};
 use crate::repository::RepoName;
 use crate::repository::tree::package::cache::MetadataCache;
+use crate::repository::tree::package::discovery::{
+    resolve_from_category_path, resolve_from_pkg_path, resolve_from_repo_path,
+};
 use crate::types::FxHashSet;
 use crate::utils::{Inherit, is_blank_or_comment};
 use anyhow::{Context, anyhow};
 use log::{debug, warn};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -95,23 +98,25 @@ impl Repository {
         })
     }
 
-    /// Returns all known CPVs in the repository.
-    pub fn cpvs(&self) -> impl Iterator<Item = &CPV> {
+    /// Returns all existing CPVs in the repository.
+    pub fn cpvs(&mut self) -> impl Iterator<Item = &CPV> {
+        self.ensure_discovered_cpvs(&Atom::default());
         self.cpv_index.iter()
     }
 
     /// Eagerly resolves and returns all known packages.
-    pub async fn packages<'r>(&'r self) -> Result<Vec<PackageResult<'r>>, RepositoryError> {
-        self.resolve_packages(self.cpv_index.iter()).await
+    pub async fn packages(&mut self) -> Result<Vec<PackageResult>, RepositoryError> {
+        self.find_packages(&Atom::default()).await
     }
 
     /// Eagerly resolves all packages that match the given [`Atom`].
-    pub async fn find_packages<'r>(
-        &'r self,
+    pub async fn find_packages(
+        &mut self,
         atom: &Atom,
-    ) -> Result<Vec<PackageResult<'r>>, RepositoryError> {
-        self.resolve_packages(self.cpv_index.find_packages(atom))
-            .await
+    ) -> Result<Vec<PackageResult>, RepositoryError> {
+        self.ensure_discovered_cpvs(atom);
+        let cpvs = self.cpv_index.find_packages(atom);
+        self.resolve_packages(cpvs).await
     }
 
     /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
@@ -124,13 +129,13 @@ impl Repository {
             .any(|desc| desc.keyword == arch && desc.profile_path == profile_path)
     }
 
-    /// Populates all categories, packages and eclasses.
+    /// Resolves all configured categories and eclasses and also clears the CPV index.
     ///
     /// NOTE: The caller must ensure [`Inherit::inherit_from`] has been called before.
-    pub fn populate(&mut self) -> Result<(), RepositoryError> {
+    pub fn finalize(&mut self) -> Result<(), RepositoryError> {
         self.collect_eclasses().map_err(RepositoryError::Data)?;
         self.collect_categories();
-        self.collect_cpvs().map_err(RepositoryError::Data)?;
+        self.cpv_index.clear();
         Ok(())
     }
 
@@ -152,13 +157,14 @@ impl Repository {
     /// Compacts the [`MetadataCache`] by removing all entries that are no longer valid,
     /// and reclaiming disk space if possible.
     pub fn compact_cache(&mut self) -> anyhow::Result<()> {
-        self.metadata_cache.retain(self.cpvs())?;
+        self.ensure_discovered_cpvs(&Atom::default());
+        self.metadata_cache.retain(self.cpv_index.iter())?;
         self.metadata_cache.compact()?;
         Ok(())
     }
 
     /// Resolves the [`Package`] for the given [`CPV`].
-    async fn resolve_package<'r>(&'r self, cpv: &'r CPV) -> PackageResult<'r> {
+    async fn resolve_package<'r>(&'r self, cpv: &'r CPV) -> PackageResult {
         let ebuild = match Ebuild::new(cpv, self) {
             Ok(ebuild) => ebuild,
             Err(error) => {
@@ -167,7 +173,7 @@ impl Repository {
         };
 
         match ebuild.generate_metadata().await {
-            Ok(metadata) => Ok(Package::new(cpv, &self.name, metadata)),
+            Ok(metadata) => Ok(Package::new(cpv.to_owned(), self.name.clone(), metadata)),
             Err(source) => Err(PackageResolutionError::new(cpv.fqn(), source)),
         }
     }
@@ -176,14 +182,18 @@ impl Repository {
     async fn resolve_packages<'r>(
         &'r self,
         cpvs: impl Iterator<Item = &'r CPV>,
-    ) -> Result<Vec<PackageResult<'r>>, RepositoryError> {
+    ) -> Result<Vec<PackageResult>, RepositoryError> {
         let mut cached = Vec::with_capacity(cpvs.size_hint().0);
         let mut missing = Vec::new();
 
         for cpv in cpvs {
             match self.metadata_cache.get(cpv)? {
                 Some(metadata) => {
-                    cached.push(Ok(Package::new(cpv, &self.name, metadata)));
+                    cached.push(Ok(Package::new(
+                        cpv.to_owned(),
+                        self.name.clone(),
+                        metadata,
+                    )));
                 }
                 None => missing.push(cpv),
             }
@@ -204,7 +214,7 @@ impl Repository {
             resolved
                 .iter()
                 .filter_map(|result| result.as_ref().ok())
-                .map(|pkg| (pkg.cpv, &pkg.metadata)),
+                .map(|pkg| (&pkg.cpv, &pkg.metadata)),
         )?;
 
         cached.extend(resolved);
@@ -239,22 +249,36 @@ impl Repository {
         }
     }
 
-    /// Collects all known packages in the repository as [`CPV`].
+    /// Ensures all [`CPV`] that match the given [`Atom`]
+    /// are discovered.
     ///
-    /// NOTE: The caller must ensure to [`Self::collect_categories`] has been called before,
-    /// since only known categories are considered when collecting packages.
-    fn collect_cpvs(&mut self) -> anyhow::Result<()> {
-        let packages = self
-            .categories
-            .par_iter()
-            .flat_map_iter(|category| resolve_cpv_from_category(&self.location, category))
-            .collect::<anyhow::Result<Vec<_>>>()
-            .with_context(|| {
-                format!("unable to collect packages at {}", self.location.display())
-            })?;
-        self.cpv_index.insert(packages);
+    /// TODO: Handle `*/package` more efficiently.
+    fn ensure_discovered_cpvs(&mut self, atom: &Atom) {
+        if self.cpv_index.is_discovered(atom) {
+            return;
+        }
+
+        let cpvs = match &atom.category {
+            AtomIdent::Exact(cat) => match &atom.package {
+                AtomIdent::Exact(pkg) => Either::Left(resolve_from_pkg_path(
+                    cat,
+                    pkg.clone(),
+                    &self.location.join(cat.as_str()).join(pkg.as_str()),
+                )),
+                AtomIdent::Any => Either::Right(Either::Left(resolve_from_category_path(
+                    cat,
+                    &self.location.join(cat.as_str()),
+                ))),
+            },
+            AtomIdent::Any => Either::Right(Either::Right(resolve_from_repo_path(
+                &self.location,
+                &self.categories,
+            ))),
+        };
+
+        self.cpv_index.insert(cpvs);
         self.cpv_index.sort();
-        Ok(())
+        self.cpv_index.mark_discovered(atom);
     }
 
     /// Resolves the repo name and validates it against `profiles/repo_name` and `layout.conf`.
@@ -425,7 +449,7 @@ mod tests {
             Arc::new(SysConf::default()),
         )
         .unwrap();
-        repository.populate().unwrap();
+        repository.finalize().unwrap();
 
         assert!(repository.categories.contains(&"app-misc".parse().unwrap()));
         assert_eq!(repository.categories.len(), 1);

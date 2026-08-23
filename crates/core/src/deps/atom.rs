@@ -156,8 +156,9 @@ impl<T: fmt::Display> fmt::Display for AtomIdent<T> {
 /// calculating dependencies between packages.
 /// TODO:
 ///  * implement remaining atom variants (see man 5 ebuild)
-#[derive(Archive, Serialize, Deserialize, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
-#[cfg_attr(test, derive(Default))]
+#[derive(
+    Archive, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug,
+)]
 pub struct Atom {
     pub operator: Option<AtomOperator>,
     pub category: AtomIdent<CatName>,
