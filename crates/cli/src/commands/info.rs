@@ -5,8 +5,6 @@ use germ_core::conf::portage::PortageConf;
 use germ_core::deps::atom::Atom;
 use germ_core::repository::RepoSet;
 use germ_core::vdb::{Vdb, package::InstalledPackage};
-use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 
 /// Prints system- and package information for all packages matching the given `Atom`.
@@ -31,9 +29,10 @@ pub fn info(atom: Option<&Atom>, sysconf: Arc<SysConf>) -> Result<()> {
     }
 
     let Some(atom) = atom else { return Ok(()) };
-    let vdb =
-        Vdb::from_path(PathBuf::from_str("/var/db/pkg")?).with_context(|| "unable to build VDB")?;
-    let packages = vdb.find_by_atom(atom);
+    let mut vdb = Vdb::from_path("/var/db/pkg").context("unable to read VDB")?;
+    let packages = vdb
+        .find_by_atom(atom)
+        .with_context(|| format!("unable to find installed packages matching {atom}"))?;
     println!(
         "\nInstalled packages matching {}:\n",
         atom.to_string().bold()
