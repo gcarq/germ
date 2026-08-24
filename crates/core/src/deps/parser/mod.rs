@@ -82,6 +82,9 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
         let mut buffer = Vec::with_capacity(16);
         while let Some(token) = self.lexer.next() {
             if token == Token::RParen {
+                if buffer.is_empty() {
+                    bail!("empty groups are not supported");
+                }
                 return Ok(self.expression.push_children(&buffer));
             }
             buffer.push(self.parse_expression(token)?);
@@ -302,6 +305,7 @@ mod tests {
             ("sys-libs/db)", "'sys-libs/db)' is not a valid atom"),
             ("(sys-libs/db", "unexpected EOF while parsing group"),
             ("bar? ( sys-libs/db", "unexpected EOF while parsing group"),
+            ("()", "empty groups are not supported"),
             ("bar? sys-libs/db )", "expected '(', got 'sys-libs/db'"),
             ("!! ( sys-libs/db ) ", "expected identifier, got '('"),
         ];

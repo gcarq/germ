@@ -1,5 +1,5 @@
-use crate::deps::DepExpression;
 use crate::deps::atom::Atom;
+use crate::deps::{DepExpression, ExpressionKind};
 use crate::eapi::Eapi;
 use crate::package::slot::PackageSlot;
 use crate::repository::Eclass;
@@ -93,9 +93,9 @@ impl PackageMetadata {
             .slot(map.get("SLOT").copied())?
             .depend(map.get("DEPEND").copied().unwrap_or(""))
             .map_err(|err| invalid("DEPEND", err))?
-            .bdepend(map.get("BDEPEND").copied().unwrap_or(""), eapi)
+            .bdepend(map.get("BDEPEND").copied().unwrap_or(""))
             .map_err(|err| invalid("BDEPEND", err))?
-            .idepend(map.get("IDEPEND").copied().unwrap_or(""), eapi)
+            .idepend(map.get("IDEPEND").copied().unwrap_or(""))
             .map_err(|err| invalid("IDEPEND", err))?
             .pdepend(map.get("PDEPEND").copied().unwrap_or(""))
             .map_err(|err| invalid("PDEPEND", err))?
@@ -129,10 +129,9 @@ impl PackageMetadata {
             .slot(Some(read_meta(&path.join("SLOT"))?.trim()))?
             .depend(read_meta(&path.join("DEPEND"))?.trim())?;
 
-        let eapi = metadata.eapi;
         metadata
-            .bdepend(read_meta(&path.join("BDEPEND"))?.trim(), &eapi)?
-            .idepend(read_meta(&path.join("IDEPEND"))?.trim(), &eapi)?
+            .bdepend(read_meta(&path.join("BDEPEND"))?.trim())?
+            .idepend(read_meta(&path.join("IDEPEND"))?.trim())?
             .pdepend(read_meta(&path.join("PDEPEND"))?.trim())?
             .rdepend(read_meta(&path.join("RDEPEND"))?.trim())
     }
@@ -185,7 +184,7 @@ impl PackageMetadata {
     }
 
     pub fn restrict(mut self, value: &str) -> anyhow::Result<Self> {
-        self.restrict = DepExpression::parse(value)?;
+        self.restrict = DepExpression::parse(self.eapi, ExpressionKind::Restrict, value)?;
         Ok(self)
     }
 
@@ -203,7 +202,7 @@ impl PackageMetadata {
     }
 
     pub fn required_use(mut self, value: &str) -> anyhow::Result<Self> {
-        self.required_use = DepExpression::parse(value)?;
+        self.required_use = DepExpression::parse(self.eapi, ExpressionKind::RequiredUse, value)?;
         Ok(self)
     }
 
@@ -217,31 +216,31 @@ impl PackageMetadata {
     }
 
     pub fn depend(mut self, value: &str) -> anyhow::Result<Self> {
-        self.depend = DepExpression::parse(value)?;
+        self.depend = DepExpression::parse(self.eapi, ExpressionKind::Dependency, value)?;
         Ok(self)
     }
 
-    pub fn bdepend(mut self, value: &str, eapi: &Eapi) -> anyhow::Result<Self> {
-        if eapi.supports_bdepend() {
-            self.bdepend = DepExpression::parse(value)?;
+    pub fn bdepend(mut self, value: &str) -> anyhow::Result<Self> {
+        if self.eapi.supports_bdepend() {
+            self.bdepend = DepExpression::parse(self.eapi, ExpressionKind::Dependency, value)?;
         }
         Ok(self)
     }
 
-    pub fn idepend(mut self, value: &str, eapi: &Eapi) -> anyhow::Result<Self> {
-        if eapi.supports_idepend() {
-            self.idepend = DepExpression::parse(value)?;
+    pub fn idepend(mut self, value: &str) -> anyhow::Result<Self> {
+        if self.eapi.supports_idepend() {
+            self.idepend = DepExpression::parse(self.eapi, ExpressionKind::Dependency, value)?;
         }
         Ok(self)
     }
 
     pub fn pdepend(mut self, value: &str) -> anyhow::Result<Self> {
-        self.pdepend = DepExpression::parse(value)?;
+        self.pdepend = DepExpression::parse(self.eapi, ExpressionKind::Dependency, value)?;
         Ok(self)
     }
 
     pub fn rdepend(mut self, value: &str) -> anyhow::Result<Self> {
-        self.rdepend = DepExpression::parse(value)?;
+        self.rdepend = DepExpression::parse(self.eapi, ExpressionKind::Dependency, value)?;
         Ok(self)
     }
 

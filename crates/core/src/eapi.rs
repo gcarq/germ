@@ -72,6 +72,11 @@ impl Eapi {
         matches!(self, Self::Eight | Self::Nine)
     }
 
+    /// Returns `true` if this EAPI supports selective URI restrictions.
+    pub const fn supports_selective_uri_restrictions(&self) -> bool {
+        matches!(self, Self::Eight | Self::Nine)
+    }
+
     /// Returns the minimum supported bash version for this EAPI.
     pub const fn supported_bash_version(&self) -> &str {
         match self {
@@ -184,6 +189,13 @@ mod tests {
             assert_eq!(eapi.supports_bdepend(), exp_bdepend);
             assert_eq!(eapi.supports_idepend(), exp_idepend);
         }
+    }
+
+    #[test]
+    fn test_eapi_expression_support() {
+        assert!(!Eapi::Seven.supports_selective_uri_restrictions());
+        assert!(Eapi::Eight.supports_selective_uri_restrictions());
+        assert!(Eapi::Nine.supports_selective_uri_restrictions());
     }
 
     #[test]

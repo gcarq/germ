@@ -1,8 +1,49 @@
-use crate::deps::ExpressionItem;
+use crate::deps::{ExpressionItem, ExpressionKind};
 use crate::useflag::UseFlag;
+use anyhow::bail;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::ops::Range;
+
+/// Represents an expression, this can be an `Item` (USE Flag, Atom, URI, ...),
+/// an expression group or other variants defined in PMS 8.2.
+///
+/// [`Range`] is used to reference the child expressions in the flat [`Vec`].
+#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
+pub enum Expression<T: ExpressionItem> {
+    Item(T),
+
+    AllOf(Range<u16>),     // ( a b )
+    AnyOf(Range<u16>),     // || ( a b )
+    OneOf(Range<u16>),     // ^^ ( a b )
+    OnlyOneOf(Range<u16>), // ?? ( a b )
+
+    Use { flag: UseFlag, children: Range<u16> },
+
+    Not(ExpressionId),
+    Forbidden(ExpressionId),
+}
+
+impl<T: ExpressionItem> Expression<T> {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Item(_) => "item",
+            Self::AllOf(_) => "all-of",
+            Self::AnyOf(_) => "any-of",
+            Self::OneOf(_) => "exactly-one-of",
+            Self::OnlyOneOf(_) => "at-most-one-of",
+            Self::Use { .. } => "USE-conditional",
+            Self::Not(_) => "negation",
+            Self::Forbidden(_) => "strong-blocker",
+        }
+    }
+}
+
+/// This is a basic wrapper around `u16` that distinguishes between expression ids
+/// and children indices.
+#[derive(Archive, Serialize, Deserialize, Copy, Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(test, derive(Default))]
+pub struct ExpressionId(u16);
 
 /// Holds the entire [`Expression`], which is a flat representation of the expression tree.
 ///
@@ -53,6 +94,58 @@ impl<T: ExpressionItem> ExpressionArena<T> {
 
     pub const fn set_root(&mut self, root: Range<u16>) {
         self.root = root;
+    }
+
+    /// Validates the expression against the given `kind`.
+    ///
+    /// Returns `Err` when a group, negation, blocker, or required-use operator is not valid
+    /// for the selected EAPI and expression context.
+    pub fn validate(&self, kind: ExpressionKind) -> anyhow::Result<()> {
+        self.validate_range(&self.root, kind)
+    }
+
+    fn validate_range(&self, range: &Range<u16>, kind: ExpressionKind) -> anyhow::Result<()> {
+        let children = &self.children[range.start as usize..range.end as usize];
+        for child in children.iter().copied() {
+            self.validate_expression(child, kind)?;
+        }
+        Ok(())
+    }
+
+    fn validate_expression(&self, id: ExpressionId, kind: ExpressionKind) -> anyhow::Result<()> {
+        let expression = self.get_expression(&id);
+        if !kind.supports_expression(expression) {
+            bail!("{} is not valid in {kind} expressions", expression.name());
+        }
+
+        match expression {
+            Expression::Item(_) => Ok(()),
+            Expression::AllOf(children)
+            | Expression::AnyOf(children)
+            | Expression::OneOf(children)
+            | Expression::OnlyOneOf(children)
+            | Expression::Use { children, .. } => self.validate_range(children, kind),
+            Expression::Not(child) => self.validate_negation(*child, kind),
+            Expression::Forbidden(child) => self.validate_forbidden(*child),
+        }
+    }
+
+    fn validate_negation(&self, child: ExpressionId, kind: ExpressionKind) -> anyhow::Result<()> {
+        match self.get_expression(&child) {
+            Expression::Use { children, .. } => self.validate_range(children, kind),
+            Expression::Item(_) => match kind {
+                ExpressionKind::Dependency | ExpressionKind::RequiredUse => Ok(()),
+                _ => bail!("negation is not valid in {kind} expressions"),
+            },
+            _ => bail!("negation must apply to an item or USE conditional"),
+        }
+    }
+
+    fn validate_forbidden(&self, child: ExpressionId) -> anyhow::Result<()> {
+        match self.get_expression(&child) {
+            Expression::Item(_) => Ok(()),
+            _ => bail!("strong blockers must apply to an item"),
+        }
     }
 
     fn fmt_expression(&self, expr: &Expression<T>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -120,28 +213,3 @@ impl<T: ExpressionItem> Default for ExpressionArena<T> {
         }
     }
 }
-
-/// Represents an expression, this can be an `Item` (USE Flag or Atom), an expression group or
-/// other variants defined in PMS 8.2.
-///
-/// [`Range`] is used to reference the child expressions in the flat [`Vec`].
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
-pub enum Expression<T: ExpressionItem> {
-    Item(T),
-
-    AllOf(Range<u16>),     // ( a b )
-    AnyOf(Range<u16>),     // || ( a b )
-    OneOf(Range<u16>),     // ^^ ( a b )
-    OnlyOneOf(Range<u16>), // ?? ( a b )
-
-    Use { flag: UseFlag, children: Range<u16> },
-
-    Not(ExpressionId),
-    Forbidden(ExpressionId),
-}
-
-/// This is a basic wrapper around `u16` that distinguishes between expression ids
-/// and children indices.
-#[derive(Archive, Serialize, Deserialize, Copy, Clone, Eq, PartialEq, Debug)]
-#[cfg_attr(test, derive(Default))]
-pub struct ExpressionId(u16);
