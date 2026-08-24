@@ -23,11 +23,24 @@ impl EnvValue {
         )
     }
 
-    /// Expands and returns a string value by substituting variables from the given context.
+    /// Expands and returns a string by substituting variables from the given `context`.
     /// The passed context must be in the original order.
     /// TODO: Add env.d to context for expansion.
     #[must_use = "this returns the expanded value as a new allocation"]
     pub fn expand(&self, context: &[(Box<str>, EnvValue)]) -> anyhow::Result<Self> {
+        self.expand_with(|var| {
+            context
+                .iter()
+                .rev()
+                .find_map(|(ctx_var, ctx_value)| (var == ctx_var.as_ref()).then_some(ctx_value))
+        })
+    }
+
+    /// Expands and returns a string by substituting variables from the given `lookup` function.
+    pub(super) fn expand_with<'ctx, F>(&self, lookup: F) -> anyhow::Result<Self>
+    where
+        F: Fn(&str) -> Option<&'ctx EnvValue>,
+    {
         if !self.0.iter().any(|value| value.contains('$')) {
             return Ok(self.clone());
         }
@@ -45,11 +58,8 @@ impl EnvValue {
                 .name("expr")
                 .ok_or_else(|| anyhow!("variable expansion is missing an expression"))?
                 .as_str();
-            for (ctx_var, ctx_value) in context.iter().rev() {
-                if var == ctx_var.as_ref() {
-                    new_value = new_value.replace(expr, &ctx_value.to_string());
-                    break;
-                }
+            if let Some(ctx_value) = lookup(var) {
+                new_value = new_value.replace(expr, &ctx_value.to_string());
             }
         }
         Ok(Self::new(new_value.as_str()))
@@ -103,6 +113,7 @@ mod tests {
     fn test_env_value_expand() {
         let context = vec![
             ("VAR1".into(), EnvValue::new("value1")),
+            ("VAR2".into(), EnvValue::new("should not be used")),
             ("VAR2".into(), EnvValue::new("value2")),
         ];
         let value = EnvValue::new("${VAR1} $VAR2 ${VAR3}");

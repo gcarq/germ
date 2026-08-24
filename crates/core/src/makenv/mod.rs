@@ -88,18 +88,13 @@ impl MakeEnv {
     }
 
     /// Inherits a parent environment using supplied incremental variables.
-    pub(crate) fn inherit_vars(
+    pub(super) fn inherit_vars(
         &mut self,
         parent: &MakeEnv,
         vars: &IncrementalVars,
     ) -> anyhow::Result<()> {
-        let context = parent
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect::<Vec<_>>();
-
         for value in self.0.values_mut() {
-            *value = value.expand(&context)?;
+            *value = value.expand_with(|var| parent.get(var))?;
         }
 
         for (key, parent_value) in parent.iter() {
