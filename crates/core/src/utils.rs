@@ -1,9 +1,9 @@
 use anyhow::{anyhow, bail};
 use md5::{Digest, Md5};
 use std::fmt::Write;
+use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 /// Removes a trailing comment from the given `line` and returns a trimmed str.
 pub fn strip_line_comment(line: &str) -> &str {
@@ -59,27 +59,46 @@ pub fn shlex_split(content: String) -> anyhow::Result<Vec<(String, String)>> {
         .collect()
 }
 
-/// Reads all files for the given `path`, ignoring subdirectories and files starting
+/// Reads all files for the given `path` and returns a sorted `Vec`.
+///
+/// This function ignores subdirectories and files starting
 /// with `.` or ending with `~`.
-pub fn list_files(path: &Path) -> impl Iterator<Item = anyhow::Result<PathBuf>> {
-    WalkDir::new(path)
-        .min_depth(1)
-        .max_depth(1)
-        .sort_by_file_name()
-        .into_iter()
-        .filter_entry(|e| {
-            let file_name = e.file_name().as_bytes();
-            e.file_type().is_file() && !file_name.starts_with(b".") && !file_name.ends_with(b"~")
+pub fn list_files(path: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = fs::read_dir(path)?
+        .map(|entry| {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let file_name = file_name.as_bytes();
+            if file_name.starts_with(b".") || file_name.ends_with(b"~") {
+                return Ok(None);
+            }
+            Ok(entry.file_type()?.is_file().then(|| entry.path()))
         })
-        .map(|entry| match entry {
-            Ok(entry) => Ok(entry.into_path()),
-            Err(e) => bail!("unable to read file '{}': {e}", path.display()),
-        })
+        .filter_map(Result::transpose)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    files.sort_unstable_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+    Ok(files)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_list_files() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        fs::write(temp.path().join("b"), "")?;
+        fs::write(temp.path().join("a"), "")?;
+        fs::write(temp.path().join(".hidden"), "")?;
+        fs::write(temp.path().join("backup~"), "")?;
+        fs::create_dir(temp.path().join("directory"))?;
+
+        let files = list_files(temp.path())?;
+        assert_eq!(files, vec![temp.path().join("a"), temp.path().join("b")]);
+        Ok(())
+    }
 
     #[test]
     fn test_is_blank_or_comment() {

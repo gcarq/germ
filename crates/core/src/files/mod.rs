@@ -42,11 +42,11 @@ pub fn content_from_path(path: &Path, recursive: bool, optional: bool) -> anyhow
         bail!("{} is a directory, but should be a file", path.display());
     }
 
-    let content = utils::list_files(path)
-        .map(|p| match p {
-            Ok(p) => fs::read_to_string(&p)
-                .with_context(|| anyhow!("unable to read file '{}'", p.display())),
-            Err(err) => bail!(err),
+    let content = utils::list_files(path)?
+        .into_iter()
+        .map(|path| {
+            fs::read_to_string(&path)
+                .with_context(|| anyhow!("unable to read file '{}'", path.display()))
         })
         .collect::<anyhow::Result<Vec<_>>>()?
         .join("\n");
