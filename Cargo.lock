@@ -389,6 +389,7 @@ dependencies = [
  "log",
  "md-5",
  "nix",
+ "once_cell",
  "rayon",
  "redb",
  "rkyv",

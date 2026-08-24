@@ -84,7 +84,7 @@ impl Repository {
 
         Ok(Self {
             location: location.to_owned(),
-            metadata_cache: MetadataCache::new(&location.join("cache"))?,
+            metadata_cache: MetadataCache::new(&location.join("cache")),
             categories: FxHashSet::default(),
             eclasses: Eclasses::empty(location),
             arch_list: ArchList::from_path(&profiles.join("arch.list"))?,
@@ -349,7 +349,7 @@ impl Default for Repository {
         let temp_dir = tempfile::Builder::new()
             .tempdir()
             .expect("failed to create temp dir");
-        let metadata_cache = MetadataCache::new(&temp_dir.path().join("metadata")).unwrap();
+        let metadata_cache = MetadataCache::new(&temp_dir.path().join("metadata"));
         Self {
             location: temp_dir.path().to_owned(),
             name: "repo".parse().unwrap(),
