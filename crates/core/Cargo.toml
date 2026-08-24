@@ -19,7 +19,6 @@ rust-ini.workspace = true
 shlex.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-walkdir.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

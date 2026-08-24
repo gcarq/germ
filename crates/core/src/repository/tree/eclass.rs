@@ -5,10 +5,10 @@ use rkyv::with::AsString;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
-use walkdir::WalkDir;
 
 /// Regex to validate eclass names according to PMS 3.1.6.
 static ECLASS_RE: LazyLock<Regex> =
@@ -48,20 +48,19 @@ impl Eclasses {
             return Ok(eclasses);
         }
 
-        let entries = WalkDir::new(path)
-            .min_depth(1)
-            .max_depth(1)
-            .into_iter()
-            .filter_entry(|e| e.file_type().is_file())
-            .filter_map(Result::ok);
+        let entries = fs::read_dir(path)?.filter_map(|entry| {
+            let entry = entry.ok()?;
+            let filename = entry.file_name();
+            let name = filename.to_str()?.strip_suffix(".eclass")?;
+            entry
+                .file_type()
+                .ok()?
+                .is_file()
+                .then(|| Eclass::new(name.to_owned(), entry.path()))
+        });
 
-        for entry in entries {
-            let Some(filename) = entry.file_name().to_str() else {
-                continue;
-            };
-            if let Some(name) = filename.strip_suffix(".eclass") {
-                eclasses.insert(Eclass::new(name.to_owned(), entry.path().to_owned())?);
-            }
+        for eclass in entries {
+            eclasses.insert(eclass?);
         }
         Ok(eclasses)
     }
