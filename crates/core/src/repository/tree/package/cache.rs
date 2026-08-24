@@ -1,7 +1,5 @@
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use redb::{Database, ReadableDatabase, TableDefinition};
 use rkyv::rancor;
@@ -49,16 +47,6 @@ impl MetadataCache {
         Ok(())
     }
 
-    fn open(path: &Path) -> Result<Database, CacheError> {
-        let db = Database::create(path).map_err(redb::Error::from)?;
-
-        // Create the metadata table if it doesn't exist.
-        let tx = db.begin_write().map_err(redb::Error::from)?;
-        tx.open_table(METADATA_TABLE).map_err(redb::Error::from)?;
-        tx.commit().map_err(redb::Error::from)?;
-        Ok(db)
-    }
-
     /// Inserts the given `entries` into the cache.
     pub fn insert_batch<'r>(
         &self,
@@ -83,7 +71,11 @@ impl MetadataCache {
         let key = cpv.fqn();
 
         let tx = self.db.begin_read().map_err(redb::Error::from)?;
-        let table = tx.open_table(METADATA_TABLE).map_err(redb::Error::from)?;
+        let table = match tx.open_table(METADATA_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(redb::Error::from(error).into()),
+        };
         let Some(value) = table.get(key).map_err(redb::Error::from)? else {
             return Ok(None);
         };
@@ -128,6 +120,10 @@ impl MetadataCache {
         self.db.compact().map_err(redb::Error::from)?;
         Ok(())
     }
+
+    fn open(path: &Path) -> Result<Database, CacheError> {
+        Ok(Database::create(path).map_err(redb::Error::from)?)
+    }
 }
 
 #[cfg(test)]
@@ -136,10 +132,14 @@ mod tests {
     use crate::test_support::cpv;
 
     #[test]
-    fn test_metadata_cache_get_missing() {
+    fn test_metadata_cache_get_missing_table() {
         let temp = tempfile::tempdir().unwrap();
 
         let cache = MetadataCache::new(temp.path()).unwrap();
+        let read_tx = cache.db.begin_read().unwrap();
+        assert_eq!(read_tx.list_tables().unwrap().count(), 0);
+        drop(read_tx);
+
         let cpv = cpv("app-misc", "foo", "1");
         assert_eq!(cache.get(&cpv).unwrap(), None);
     }
@@ -193,6 +193,28 @@ mod tests {
         cache.retain([&known]).unwrap();
         assert!(cache.get(&known).unwrap().is_some());
         assert_eq!(cache.get(&unknown).unwrap(), None);
+    }
+
+    #[test]
+    fn test_metadata_cache_retain_compact() {
+        let temp = tempfile::tempdir().unwrap();
+        let known = cpv("app-misc", "foo", "1");
+        let unknown = cpv("app-misc", "bar", "1");
+
+        let mut cache = MetadataCache::new(temp.path()).unwrap();
+        cache
+            .insert_batch([
+                (&known, &PackageMetadata::default()),
+                (&unknown, &PackageMetadata::default()),
+            ])
+            .unwrap();
+        cache.retain([&known]).unwrap();
+        cache.compact().unwrap();
+        drop(cache);
+
+        let reopened = MetadataCache::new(temp.path()).unwrap();
+        assert!(reopened.get(&known).unwrap().is_some());
+        assert_eq!(reopened.get(&unknown).unwrap(), None);
     }
 
     #[test]
