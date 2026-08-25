@@ -18,7 +18,11 @@ pub enum Expression<T: ExpressionItem> {
     OneOf(Range<u16>),     // ^^ ( a b )
     OnlyOneOf(Range<u16>), // ?? ( a b )
 
-    Use { flag: UseFlag, children: Range<u16> },
+    Use {
+        flag: UseFlag,
+        negated: bool,
+        children: Range<u16>,
+    },
 
     Not(ExpressionId),
     Forbidden(ExpressionId),
@@ -65,6 +69,10 @@ impl<T: ExpressionItem> ExpressionArena<T> {
         }
     }
 
+    pub const fn set_root(&mut self, root: Range<u16>) {
+        self.root = root;
+    }
+
     /// Consumes the given `ids` and pushes them as children.
     ///
     /// Returns a [`Range`] for future referencing in `self.children`.
@@ -82,18 +90,16 @@ impl<T: ExpressionItem> ExpressionArena<T> {
         id
     }
 
+    /// Returns the expression for the given `id`.
     pub fn get_expression(&self, id: &ExpressionId) -> &Expression<T> {
         &self.expressions[id.0 as usize]
     }
 
-    pub fn get_children(&self, range: Range<u16>) -> impl Iterator<Item = &Expression<T>> {
+    /// Returns an iterator over the children for the given `range`.
+    pub fn get_children(&self, range: &Range<u16>) -> impl Iterator<Item = ExpressionId> {
         self.children[range.start as usize..range.end as usize]
             .iter()
-            .map(|id| self.get_expression(id))
-    }
-
-    pub const fn set_root(&mut self, root: Range<u16>) {
-        self.root = root;
+            .copied()
     }
 
     /// Validates the expression against the given `kind`.
@@ -105,8 +111,7 @@ impl<T: ExpressionItem> ExpressionArena<T> {
     }
 
     fn validate_range(&self, range: &Range<u16>, kind: ExpressionKind) -> anyhow::Result<()> {
-        let children = &self.children[range.start as usize..range.end as usize];
-        for child in children.iter().copied() {
+        for child in self.get_children(range) {
             self.validate_expression(child, kind)?;
         }
         Ok(())
@@ -119,32 +124,23 @@ impl<T: ExpressionItem> ExpressionArena<T> {
         }
 
         match expression {
-            Expression::Item(_) => Ok(()),
+            Expression::Item(_) | Expression::Forbidden(_) => Ok(()),
             Expression::AllOf(children)
             | Expression::AnyOf(children)
             | Expression::OneOf(children)
             | Expression::OnlyOneOf(children)
             | Expression::Use { children, .. } => self.validate_range(children, kind),
             Expression::Not(child) => self.validate_negation(*child, kind),
-            Expression::Forbidden(child) => self.validate_forbidden(*child),
         }
     }
 
     fn validate_negation(&self, child: ExpressionId, kind: ExpressionKind) -> anyhow::Result<()> {
         match self.get_expression(&child) {
-            Expression::Use { children, .. } => self.validate_range(children, kind),
             Expression::Item(_) => match kind {
                 ExpressionKind::Dependency | ExpressionKind::RequiredUse => Ok(()),
                 _ => bail!("negation is not valid in {kind} expressions"),
             },
-            _ => bail!("negation must apply to an item or USE conditional"),
-        }
-    }
-
-    fn validate_forbidden(&self, child: ExpressionId) -> anyhow::Result<()> {
-        match self.get_expression(&child) {
-            Expression::Item(_) => Ok(()),
-            _ => bail!("strong blockers must apply to an item"),
+            _ => bail!("negation must apply to an item"),
         }
     }
 
@@ -159,36 +155,44 @@ impl<T: ExpressionItem> ExpressionArena<T> {
                 f.write_str("!!")?;
                 self.fmt_expression(self.get_expression(child), f)
             }
-            Expression::Use { flag, children } => {
+            Expression::Use {
+                flag,
+                negated,
+                children,
+            } => {
+                if *negated {
+                    f.write_str("!")?;
+                }
                 write!(f, "{flag}? ( ")?;
-                self.fmt_children(children.clone(), f)?;
+                self.fmt_children(children, f)?;
                 f.write_str(" )")
             }
             Expression::AllOf(children) => {
                 f.write_str("( ")?;
-                self.fmt_children(children.clone(), f)?;
+                self.fmt_children(children, f)?;
                 f.write_str(" )")
             }
             Expression::AnyOf(children) => {
                 f.write_str("|| ( ")?;
-                self.fmt_children(children.clone(), f)?;
+                self.fmt_children(children, f)?;
                 f.write_str(" )")
             }
             Expression::OneOf(children) => {
                 f.write_str("^^ ( ")?;
-                self.fmt_children(children.clone(), f)?;
+                self.fmt_children(children, f)?;
                 f.write_str(" )")
             }
             Expression::OnlyOneOf(children) => {
                 f.write_str("?? ( ")?;
-                self.fmt_children(children.clone(), f)?;
+                self.fmt_children(children, f)?;
                 f.write_str(" )")
             }
         }
     }
 
-    fn fmt_children(&self, range: Range<u16>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, child) in self.get_children(range).enumerate() {
+    fn fmt_children(&self, range: &Range<u16>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, id) in self.get_children(range).enumerate() {
+            let child = self.get_expression(&id);
             if i > 0 {
                 f.write_str(" ")?;
             }
@@ -200,7 +204,7 @@ impl<T: ExpressionItem> ExpressionArena<T> {
 
 impl<T: ExpressionItem> fmt::Display for ExpressionArena<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_children(self.root.clone(), f)
+        self.fmt_children(&self.root, f)
     }
 }
 

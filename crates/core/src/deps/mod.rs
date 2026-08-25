@@ -141,6 +141,7 @@ mod tests {
             (ExpressionKind::RequiredUse, "^^ ( foo bar )"),
             (ExpressionKind::RequiredUse, "?? ( foo bar )"),
             (ExpressionKind::RequiredUse, "!foo"),
+            (ExpressionKind::RequiredUse, "!foo? ( bar )"),
             (ExpressionKind::License, "|| ( GPL-2 MIT )"),
             (ExpressionKind::Restrict, "( fetch mirror )"),
             (ExpressionKind::Restrict, "!foo? ( fetch )"),
