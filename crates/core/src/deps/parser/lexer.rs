@@ -3,8 +3,7 @@ use std::fmt::Write;
 use std::iter::Peekable;
 use std::str::CharIndices;
 
-#[derive(PartialEq)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(PartialEq, Debug)]
 pub enum Token<'a> {
     Whitespace,
     Bang,                    // syntax: !

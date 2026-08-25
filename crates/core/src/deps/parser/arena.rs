@@ -1,6 +1,6 @@
 use crate::deps::{ExpressionItem, ExpressionKind};
 use crate::useflag::UseFlag;
-use anyhow::bail;
+use anyhow::{Context, bail};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::ops::Range;
@@ -13,15 +13,15 @@ use std::ops::Range;
 pub enum Expression<T: ExpressionItem> {
     Item(T),
 
-    AllOf(Range<u16>),     // ( a b )
-    AnyOf(Range<u16>),     // || ( a b )
-    OneOf(Range<u16>),     // ^^ ( a b )
-    OnlyOneOf(Range<u16>), // ?? ( a b )
+    AllOf(Range<u32>),     // ( a b )
+    AnyOf(Range<u32>),     // || ( a b )
+    OneOf(Range<u32>),     // ^^ ( a b )
+    OnlyOneOf(Range<u32>), // ?? ( a b )
 
     Use {
         flag: UseFlag,
         negated: bool,
-        children: Range<u16>,
+        children: Range<u32>,
     },
 
     Not(ExpressionId),
@@ -43,11 +43,10 @@ impl<T: ExpressionItem> Expression<T> {
     }
 }
 
-/// This is a basic wrapper around `u16` that distinguishes between expression ids
+/// This is a basic wrapper around `u32` that distinguishes between expression ids
 /// and children indices.
 #[derive(Archive, Serialize, Deserialize, Copy, Clone, Eq, PartialEq, Debug)]
-#[cfg_attr(test, derive(Default))]
-pub struct ExpressionId(u16);
+pub struct ExpressionId(u32);
 
 /// Holds the entire [`Expression`], which is a flat representation of the expression tree.
 ///
@@ -57,37 +56,31 @@ pub struct ExpressionId(u16);
 pub struct ExpressionArena<T: ExpressionItem> {
     expressions: Vec<Expression<T>>,
     children: Vec<ExpressionId>,
-    root: Range<u16>,
+    root: Range<u32>,
 }
 
 impl<T: ExpressionItem> ExpressionArena<T> {
-    pub fn new() -> Self {
-        Self {
-            expressions: Vec::with_capacity(64),
-            children: Vec::with_capacity(64),
-            root: Range::default(),
-        }
-    }
-
-    pub const fn set_root(&mut self, root: Range<u16>) {
+    pub const fn set_root(&mut self, root: Range<u32>) {
         self.root = root;
     }
 
     /// Consumes the given `ids` and pushes them as children.
     ///
     /// Returns a [`Range`] for future referencing in `self.children`.
-    pub fn push_children(&mut self, ids: &[ExpressionId]) -> Range<u16> {
-        let start = self.children.len() as u16;
+    pub fn push_children(&mut self, ids: &[ExpressionId]) -> anyhow::Result<Range<u32>> {
+        let start = u32::try_from(self.children.len()).context("expression doesn't fit in u32")?;
         self.children.extend(ids);
-        let end = self.children.len() as u16;
-        start..end
+        let end = u32::try_from(self.children.len()).context("expression doesn't fit in u32")?;
+        Ok(start..end)
     }
 
     /// Pushes the given `expr` into the arena and returns its [`ExpressionId`].
-    pub fn push_expression(&mut self, expr: Expression<T>) -> ExpressionId {
-        let id = ExpressionId(self.expressions.len() as u16);
+    pub fn push_expression(&mut self, expr: Expression<T>) -> anyhow::Result<ExpressionId> {
+        let id = ExpressionId(
+            u32::try_from(self.expressions.len()).context("expression doesn't fit in u32")?,
+        );
         self.expressions.push(expr);
-        id
+        Ok(id)
     }
 
     /// Returns the expression for the given `id`.
@@ -96,7 +89,7 @@ impl<T: ExpressionItem> ExpressionArena<T> {
     }
 
     /// Returns an iterator over the children for the given `range`.
-    pub fn get_children(&self, range: &Range<u16>) -> impl Iterator<Item = ExpressionId> {
+    pub fn get_children(&self, range: &Range<u32>) -> impl Iterator<Item = ExpressionId> {
         self.children[range.start as usize..range.end as usize]
             .iter()
             .copied()
@@ -110,7 +103,7 @@ impl<T: ExpressionItem> ExpressionArena<T> {
         self.validate_range(&self.root, kind)
     }
 
-    fn validate_range(&self, range: &Range<u16>, kind: ExpressionKind) -> anyhow::Result<()> {
+    fn validate_range(&self, range: &Range<u32>, kind: ExpressionKind) -> anyhow::Result<()> {
         for child in self.get_children(range) {
             self.validate_expression(child, kind)?;
         }
@@ -190,7 +183,7 @@ impl<T: ExpressionItem> ExpressionArena<T> {
         }
     }
 
-    fn fmt_children(&self, range: &Range<u16>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt_children(&self, range: &Range<u32>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, id) in self.get_children(range).enumerate() {
             let child = self.get_expression(&id);
             if i > 0 {

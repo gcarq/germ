@@ -22,7 +22,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     pub fn parse(input: &'a str) -> anyhow::Result<ExpressionArena<T>> {
         let mut parser = Self {
             lexer: Lexer::new(input),
-            arena: ExpressionArena::new(),
+            arena: ExpressionArena::default(),
         };
 
         parser.parse_root()?;
@@ -45,7 +45,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
             }
         }
 
-        let root = self.arena.push_children(&buffer);
+        let root = self.arena.push_children(&buffer)?;
         self.arena.set_root(root);
         Ok(())
     }
@@ -87,7 +87,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
                 bail!("unexpected token '{token}'")
             }
         };
-        Ok(self.arena.push_expression(node))
+        self.arena.push_expression(node)
     }
 
     /// Parses a USE conditional expression, e.g. `foo? ( bar )` or `!foo? ( bar )`.
@@ -108,7 +108,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     ///
     /// This function expects that [`Token::LParen`] has already been consumed.
     /// Returns a [`Range`] that can be used for slicing `expression.children`.
-    fn parse_group(&mut self) -> anyhow::Result<Range<u16>> {
+    fn parse_group(&mut self) -> anyhow::Result<Range<u32>> {
         let mut buffer = Vec::with_capacity(16);
         let first = match self.lexer.next() {
             Some(Token::RParen) => bail!("empty groups are not supported"),
@@ -126,7 +126,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
             match self.lexer.next() {
                 Some(Token::Whitespace) => match self.lexer.next() {
                     Some(Token::RParen) => {
-                        return Ok(self.arena.push_children(&buffer));
+                        return self.arena.push_children(&buffer);
                     }
                     Some(token) => buffer.push(self.parse_expression(token)?),
                     None => bail!("unexpected EOF while parsing group"),
