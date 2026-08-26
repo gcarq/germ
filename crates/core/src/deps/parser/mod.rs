@@ -1,9 +1,11 @@
 pub mod arena;
 mod lexer;
+#[cfg(test)]
+mod test_support;
 
+use self::arena::{Expression, ExpressionArena, ExpressionId};
+use self::lexer::{Lexer, Token};
 use crate::deps::ExpressionItem;
-use crate::deps::parser::arena::{Expression, ExpressionArena, ExpressionId};
-use crate::deps::parser::lexer::{Lexer, Token};
 use crate::useflag::UseFlag;
 use anyhow::{anyhow, bail};
 use std::ops::Range;
@@ -46,7 +48,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
         }
 
         let root = self.arena.push_children(&buffer)?;
-        self.arena.set_root(root);
+        self.arena.set_roots(root);
         Ok(())
     }
 
@@ -163,123 +165,99 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     }
 }
 
-// TODO: add snapshot tests for the parsed arena
 #[cfg(test)]
 mod tests {
+    use super::test_support::TestExpression::{
+        AllOf, AnyOf, Forbidden, Not, OneOf, OnlyOneOf, Use,
+    };
+    use super::test_support::{assert_expr, item};
     use super::*;
     use crate::deps::atom::Atom;
 
     #[test]
-    fn test_parser_group_one_off() {
+    fn test_parser_group_one_of() {
         let input = "^^ ( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[OneOff(Box::new([
-        //         Item(Atom::parse("sys-libs/db").unwrap()),
-        //         Item(Atom::parse("app-misc/foo").unwrap()),
-        //     ]))]
-        // );
-        assert_eq!(expr.to_string(), "^^ ( sys-libs/db app-misc/foo )");
+        assert_expr(
+            &expr,
+            &[OneOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
+        );
+        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
-    fn test_parser_group_all_off() {
+    fn test_parser_group_all_of() {
         let input = "( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[AllOff(Box::new([
-        //         Item(Atom::parse("sys-libs/db").unwrap()),
-        //         Item(Atom::parse("app-misc/foo").unwrap()),
-        //     ]))]
-        // );
+        assert_expr(
+            &expr,
+            &[AllOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
+        );
         assert_eq!(expr.to_string(), "( sys-libs/db app-misc/foo )");
     }
 
     #[test]
-    fn test_parser_group_any_off() {
+    fn test_parser_group_any_of() {
         let input = "|| ( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[AnyOff(Box::new([
-        //         Item(Atom::parse("sys-libs/db").unwrap()),
-        //         Item(Atom::parse("app-misc/foo").unwrap()),
-        //     ]))]
-        // );
-        assert_eq!(expr.to_string(), "|| ( sys-libs/db app-misc/foo )");
+        assert_expr(
+            &expr,
+            &[AnyOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
+        );
+        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
-    fn test_parser_group_at_most_one_off() {
+    fn test_parser_group_only_one_of() {
         let input = "?? ( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[AtMostOneOff(Box::new([
-        //         Item(Atom::parse("sys-libs/db").unwrap()),
-        //         Item(Atom::parse("app-misc/foo").unwrap()),
-        //     ]))]
-        // );
-        assert_eq!(expr.to_string(), "?? ( sys-libs/db app-misc/foo )");
+        assert_expr(
+            &expr,
+            &[OnlyOneOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
+        );
+        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
-    fn test_parser_group_condition() {
+    fn test_parser_use_conditional() {
         let input = "bar? ( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[Condition(
-        //         UseFlag::parse("bar").unwrap(),
-        //         Box::new([
-        //             Item(Atom::parse("sys-libs/db").unwrap()),
-        //             Item(Atom::parse("app-misc/foo").unwrap()),
-        //         ]),
-        //     )]
-        // );
-        assert_eq!(expr.to_string(), "bar? ( sys-libs/db app-misc/foo )");
+        assert_expr(
+            &expr,
+            &[Use {
+                flag: "bar".parse().unwrap(),
+                negated: false,
+                children: vec![item("sys-libs/db"), item("app-misc/foo")],
+            }],
+        );
+        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
     fn test_parser_negation() {
         let input = "!sys-libs/db";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[Negation(Box::new(Item(
-        //         Atom::parse("sys-libs/db").unwrap()
-        //     )))]
-        // );
-        assert_eq!(expr.to_string(), "!sys-libs/db");
+        assert_expr(&expr, &[Not(item("sys-libs/db").into())]);
+        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
     fn test_parser_forbidden() {
         let input = "!!sys-libs/db";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[Forbidden(Box::new(Item(
-        //         Atom::parse("sys-libs/db").unwrap()
-        //     )))]
-        // );
-        assert_eq!(expr.to_string(), "!!sys-libs/db");
+        assert_expr(&expr, &[Forbidden(item("sys-libs/db").into())]);
+        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
     fn test_parser_item() {
         let input = "media-libs/mesa[gbm(+)] dev-lang/R";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[
-        //         Item(Atom::parse("media-libs/mesa[gbm(+)]").unwrap()),
-        //         Item(Atom::parse("dev-lang/R").unwrap()),
-        //     ]
-        // );
-        assert_eq!(expr.to_string(), "media-libs/mesa[gbm(+)] dev-lang/R");
+        assert_expr(
+            &expr,
+            &[item("media-libs/mesa[gbm(+)]"), item("dev-lang/R")],
+        );
+        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
@@ -296,27 +274,24 @@ mod tests {
         ";
 
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[
-        //         Item(Atom::parse("sys-libs/db").unwrap()),
-        //         Condition(
-        //             UseFlag::parse("bar").unwrap(),
-        //             Box::new([Item(Atom::parse("sys-libs/db").unwrap())]),
-        //         ),
-        //         AnyOff(Box::new([
-        //             Item(Atom::parse("=sys-libs/db-5*:5").unwrap()),
-        //             Item(Atom::parse("=sys-libs/db-4*:4").unwrap()),
-        //         ])),
-        //         Negation(Box::new(Condition(
-        //             UseFlag::parse("foo").unwrap(),
-        //             Box::new([Negation(Box::new(Item(
-        //                 Atom::parse("app-misc/foo").unwrap(),
-        //             )))]),
-        //         ))),
-        //         Forbidden(Box::new(Item(Atom::parse("<dev-perl/Mail-Box-3").unwrap()))),
-        //     ]
-        // );
+        assert_expr(
+            &expr,
+            &[
+                item("sys-libs/db"),
+                Use {
+                    flag: "bar".parse().unwrap(),
+                    negated: false,
+                    children: vec![item("sys-libs/db")],
+                },
+                AnyOf(vec![item("=sys-libs/db-5*:5"), item("=sys-libs/db-4*:4")]),
+                Use {
+                    flag: "foo".parse().unwrap(),
+                    negated: true,
+                    children: vec![Not(item("app-misc/foo").into())],
+                },
+                Forbidden(item("<dev-perl/Mail-Box-3").into()),
+            ],
+        );
         assert_eq!(
             expr.to_string(),
             "sys-libs/db bar? ( sys-libs/db ) || ( =sys-libs/db-5*:5 =sys-libs/db-4*:4 ) !foo? ( !app-misc/foo ) !!<dev-perl/Mail-Box-3"
@@ -330,25 +305,20 @@ mod tests {
             ssh? ( || ( rdp ( vnc X ) ) )
         ";
         let expr = ExpressionParser::<UseFlag>::parse(input).unwrap();
-        // assert_eq!(
-        //     expr.as_slice(),
-        //     &[
-        //         AnyOff(Box::new([
-        //             Item(UseFlag::parse("wayland").unwrap()),
-        //             Item(UseFlag::parse("X").unwrap()),
-        //         ])),
-        //         Condition(
-        //             UseFlag::parse("ssh").unwrap(),
-        //             Box::new([AnyOff(Box::new([
-        //                 Item(UseFlag::parse("rdp").unwrap()),
-        //                 AllOff(Box::new([
-        //                     Item(UseFlag::parse("vnc").unwrap()),
-        //                     Item(UseFlag::parse("X").unwrap()),
-        //                 ]))
-        //             ]))]),
-        //         ),
-        //     ]
-        // );
+        assert_expr(
+            &expr,
+            &[
+                AnyOf(vec![item("wayland"), item("X")]),
+                Use {
+                    flag: "ssh".parse().unwrap(),
+                    negated: false,
+                    children: vec![AnyOf(vec![
+                        item("rdp"),
+                        AllOf(vec![item("vnc"), item("X")]),
+                    ])],
+                },
+            ],
+        );
         assert_eq!(
             expr.to_string(),
             "|| ( wayland X ) ssh? ( || ( rdp ( vnc X ) ) )"

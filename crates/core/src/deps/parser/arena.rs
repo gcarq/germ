@@ -56,12 +56,18 @@ pub struct ExpressionId(u32);
 pub struct ExpressionArena<T: ExpressionItem> {
     expressions: Vec<Expression<T>>,
     children: Vec<ExpressionId>,
-    root: Range<u32>,
+    roots: Range<u32>,
 }
 
 impl<T: ExpressionItem> ExpressionArena<T> {
-    pub const fn set_root(&mut self, root: Range<u32>) {
-        self.root = root;
+    /// Sets the root range for the expression arena.
+    pub const fn set_roots(&mut self, root: Range<u32>) {
+        self.roots = root;
+    }
+
+    /// Returns the root expressions.
+    pub fn roots(&self) -> &[ExpressionId] {
+        self.get_children(&self.roots)
     }
 
     /// Consumes the given `ids` and pushes them as children.
@@ -88,11 +94,9 @@ impl<T: ExpressionItem> ExpressionArena<T> {
         &self.expressions[id.0 as usize]
     }
 
-    /// Returns an iterator over the children for the given `range`.
-    pub fn get_children(&self, range: &Range<u32>) -> impl Iterator<Item = ExpressionId> {
-        self.children[range.start as usize..range.end as usize]
-            .iter()
-            .copied()
+    /// Returns the children for the given `range`.
+    pub fn get_children(&self, range: &Range<u32>) -> &[ExpressionId] {
+        &self.children[range.start as usize..range.end as usize]
     }
 
     /// Validates the expression against the given `kind`.
@@ -100,12 +104,12 @@ impl<T: ExpressionItem> ExpressionArena<T> {
     /// Returns `Err` when a group, negation, blocker, or required-use operator is not valid
     /// for the selected EAPI and expression context.
     pub fn validate(&self, kind: ExpressionKind) -> anyhow::Result<()> {
-        self.validate_range(&self.root, kind)
+        self.validate_range(&self.roots, kind)
     }
 
     fn validate_range(&self, range: &Range<u32>, kind: ExpressionKind) -> anyhow::Result<()> {
         for child in self.get_children(range) {
-            self.validate_expression(child, kind)?;
+            self.validate_expression(*child, kind)?;
         }
         Ok(())
     }
@@ -184,8 +188,8 @@ impl<T: ExpressionItem> ExpressionArena<T> {
     }
 
     fn fmt_children(&self, range: &Range<u32>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, id) in self.get_children(range).enumerate() {
-            let child = self.get_expression(&id);
+        for (i, id) in self.get_children(range).iter().enumerate() {
+            let child = self.get_expression(id);
             if i > 0 {
                 f.write_str(" ")?;
             }
@@ -197,7 +201,7 @@ impl<T: ExpressionItem> ExpressionArena<T> {
 
 impl<T: ExpressionItem> fmt::Display for ExpressionArena<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_children(&self.root, f)
+        self.fmt_children(&self.roots, f)
     }
 }
 
@@ -206,7 +210,7 @@ impl<T: ExpressionItem> Default for ExpressionArena<T> {
         Self {
             expressions: Vec::default(),
             children: Vec::default(),
-            root: Range::default(),
+            roots: Range::default(),
         }
     }
 }
