@@ -1,9 +1,11 @@
 pub mod atom;
+pub mod expression;
 mod parser;
 
 use crate::deps::atom::Atom;
+use crate::deps::expression::ExpressionTree;
 use crate::deps::parser::ExpressionParser;
-use crate::deps::parser::arena::{Expression, ExpressionArena};
+use crate::deps::parser::arena::{ArenaEntry, ExpressionArena};
 use crate::eapi::Eapi;
 use crate::useflag::UseFlag;
 
@@ -26,15 +28,15 @@ pub enum ExpressionKind {
 
 impl ExpressionKind {
     /// Returns `true` if the given `expression` is valid for this kind.
-    const fn supports_expression<T: ExpressionItem>(self, expression: &Expression<T>) -> bool {
+    const fn supports_expression<T: ExpressionItem>(self, expression: &ArenaEntry<T>) -> bool {
         match expression {
-            Expression::Item(_) | Expression::AllOf(_) | Expression::Not(_) => true,
-            Expression::Use { .. } => true,
-            Expression::AnyOf(_) => {
+            ArenaEntry::Item(_) | ArenaEntry::AllOf(_) | ArenaEntry::Not(_) => true,
+            ArenaEntry::Use { .. } => true,
+            ArenaEntry::AnyOf(_) => {
                 matches!(self, Self::Dependency | Self::License | Self::RequiredUse)
             }
-            Expression::OneOf(_) | Expression::OnlyOneOf(_) => matches!(self, Self::RequiredUse),
-            Expression::Forbidden(_) => matches!(self, Self::Dependency),
+            ArenaEntry::OneOf(_) | ArenaEntry::OnlyOneOf(_) => matches!(self, Self::RequiredUse),
+            ArenaEntry::Forbidden(_) => matches!(self, Self::Dependency),
         }
     }
 
@@ -95,6 +97,12 @@ impl<T: ExpressionItem> DepExpression<T> {
         arena.validate(kind)?;
         Ok(Self { arena })
     }
+
+    /// Returns a view of the expression.
+    #[allow(dead_code)]
+    pub const fn view(&self) -> ExpressionTree<'_, T> {
+        self.arena.view()
+    }
 }
 
 impl<T: ExpressionItem + fmt::Display> fmt::Display for DepExpression<T> {
@@ -120,6 +128,14 @@ mod tests {
         let expression =
             DepExpression::<Atom>::parse(Eapi::Seven, ExpressionKind::Dependency, " \t").unwrap();
         assert_eq!(expression.to_string(), "");
+    }
+
+    #[test]
+    fn test_expression_view() {
+        let expression =
+            DepExpression::<Atom>::parse(Eapi::Eight, ExpressionKind::Dependency, "cat/pkg")
+                .unwrap();
+        assert_eq!(expression.view().roots().count(), 1);
     }
 
     #[test]

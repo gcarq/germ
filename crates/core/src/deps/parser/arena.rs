@@ -5,12 +5,12 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::ops::Range;
 
-/// Represents an expression, this can be an `Item` (USE Flag, Atom, URI, ...),
+/// Represents an arena entry, this can be an `Item` (USE Flag, Atom, URI, ...),
 /// an expression group or other variants defined in PMS 8.2.
 ///
 /// [`Range`] is used to reference the child expressions in the flat [`Vec`].
 #[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
-pub enum Expression<T: ExpressionItem> {
+pub enum ArenaEntry<T: ExpressionItem> {
     Item(T),
 
     AllOf(Range<u32>),     // ( a b )
@@ -28,7 +28,7 @@ pub enum Expression<T: ExpressionItem> {
     Forbidden(ExpressionId),
 }
 
-impl<T: ExpressionItem> Expression<T> {
+impl<T: ExpressionItem> ArenaEntry<T> {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Item(_) => "item",
@@ -48,13 +48,18 @@ impl<T: ExpressionItem> Expression<T> {
 #[derive(Archive, Serialize, Deserialize, Copy, Clone, Eq, PartialEq, Debug)]
 pub struct ExpressionId(u32);
 
-/// Holds the entire [`Expression`], which is a flat representation of the expression tree.
+/// Holds the entire expression in a flat arena representation.
 ///
-/// To support multiple root expressions, `root` is defined as [`Range`] which holds the
-/// index range in the `children` vector.
+/// All expressions are saved in `expressions`.
+///
+/// `self.children` holds indices to look up [`ArenaEntry`] in `self.expressions`,
+/// this allows children to be expressed as [`Range`] into `self.children`.
+///
+/// The "root" of the expression can also consist of multiple expressions,
+/// which is why `self.roots` is also a [`Range`] into `children`.
 #[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Debug)]
 pub struct ExpressionArena<T: ExpressionItem> {
-    expressions: Vec<Expression<T>>,
+    expressions: Vec<ArenaEntry<T>>,
     children: Vec<ExpressionId>,
     roots: Range<u32>,
 }
@@ -65,9 +70,9 @@ impl<T: ExpressionItem> ExpressionArena<T> {
         self.roots = root;
     }
 
-    /// Returns the root expressions.
-    pub fn roots(&self) -> &[ExpressionId] {
-        self.get_children(&self.roots)
+    /// Returns the root range.
+    pub const fn root_range(&self) -> &Range<u32> {
+        &self.roots
     }
 
     /// Consumes the given `ids` and pushes them as children.
@@ -81,7 +86,7 @@ impl<T: ExpressionItem> ExpressionArena<T> {
     }
 
     /// Pushes the given `expr` into the arena and returns its [`ExpressionId`].
-    pub fn push_expression(&mut self, expr: Expression<T>) -> anyhow::Result<ExpressionId> {
+    pub fn push_expression(&mut self, expr: ArenaEntry<T>) -> anyhow::Result<ExpressionId> {
         let id = ExpressionId(
             u32::try_from(self.expressions.len()).context("expression doesn't fit in u32")?,
         );
@@ -90,7 +95,7 @@ impl<T: ExpressionItem> ExpressionArena<T> {
     }
 
     /// Returns the expression for the given `id`.
-    pub fn get_expression(&self, id: &ExpressionId) -> &Expression<T> {
+    pub fn get_expression(&self, id: &ExpressionId) -> &ArenaEntry<T> {
         &self.expressions[id.0 as usize]
     }
 
@@ -121,19 +126,19 @@ impl<T: ExpressionItem> ExpressionArena<T> {
         }
 
         match expression {
-            Expression::Item(_) | Expression::Forbidden(_) => Ok(()),
-            Expression::AllOf(children)
-            | Expression::AnyOf(children)
-            | Expression::OneOf(children)
-            | Expression::OnlyOneOf(children)
-            | Expression::Use { children, .. } => self.validate_range(children, kind),
-            Expression::Not(child) => self.validate_negation(*child, kind),
+            ArenaEntry::Item(_) | ArenaEntry::Forbidden(_) => Ok(()),
+            ArenaEntry::AllOf(children)
+            | ArenaEntry::AnyOf(children)
+            | ArenaEntry::OneOf(children)
+            | ArenaEntry::OnlyOneOf(children)
+            | ArenaEntry::Use { children, .. } => self.validate_range(children, kind),
+            ArenaEntry::Not(child) => self.validate_negation(*child, kind),
         }
     }
 
     fn validate_negation(&self, child: ExpressionId, kind: ExpressionKind) -> anyhow::Result<()> {
         match self.get_expression(&child) {
-            Expression::Item(_) => match kind {
+            ArenaEntry::Item(_) => match kind {
                 ExpressionKind::Dependency | ExpressionKind::RequiredUse => Ok(()),
                 _ => bail!("negation is not valid in {kind} expressions"),
             },
@@ -141,18 +146,18 @@ impl<T: ExpressionItem> ExpressionArena<T> {
         }
     }
 
-    fn fmt_expression(&self, expr: &Expression<T>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt_expression(&self, expr: &ArenaEntry<T>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match expr {
-            Expression::Item(item) => item.fmt(f),
-            Expression::Not(child) => {
+            ArenaEntry::Item(item) => item.fmt(f),
+            ArenaEntry::Not(child) => {
                 f.write_str("!")?;
                 self.fmt_expression(self.get_expression(child), f)
             }
-            Expression::Forbidden(child) => {
+            ArenaEntry::Forbidden(child) => {
                 f.write_str("!!")?;
                 self.fmt_expression(self.get_expression(child), f)
             }
-            Expression::Use {
+            ArenaEntry::Use {
                 flag,
                 negated,
                 children,
@@ -164,22 +169,22 @@ impl<T: ExpressionItem> ExpressionArena<T> {
                 self.fmt_children(children, f)?;
                 f.write_str(" )")
             }
-            Expression::AllOf(children) => {
+            ArenaEntry::AllOf(children) => {
                 f.write_str("( ")?;
                 self.fmt_children(children, f)?;
                 f.write_str(" )")
             }
-            Expression::AnyOf(children) => {
+            ArenaEntry::AnyOf(children) => {
                 f.write_str("|| ( ")?;
                 self.fmt_children(children, f)?;
                 f.write_str(" )")
             }
-            Expression::OneOf(children) => {
+            ArenaEntry::OneOf(children) => {
                 f.write_str("^^ ( ")?;
                 self.fmt_children(children, f)?;
                 f.write_str(" )")
             }
-            Expression::OnlyOneOf(children) => {
+            ArenaEntry::OnlyOneOf(children) => {
                 f.write_str("?? ( ")?;
                 self.fmt_children(children, f)?;
                 f.write_str(" )")

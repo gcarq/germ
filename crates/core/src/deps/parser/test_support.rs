@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
-use super::arena::{Expression, ExpressionArena, ExpressionId};
 use crate::deps::ExpressionItem;
+use crate::deps::expression::{Expression, ExpressionChildren, ExpressionTree};
 use crate::useflag::UseFlag;
 use TestExpression::{AllOf, AnyOf, Forbidden, Item, Not, OneOf, OnlyOneOf, Use};
 
@@ -21,51 +21,62 @@ pub enum TestExpression<T> {
     Forbidden(Box<Self>),
 }
 
-/// Asserts the given `expr` against `expected`.
-pub fn assert_expr<T: ExpressionItem + Clone + Debug + PartialEq>(
-    expr: &ExpressionArena<T>,
+/// Asserts the given `tree` against `expected`.
+pub fn assert_expr<T: ExpressionItem + Debug + PartialEq>(
+    tree: ExpressionTree<'_, T>,
     expected: &[TestExpression<T>],
 ) {
-    assert_eq!(collect_children(expr, expr.roots()), expected);
+    assert_children(tree.roots(), expected);
 }
 
-/// Creates a `TestExpression` from the given `input`.
+/// Creates a [`TestExpression`] from the given `input`.
 pub fn item<T: ExpressionItem>(input: &str) -> TestExpression<T> {
     Item(T::parse(input).unwrap())
 }
 
-fn collect_expression<T: ExpressionItem + Clone>(
-    expr: &ExpressionArena<T>,
-    id: ExpressionId,
-) -> TestExpression<T> {
-    match expr.get_expression(&id) {
-        Expression::Item(item) => Item(item.clone()),
-        Expression::AllOf(children) => AllOf(collect_children(expr, expr.get_children(children))),
-        Expression::AnyOf(children) => AnyOf(collect_children(expr, expr.get_children(children))),
-        Expression::OneOf(children) => OneOf(collect_children(expr, expr.get_children(children))),
-        Expression::OnlyOneOf(children) => {
-            OnlyOneOf(collect_children(expr, expr.get_children(children)))
+fn assert_expression<T: ExpressionItem + Debug + PartialEq>(
+    actual: Expression<'_, T>,
+    expected: &TestExpression<T>,
+) {
+    match (actual, expected) {
+        (Expression::Item(actual), Item(expected)) => assert_eq!(actual, expected),
+        (Expression::AllOf(actual), AllOf(expected)) => assert_children(actual, expected),
+        (Expression::AnyOf(actual), AnyOf(expected)) => assert_children(actual, expected),
+        (Expression::OneOf(actual), OneOf(expected)) => assert_children(actual, expected),
+        (Expression::OnlyOneOf(actual), OnlyOneOf(expected)) => assert_children(actual, expected),
+        (
+            Expression::Use {
+                flag: actual_flag,
+                negated: actual_negated,
+                children: actual_children,
+            },
+            Use {
+                flag: expected_flag,
+                negated: expected_negated,
+                children: expected_children,
+            },
+        ) => {
+            assert_eq!(actual_flag, expected_flag);
+            assert_eq!(actual_negated, *expected_negated);
+            assert_children(actual_children, expected_children);
         }
-        Expression::Use {
-            flag,
-            negated,
-            children,
-        } => Use {
-            flag: flag.clone(),
-            negated: *negated,
-            children: collect_children(expr, expr.get_children(children)),
-        },
-        Expression::Not(child) => Not(collect_expression(expr, *child).into()),
-        Expression::Forbidden(child) => Forbidden(collect_expression(expr, *child).into()),
+        (Expression::Not(actual), Not(expected)) => {
+            assert_expression(actual.expression(), expected);
+        }
+        (Expression::Forbidden(actual), Forbidden(expected)) => {
+            assert_expression(actual.expression(), expected);
+        }
+        _ => panic!("expression variants differ"),
     }
 }
 
-fn collect_children<T: ExpressionItem + Clone>(
-    expr: &ExpressionArena<T>,
-    children: &[ExpressionId],
-) -> Vec<TestExpression<T>> {
-    children
-        .iter()
-        .map(|id| collect_expression(expr, *id))
-        .collect()
+fn assert_children<T: ExpressionItem + Debug + PartialEq>(
+    mut actual: ExpressionChildren<'_, T>,
+    expected: &[TestExpression<T>],
+) {
+    for expected in expected {
+        let actual = actual.next().expect("missing expression");
+        assert_expression(actual.expression(), expected);
+    }
+    assert!(actual.next().is_none(), "extra expression");
 }

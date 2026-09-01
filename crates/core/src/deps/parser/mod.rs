@@ -3,7 +3,7 @@ mod lexer;
 #[cfg(test)]
 mod test_support;
 
-use self::arena::{Expression, ExpressionArena, ExpressionId};
+use self::arena::{ArenaEntry, ExpressionArena, ExpressionId};
 use self::lexer::{Lexer, Token};
 use crate::deps::ExpressionItem;
 use crate::useflag::UseFlag;
@@ -55,28 +55,28 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     /// Parses an expression based on given [`Token`].
     fn parse_expression(&mut self, token: Token) -> anyhow::Result<ExpressionId> {
         let node = match token {
-            Token::Ident(ident) => Expression::Item(T::parse(ident)?),
-            Token::LParen => Expression::AllOf(self.parse_group()?),
+            Token::Ident(ident) => ArenaEntry::Item(T::parse(ident)?),
+            Token::LParen => ArenaEntry::AllOf(self.parse_group()?),
             Token::OneOf => {
                 self.expect_separated(Token::LParen)?;
-                Expression::OneOf(self.parse_group()?)
+                ArenaEntry::OneOf(self.parse_group()?)
             }
             Token::AnyOf => {
                 self.expect_separated(Token::LParen)?;
-                Expression::AnyOf(self.parse_group()?)
+                ArenaEntry::AnyOf(self.parse_group()?)
             }
             Token::OnlyOneOf => {
                 self.expect_separated(Token::LParen)?;
-                Expression::OnlyOneOf(self.parse_group()?)
+                ArenaEntry::OnlyOneOf(self.parse_group()?)
             }
             Token::UseConditional(flag) => self.parse_use_conditional(flag, false)?,
             Token::Bang => match self.lexer.next().ok_or_else(|| anyhow!("unexpected EOF"))? {
                 Token::Whitespace => bail!("expected an adjacent operand after '!'"),
-                Token::Ident(name) => Expression::Not(self.parse_expression(Token::Ident(name))?),
+                Token::Ident(name) => ArenaEntry::Not(self.parse_expression(Token::Ident(name))?),
                 Token::UseConditional(flag) => self.parse_use_conditional(flag, true)?,
                 Token::Bang => match self.lexer.next() {
                     Some(Token::Ident(name)) => {
-                        Expression::Forbidden(self.parse_expression(Token::Ident(name))?)
+                        ArenaEntry::Forbidden(self.parse_expression(Token::Ident(name))?)
                     }
                     Some(t) => bail!("expected identifier, got '{t}'"),
                     None => bail!("expected identifier, got EOF"),
@@ -97,16 +97,16 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
         &mut self,
         flag: &str,
         negated: bool,
-    ) -> anyhow::Result<Expression<T>> {
+    ) -> anyhow::Result<ArenaEntry<T>> {
         self.expect_separated(Token::LParen)?;
-        Ok(Expression::Use {
+        Ok(ArenaEntry::Use {
             flag: UseFlag::parse(flag)?,
             negated,
             children: self.parse_group()?,
         })
     }
 
-    /// Parses a group of expressions, see [Expression]`.
+    /// Parses a group of expressions, see [`ArenaEntry`].
     ///
     /// This function expects that [`Token::LParen`] has already been consumed.
     /// Returns a [`Range`] that can be used for slicing `expression.children`.
@@ -179,7 +179,7 @@ mod tests {
         let input = "^^ ( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(
-            &expr,
+            expr.view(),
             &[OneOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
         );
         assert_eq!(expr.to_string(), input);
@@ -190,7 +190,7 @@ mod tests {
         let input = "( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(
-            &expr,
+            expr.view(),
             &[AllOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
         );
         assert_eq!(expr.to_string(), "( sys-libs/db app-misc/foo )");
@@ -201,7 +201,7 @@ mod tests {
         let input = "|| ( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(
-            &expr,
+            expr.view(),
             &[AnyOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
         );
         assert_eq!(expr.to_string(), input);
@@ -212,7 +212,7 @@ mod tests {
         let input = "?? ( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(
-            &expr,
+            expr.view(),
             &[OnlyOneOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
         );
         assert_eq!(expr.to_string(), input);
@@ -223,7 +223,7 @@ mod tests {
         let input = "bar? ( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(
-            &expr,
+            expr.view(),
             &[Use {
                 flag: "bar".parse().unwrap(),
                 negated: false,
@@ -237,7 +237,7 @@ mod tests {
     fn test_parser_negation() {
         let input = "!sys-libs/db";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        assert_expr(&expr, &[Not(item("sys-libs/db").into())]);
+        assert_expr(expr.view(), &[Not(item("sys-libs/db").into())]);
         assert_eq!(expr.to_string(), input);
     }
 
@@ -245,7 +245,7 @@ mod tests {
     fn test_parser_forbidden() {
         let input = "!!sys-libs/db";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        assert_expr(&expr, &[Forbidden(item("sys-libs/db").into())]);
+        assert_expr(expr.view(), &[Forbidden(item("sys-libs/db").into())]);
         assert_eq!(expr.to_string(), input);
     }
 
@@ -254,7 +254,7 @@ mod tests {
         let input = "media-libs/mesa[gbm(+)] dev-lang/R";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(
-            &expr,
+            expr.view(),
             &[item("media-libs/mesa[gbm(+)]"), item("dev-lang/R")],
         );
         assert_eq!(expr.to_string(), input);
@@ -275,7 +275,7 @@ mod tests {
 
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(
-            &expr,
+            expr.view(),
             &[
                 item("sys-libs/db"),
                 Use {
@@ -306,7 +306,7 @@ mod tests {
         ";
         let expr = ExpressionParser::<UseFlag>::parse(input).unwrap();
         assert_expr(
-            &expr,
+            expr.view(),
             &[
                 AnyOf(vec![item("wayland"), item("X")]),
                 Use {
