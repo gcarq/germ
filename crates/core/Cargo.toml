@@ -8,6 +8,7 @@ anyhow.workspace = true
 either.workspace = true
 futures-util.workspace = true
 fxhash.workspace = true
+indexmap.workspace = true
 log.workspace = true
 md-5.workspace = true
 nix.workspace = true

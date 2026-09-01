@@ -49,6 +49,7 @@ pub struct Repository {
     pub package_unmask: PackageEntries,
     pub arch_list: ArchList,
     pub categories: FxHashSet<CatName>,
+    pub priority: i32,
     profiles_desc: ProfileDescriptions,
     cpv_index: CPVIndex,
     metadata_cache: MetadataCache,
@@ -60,6 +61,7 @@ impl Repository {
     pub fn load(
         name: &RepoName,
         location: &Path,
+        priority: i32,
         sysconf: Arc<SysConf>,
     ) -> Result<Self, RepositoryError> {
         let layout = Layout::from_path(&location.join("metadata").join("layout.conf"))?;
@@ -90,6 +92,7 @@ impl Repository {
             arch_list: ArchList::from_path(&profiles.join("arch.list"))?,
             profiles_desc: ProfileDescriptions::from_path(&profiles.join("profiles.desc"))?,
             cpv_index: CPVIndex::default(),
+            priority,
             package_mask,
             package_unmask,
             layout,
@@ -351,8 +354,9 @@ impl Default for Repository {
             .expect("failed to create temp dir");
         let metadata_cache = MetadataCache::new(&temp_dir.path().join("metadata"));
         Self {
-            location: temp_dir.path().to_owned(),
             name: "repo".parse().unwrap(),
+            location: temp_dir.path().to_owned(),
+            priority: 0,
             layout: Layout::default(),
             categories: FxHashSet::default(),
             package_mask: PackageEntries::default(),
@@ -361,8 +365,8 @@ impl Default for Repository {
             arch_list: ArchList::default(),
             profiles_desc: ProfileDescriptions::default(),
             cpv_index: CPVIndex::default(),
-            metadata_cache,
             sysconf: SysConf::default().into(),
+            metadata_cache,
         }
     }
 }
@@ -446,6 +450,7 @@ mod tests {
         let mut repository = Repository::load(
             &RepoName::default(),
             &location,
+            0,
             Arc::new(SysConf::default()),
         )
         .unwrap();
@@ -469,8 +474,8 @@ mod tests {
             .unwrap();
 
         let sysconf = Arc::new(SysConf::default());
-        let valid = Repository::load(&RepoName::default(), &valid_location, sysconf.clone());
-        let invalid = Repository::load(&RepoName::default(), &invalid_location, sysconf.clone());
+        let valid = Repository::load(&RepoName::default(), &valid_location, 0, sysconf.clone());
+        let invalid = Repository::load(&RepoName::default(), &invalid_location, 0, sysconf.clone());
 
         assert!(valid.is_ok());
         assert!(matches!(invalid, Err(RepositoryError::Profile(_))));

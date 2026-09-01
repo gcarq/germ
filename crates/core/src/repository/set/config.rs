@@ -25,7 +25,7 @@ impl RepoSetConfig {
         debug!("Loading repos.conf from '{}' ...", location.display());
         let conf = Self::parse_conf(location).with_context(|| "unable to parse repos.conf")?;
 
-        let repo_confs = conf
+        let mut repo_confs = conf
             .into_iter()
             .filter_map(|(section, properties)| match section {
                 Some(name) if name != "DEFAULT" => Some((name, properties)),
@@ -36,6 +36,8 @@ impl RepoSetConfig {
                     .with_context(|| format!("unable to build repository config for '{name}'"))
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
+
+        repo_confs.sort_unstable_by_key(|conf| conf.priority);
 
         Ok(Self { repo_confs })
     }
@@ -72,6 +74,8 @@ pub struct RepositoryConfig {
     pub name: RepoName,
     // Defines parent repositories from repos.conf, if explicitly configured
     pub masters: Option<Vec<RepoName>>,
+    // Defines the priority of the repository, gentoo defaults to -1000, otherwise 0.
+    pub priority: i32,
     // Holds all raw properties from the repository section in repos.conf for potential future use
     pub raw_properties: FxHashMap<String, String>,
 }
@@ -90,6 +94,15 @@ impl RepositoryConfig {
                 warn!("repos.conf: '{prop}' property is not supported and will be ignored");
             }
         }
+
+        let priority = properties
+            .get("priority")
+            .map(|p| {
+                p.parse::<i32>()
+                    .with_context(|| format!("invalid priority '{p}'"))
+            })
+            .transpose()?
+            .unwrap_or_else(|| if name.as_str() == "gentoo" { -1000 } else { 0 });
 
         let location = properties
             .get("location")
@@ -127,6 +140,7 @@ impl RepositoryConfig {
         let config = RepositoryConfig {
             location,
             name,
+            priority,
             masters,
             raw_properties,
         };

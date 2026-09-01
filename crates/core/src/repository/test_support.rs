@@ -245,7 +245,7 @@ impl RepoBuilder {
 
         self.write_to(&location)
             .with_context(|| format!("failed to write repository '{name}'"))?;
-        let repository = Repository::load(&name, &location, SysConf::default().into())?;
+        let repository = Repository::load(&name, &location, 0, SysConf::default().into())?;
         Ok(Temp::new(repository, temp_dir))
     }
 }

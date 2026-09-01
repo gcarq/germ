@@ -16,6 +16,7 @@ use crate::types::{FxHashMap, FxHashSet};
 use crate::utils::Inherit;
 use anyhow::anyhow;
 use either::Either;
+use indexmap::IndexMap;
 use log::{debug, error, warn};
 use std::path::Path;
 use std::sync::Arc;
@@ -29,7 +30,7 @@ use std::{fs, io};
 pub struct RepoSet {
     sysconf: Arc<SysConf>,
     config: RepoSetConfig,
-    entries: FxHashMap<RepoName, RepositoryEntry>,
+    entries: IndexMap<RepoName, RepositoryEntry>,
 }
 
 /// Holds repository package masks aggregated from all available repositories.
@@ -72,7 +73,7 @@ impl RepoSet {
         let mut set = Self {
             config,
             sysconf,
-            entries: FxHashMap::default(),
+            entries: IndexMap::default(),
         };
         set.reload_from_disk()?;
         Ok(set)
@@ -127,7 +128,8 @@ impl RepoSet {
         self.entries.get_mut(name)?.repository.as_mut()
     }
 
-    /// Returns an iterator over all repositories, or just the repository with the given `name`.
+    /// Returns an iterator over all repositories ordered by priority,
+    /// or just the repository with the given `name`.
     pub fn select(&self, name: Option<&str>) -> impl Iterator<Item = &Repository> {
         match name {
             Some(name) => Either::Left(self.get(name).into_iter()),
@@ -135,7 +137,8 @@ impl RepoSet {
         }
     }
 
-    /// Returns a mutable iterator over all repositories, or just the repository with the given `name`.
+    /// Returns a mutable iterator over all repositories ordered by priority,
+    /// or just the repository with the given `name`.
     pub fn select_mut(&mut self, name: Option<&str>) -> impl Iterator<Item = &mut Repository> {
         match name {
             Some(name) => Either::Left(self.get_mut(name).into_iter()),
@@ -143,12 +146,14 @@ impl RepoSet {
         }
     }
 
+    /// Returns an iterator over all available repositories ordered by priority.
     pub fn values(&self) -> impl Iterator<Item = &Repository> {
         self.entries
             .values()
             .filter_map(|entry| entry.repository.as_ref())
     }
 
+    /// Returns a mutable iterator over all available repositories ordered by priority.
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Repository> {
         self.entries
             .values_mut()
@@ -217,13 +222,15 @@ impl RepoSet {
 
     /// Reloads all repository data from disk.
     fn reload_from_disk(&mut self) -> Result<(), RepoSetError> {
-        let mut entries = FxHashMap::default();
+        let mut entries = IndexMap::default();
         for config in self.config.iter() {
             let sync_handler = build_sync_handler(&config.raw_properties).map_err(|error| {
                 RepoSetError::Configuration(
                     error.context(format!("unable to configure repository '{}'", config.name)),
                 )
             })?;
+
+            // IndexMap preserves the order of insertion, which is important for repository priority.
             entries.insert(
                 config.name.clone(),
                 RepositoryEntry {
@@ -239,21 +246,24 @@ impl RepoSet {
         for config in self.config.iter() {
             let sysconf = self.sysconf.clone();
             match fs::metadata(&config.location) {
-                Ok(_) => match Repository::load(&config.name, &config.location, sysconf) {
-                    Ok(repository) => {
-                        pending.insert(config.name.clone(), repository);
+                Ok(_) => {
+                    match Repository::load(&config.name, &config.location, config.priority, sysconf)
+                    {
+                        Ok(repository) => {
+                            pending.insert(config.name.clone(), repository);
+                        }
+                        Err(
+                            error @ (RepositoryError::Data(_)
+                            | RepositoryError::Layout(_)
+                            | RepositoryError::Profile(_)),
+                        ) => {
+                            warn!("Repository '{}' is unavailable: {error:#}", config.name);
+                        }
+                        Err(source) => {
+                            return Err(RepoSetError::repo_failure(&config.name, source));
+                        }
                     }
-                    Err(
-                        error @ (RepositoryError::Data(_)
-                        | RepositoryError::Layout(_)
-                        | RepositoryError::Profile(_)),
-                    ) => {
-                        warn!("Repository '{}' is unavailable: {error:#}", config.name);
-                    }
-                    Err(source) => {
-                        return Err(RepoSetError::repo_failure(&config.name, source));
-                    }
-                },
+                }
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => {
                     return Err(RepoSetError::Configuration(
@@ -721,5 +731,21 @@ mod tests {
         assert_eq!(paths[0], fixture.get("child").unwrap().location.as_path());
         assert_eq!(paths[1], fixture.get("first").unwrap().location.as_path());
         assert_eq!(paths[2], second_path);
+    }
+
+    #[test]
+    fn test_priority_order() -> anyhow::Result<()> {
+        let fixture = repo_set([
+            RepoBuilder::new("fallback").repos_conf_property("priority", "10"),
+            RepoBuilder::new("preferred").repos_conf_property("priority", "-10"),
+        ])?;
+
+        let names = fixture
+            .values()
+            .map(|repo| repo.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["preferred", "fallback"]);
+        Ok(())
     }
 }
