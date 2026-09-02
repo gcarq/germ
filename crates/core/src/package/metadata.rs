@@ -1,12 +1,14 @@
 use crate::deps::atom::Atom;
 use crate::deps::{DepExpression, ExpressionKind};
 use crate::eapi::Eapi;
+use crate::keyword::Keyword;
 use crate::package::slot::PackageSlot;
 use crate::repository::Eclass;
 use crate::types::FxHashMap;
 use crate::useflag::{IUseEntry, UseFlag};
 use anyhow::{anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
+use std::str::FromStr;
 use std::{fmt, fs, io, path::Path};
 use thiserror::Error;
 
@@ -41,8 +43,7 @@ pub struct PackageMetadata {
     // and this should be parsed as DepExpression
     pub license: Vec<String>,
     pub properties: Vec<String>,
-    // TODO: enforce valid keywords
-    pub keywords: Vec<String>,
+    pub keywords: Vec<Keyword>,
     pub inherit: Vec<String>,
     // TODO: use a string instead of UseFlag
     pub restrict: DepExpression<UseFlag>,
@@ -78,14 +79,21 @@ impl PackageMetadata {
         let metadata = metadata
             .description(map.get("DESCRIPTION").copied())?
             .homepage(map.get("HOMEPAGE").copied().unwrap_or(""))
+            .map_err(|err| invalid("HOMEPAGE", err))?
             .src_uri(map.get("SRC_URI").copied().unwrap_or(""))
+            .map_err(|err| invalid("SRC_URI", err))?
             .license(map.get("LICENSE").copied().unwrap_or(""))
+            .map_err(|err| invalid("LICENSE", err))?
             .properties(map.get("PROPERTIES").copied().unwrap_or(""))
+            .map_err(|err| invalid("PROPERTIES", err))?
             .keywords(map.get("KEYWORDS").copied().unwrap_or(""))
+            .map_err(|err| invalid("KEYWORDS", err))?
             .inherit(map.get("INHERIT").copied().unwrap_or(""))
+            .map_err(|err| invalid("INHERIT", err))?
             .restrict(map.get("RESTRICT").copied().unwrap_or(""))
             .map_err(|err| invalid("RESTRICT", err))?
             .defined_phases(map.get("DEFINED_PHASES").copied().unwrap_or(""))
+            .map_err(|err| invalid("DEFINED_PHASES", err))?
             .iuse(map.get("IUSE").copied().unwrap_or(""))
             .map_err(|err| invalid("IUSE", err))?
             .required_use(map.get("REQUIRED_USE").copied().unwrap_or(""))
@@ -117,13 +125,13 @@ impl PackageMetadata {
         let metadata = Self::default()
             .eapi(read_meta(&path.join("EAPI"))?.trim())?
             .description(Some(read_meta(&path.join("DESCRIPTION"))?.trim()))?
-            .homepage(read_meta(&path.join("HOMEPAGE"))?.trim())
-            .license(read_meta(&path.join("LICENSE"))?.trim())
-            .properties(read_meta(&path.join("PROPERTIES"))?.trim())
-            .keywords(read_meta(&path.join("KEYWORDS"))?.trim())
-            .inherit(read_meta(&path.join("INHERIT"))?.trim())
+            .homepage(read_meta(&path.join("HOMEPAGE"))?.trim())?
+            .license(read_meta(&path.join("LICENSE"))?.trim())?
+            .properties(read_meta(&path.join("PROPERTIES"))?.trim())?
+            .keywords(read_meta(&path.join("KEYWORDS"))?.trim())?
+            .inherit(read_meta(&path.join("INHERIT"))?.trim())?
             .restrict(read_meta(&path.join("RESTRICT"))?.trim())?
-            .defined_phases(read_meta(&path.join("DEFINED_PHASES"))?.trim())
+            .defined_phases(read_meta(&path.join("DEFINED_PHASES"))?.trim())?
             .iuse(read_meta(&path.join("IUSE"))?.trim())?
             .required_use(read_meta(&path.join("REQUIRED_USE"))?.trim())?
             .slot(Some(read_meta(&path.join("SLOT"))?.trim()))?
@@ -153,34 +161,34 @@ impl PackageMetadata {
         Ok(self)
     }
 
-    pub fn homepage(mut self, value: &str) -> Self {
-        self.homepage = Self::parse_value(value);
-        self
+    pub fn homepage(mut self, value: &str) -> anyhow::Result<Self> {
+        self.homepage = Self::parse_value(value)?;
+        Ok(self)
     }
 
-    pub fn src_uri(mut self, value: &str) -> Self {
-        self.src_uri = Self::parse_value(value);
-        self
+    pub fn src_uri(mut self, value: &str) -> anyhow::Result<Self> {
+        self.src_uri = Self::parse_value(value)?;
+        Ok(self)
     }
 
-    pub fn license(mut self, value: &str) -> Self {
-        self.license = Self::parse_value(value);
-        self
+    pub fn license(mut self, value: &str) -> anyhow::Result<Self> {
+        self.license = Self::parse_value(value)?;
+        Ok(self)
     }
 
-    pub fn properties(mut self, value: &str) -> Self {
-        self.properties = Self::parse_value(value);
-        self
+    pub fn properties(mut self, value: &str) -> anyhow::Result<Self> {
+        self.properties = Self::parse_value(value)?;
+        Ok(self)
     }
 
-    pub fn keywords(mut self, value: &str) -> Self {
-        self.keywords = Self::parse_value(value);
-        self
+    pub fn keywords(mut self, value: &str) -> anyhow::Result<Self> {
+        self.keywords = Self::parse_value(value)?;
+        Ok(self)
     }
 
-    pub fn inherit(mut self, value: &str) -> Self {
-        self.inherit = Self::parse_value(value);
-        self
+    pub fn inherit(mut self, value: &str) -> anyhow::Result<Self> {
+        self.inherit = Self::parse_value(value)?;
+        Ok(self)
     }
 
     pub fn restrict(mut self, value: &str) -> anyhow::Result<Self> {
@@ -188,16 +196,13 @@ impl PackageMetadata {
         Ok(self)
     }
 
-    pub fn defined_phases(mut self, value: &str) -> Self {
-        self.defined_phases = Self::parse_value(value);
-        self
+    pub fn defined_phases(mut self, value: &str) -> anyhow::Result<Self> {
+        self.defined_phases = Self::parse_value(value)?;
+        Ok(self)
     }
 
     pub fn iuse(mut self, value: &str) -> anyhow::Result<Self> {
-        self.iuse = value
-            .split_whitespace()
-            .map(str::parse)
-            .collect::<anyhow::Result<_>>()?;
+        self.iuse = Self::parse_value(value)?;
         Ok(self)
     }
 
@@ -244,8 +249,8 @@ impl PackageMetadata {
         Ok(self)
     }
 
-    fn parse_value(value: &str) -> Vec<String> {
-        value.split_whitespace().map(String::from).collect()
+    fn parse_value<T: FromStr>(value: &str) -> Result<Vec<T>, T::Err> {
+        value.split_whitespace().map(str::parse::<T>).collect()
     }
 }
 
@@ -268,7 +273,15 @@ impl fmt::Display for PackageMetadata {
                 .collect::<Vec<_>>()
                 .join(" ")
         )?;
-        writeln!(f, "KEYWORDS={}", self.keywords.join(" "))?;
+        writeln!(
+            f,
+            "KEYWORDS={}",
+            self.keywords
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        )?;
         writeln!(f, "LICENSE={}", self.license.join(" "))?;
         writeln!(f, "PDEPEND={}", self.pdepend)?;
         writeln!(f, "PROPERTIES={}", self.properties.join(" "))?;
@@ -298,6 +311,8 @@ const fn invalid(field: &'static str, source: anyhow::Error) -> PackageMetadataE
 
 #[cfg(test)]
 mod tests {
+    use crate::repository::Arch;
+
     use super::*;
 
     fn metadata_map() -> FxHashMap<&'static str, &'static str> {
@@ -311,7 +326,7 @@ mod tests {
             "LICENSE=GPL-3",
             "PROPERTIES=live test_network",
             "DESCRIPTION=Example python package",
-            "KEYWORDS=amd64 x86",
+            "KEYWORDS=amd64 ~arm64",
             "INHERITED= toolchain-funcs bash-completion-r1 eapi9-ver edo linux-info systemd",
             "IUSE=examples +ipv6",
             "REQUIRED_USE=^^ ( python_single_target_python3_11 )",
@@ -342,7 +357,13 @@ mod tests {
         );
         assert_eq!(metadata.license, vec!["GPL-3"]);
         assert_eq!(metadata.properties, vec!["live", "test_network"]);
-        assert_eq!(metadata.keywords, vec!["amd64", "x86"]);
+        assert_eq!(
+            metadata.keywords,
+            vec![
+                Keyword::Stable(Arch::new("amd64").unwrap()),
+                Keyword::Testing(Arch::new("arm64").unwrap())
+            ]
+        );
         assert_eq!(
             metadata.inherit,
             vec![

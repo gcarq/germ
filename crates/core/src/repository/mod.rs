@@ -9,6 +9,6 @@ pub use name::RepoName;
 pub(crate) use set::RepoPackageMasks;
 pub use set::{RepoSet, RepoSetError};
 pub use tree::{
-    ArchList, CacheError, Eclass, Eclasses, Layout, LayoutError, PackageResolutionError,
+    Arch, Arches, CacheError, Eclass, Eclasses, Layout, LayoutError, PackageResolutionError,
     PackageResult, ProfileError, Repository, RepositoryError,
 };

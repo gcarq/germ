@@ -1,9 +1,17 @@
 use crate::files::content_from_path;
+use crate::grammar::ARCH;
 use crate::utils::is_blank_or_comment;
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
+use fancy_regex::Regex;
+use rkyv::{Archive, Deserialize, Serialize};
+use std::fmt;
 use std::ops::Deref;
 use std::path::Path;
+use std::sync::LazyLock;
 use thiserror::Error;
+
+/// Regex for architecture name validation.
+static ARCH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"\A{ARCH}\z")).unwrap());
 
 #[derive(Debug, Error)]
 #[error(transparent)]
@@ -61,32 +69,75 @@ impl ProfileDescription {
     }
 }
 
+/// Represents a single architecture e.g.: `amd64`.
+#[derive(Archive, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Arch(Box<str>);
+
+impl Arch {
+    /// Creates a new [`Arch`].
+    ///
+    /// Returns `Err` if the given `arch` is invalid.
+    pub fn new(arch: impl Into<Box<str>>) -> anyhow::Result<Self> {
+        let arch = arch.into();
+        if !ARCH_RE.is_match(arch.as_ref())? {
+            bail!("invalid arch: '{arch}'");
+        }
+        Ok(Self(arch))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for Arch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Holds all supported architectures from `profiles/arch.list`.
 #[derive(Default, Debug)]
-pub struct ArchList(Vec<String>);
+pub struct Arches(Vec<Arch>);
 
-impl ArchList {
+impl Arches {
     pub fn from_path(path: &Path) -> Result<Self, ProfileError> {
         let content = content_from_path(path, false, true)?;
         let archs = content
             .lines()
             .map(str::trim)
             .filter(|line| !is_blank_or_comment(line))
-            .map(String::from)
-            .collect();
+            .map(Arch::new)
+            .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(Self(archs))
     }
 
     /// Checks if the given `arch` is supported.
-    pub fn supports(&self, arch: &str) -> bool {
-        self.0.iter().any(|a| a == arch)
+    pub fn contains(&self, arch: &str) -> bool {
+        self.0.iter().any(|a| a.as_str() == arch)
+    }
+
+    pub fn extend(&mut self, other: &Self) {
+        self.0.extend_from_slice(&other.0);
     }
 }
 
-impl Deref for ArchList {
-    type Target = Vec<String>;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    #[test]
+    fn test_arch_valid() {
+        for arch in ["amd64", "arm64", "x86", "riscv"] {
+            let parsed = Arch::new(arch).unwrap();
+            assert_eq!(parsed.as_str(), arch);
+        }
+    }
+
+    #[test]
+    fn test_arch_invalid() {
+        for arch in ["", "-foo", "+foo", ".foo", "foo.bar"] {
+            assert!(Arch::new(arch).is_err(), "{arch:?} should be invalid");
+        }
     }
 }

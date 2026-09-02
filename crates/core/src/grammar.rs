@@ -15,6 +15,9 @@ pub const USE_FLAG: &str = r"[A-Za-z0-9][A-Za-z0-9+_@-]*";
 /// PMS 3.1.5 repository name syntax.
 pub const REPOSITORY: &str = r"[a-zA-Z0-9_][a-zA-Z0-9_-]*";
 
+/// PMS 3.1.7 keyword name syntax used for architecture names.
+pub const ARCH: &str = r"[a-zA-Z0-9_][a-zA-Z0-9_-]*";
+
 /// PMS 3.2 package version base syntax: numeric components and an optional letter.
 pub const VERSION: &str = r"[0-9]+(?:\.[0-9]+)*[a-z]?";
 

@@ -10,7 +10,7 @@ pub use error::RepositoryError;
 use futures_util::{StreamExt, TryStreamExt, stream};
 pub use layout::{Layout, LayoutError};
 pub use package::{PackageResolutionError, PackageResult};
-pub use profiles::{ArchList, ProfileError};
+pub use profiles::{Arch, Arches, ProfileError};
 
 use self::package::CPVIndex;
 use self::profiles::ProfileDescriptions;
@@ -47,7 +47,7 @@ pub struct Repository {
     pub eclasses: Eclasses,
     pub package_mask: PackageEntries,
     pub package_unmask: PackageEntries,
-    pub arch_list: ArchList,
+    pub arches: Arches,
     pub categories: FxHashSet<CatName>,
     pub priority: i32,
     profiles_desc: ProfileDescriptions,
@@ -89,7 +89,7 @@ impl Repository {
             metadata_cache: MetadataCache::new(&location.join("cache")),
             categories: FxHashSet::default(),
             eclasses: Eclasses::empty(location),
-            arch_list: ArchList::from_path(&profiles.join("arch.list"))?,
+            arches: Arches::from_path(&profiles.join("arch.list"))?,
             profiles_desc: ProfileDescriptions::from_path(&profiles.join("profiles.desc"))?,
             cpv_index: CPVIndex::default(),
             priority,
@@ -322,6 +322,7 @@ impl Inherit for Repository {
         debug!("Inheriting '{}' from '{}' ...", self.name, master.name);
         self.categories.extend(master.categories.iter().cloned());
         self.eclasses.extend(&master.eclasses);
+        self.arches.extend(&master.arches);
         Ok(())
     }
 }
@@ -362,7 +363,7 @@ impl Default for Repository {
             package_mask: PackageEntries::default(),
             package_unmask: PackageEntries::default(),
             eclasses: Eclasses::default(),
-            arch_list: ArchList::default(),
+            arches: Arches::default(),
             profiles_desc: ProfileDescriptions::default(),
             cpv_index: CPVIndex::default(),
             sysconf: SysConf::default().into(),

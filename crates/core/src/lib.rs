@@ -7,6 +7,7 @@ mod eapi;
 mod ebuild;
 mod files;
 mod grammar;
+mod keyword;
 pub mod makenv;
 pub mod package;
 mod profile;

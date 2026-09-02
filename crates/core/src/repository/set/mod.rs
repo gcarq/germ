@@ -185,7 +185,7 @@ impl RepoSet {
     /// Validates that at least one available repository supports the given architecture.
     pub fn validate_arch(&self, arch: &str) -> anyhow::Result<()> {
         for repository in self.values() {
-            if repository.arch_list.supports(arch) {
+            if repository.arches.contains(arch) {
                 return Ok(());
             }
         }
