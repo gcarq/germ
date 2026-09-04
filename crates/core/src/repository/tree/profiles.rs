@@ -7,6 +7,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::LazyLock;
 use thiserror::Error;
 
@@ -45,7 +46,7 @@ impl Deref for ProfileDescriptions {
 /// Represents a profile description as found in profiles.desc file.
 #[derive(Debug)]
 pub struct ProfileDescription {
-    pub keyword: String,
+    pub arch: Arch,
     pub profile_path: String,
     #[allow(unused)]
     stability: String,
@@ -53,12 +54,12 @@ pub struct ProfileDescription {
 
 impl ProfileDescription {
     /// Parses a profile description from a single line.
-    /// The line must consist of `<keyword> <profile_path> <stability>` otherwise an Err is returned.
+    /// The line must consist of `<arch> <profile_path> <stability>` otherwise an Err is returned.
     fn from_line(line: &str) -> Result<Self, ProfileError> {
         let parts = line.split_ascii_whitespace().collect::<Vec<_>>();
         match parts.as_slice() {
-            [keyword, profile_path, stability] => Ok(Self {
-                keyword: (*keyword).to_owned(),
+            [arch, profile_path, stability] => Ok(Self {
+                arch: arch.parse()?,
                 profile_path: (*profile_path).to_owned(),
                 stability: (*stability).to_owned(),
             }),
@@ -90,6 +91,14 @@ impl Arch {
     }
 }
 
+impl FromStr for Arch {
+    type Err = anyhow::Error;
+
+    fn from_str(arch: &str) -> Result<Self, Self::Err> {
+        Self::new(arch)
+    }
+}
+
 impl fmt::Display for Arch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -113,8 +122,8 @@ impl Arches {
     }
 
     /// Checks if the given `arch` is supported.
-    pub fn contains(&self, arch: &str) -> bool {
-        self.0.iter().any(|a| a.as_str() == arch)
+    pub fn contains(&self, arch: &Arch) -> bool {
+        self.0.contains(arch)
     }
 
     pub fn extend(&mut self, other: &Self) {

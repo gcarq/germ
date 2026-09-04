@@ -16,12 +16,12 @@ pub enum Keyword {
 impl Keyword {
     pub fn new(keyword: &str) -> anyhow::Result<Self> {
         let keyword = match keyword.chars().next().unwrap_or_default() {
-            '~' => Keyword::Testing(Arch::new(&keyword[1..])?),
+            '~' => Keyword::Testing(keyword[1..].parse()?),
             '-' => match keyword {
                 "-*" => Keyword::UnlistedUnsupported,
-                _ => Keyword::Unsupported(Arch::new(&keyword[1..])?),
+                _ => Keyword::Unsupported(keyword[1..].parse()?),
             },
-            _ => Keyword::Stable(Arch::new(keyword)?),
+            _ => Keyword::Stable(keyword.parse()?),
         };
         Ok(keyword)
     }
@@ -63,9 +63,9 @@ mod tests {
     #[test]
     fn test_keyword_valid() {
         let tests = [
-            ("amd64", Keyword::Stable(Arch::new("amd64").unwrap())),
-            ("~arm64", Keyword::Testing(Arch::new("arm64").unwrap())),
-            ("-x86", Keyword::Unsupported(Arch::new("x86").unwrap())),
+            ("amd64", Keyword::Stable("amd64".parse().unwrap())),
+            ("~arm64", Keyword::Testing("arm64".parse().unwrap())),
+            ("-x86", Keyword::Unsupported("x86".parse().unwrap())),
             ("-*", Keyword::UnlistedUnsupported),
         ];
         for (input, expected) in tests {

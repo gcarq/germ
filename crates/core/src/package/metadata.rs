@@ -311,8 +311,6 @@ const fn invalid(field: &'static str, source: anyhow::Error) -> PackageMetadataE
 
 #[cfg(test)]
 mod tests {
-    use crate::repository::Arch;
-
     use super::*;
 
     fn metadata_map() -> FxHashMap<&'static str, &'static str> {
@@ -360,8 +358,8 @@ mod tests {
         assert_eq!(
             metadata.keywords,
             vec![
-                Keyword::Stable(Arch::new("amd64").unwrap()),
-                Keyword::Testing(Arch::new("arm64").unwrap())
+                Keyword::Stable("amd64".parse().unwrap()),
+                Keyword::Testing("arm64".parse().unwrap())
             ]
         );
         assert_eq!(

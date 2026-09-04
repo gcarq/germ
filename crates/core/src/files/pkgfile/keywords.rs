@@ -126,8 +126,8 @@ impl FromStr for KeywordSelector {
             "~*" => Ok(Self::AnyTesting),
             "**" => Ok(Self::Any),
             _ => match selector.strip_prefix('~') {
-                Some(arch) => Ok(Self::Testing(Arch::new(arch)?)),
-                None => Ok(Self::Stable(Arch::new(selector)?)),
+                Some(arch) => Ok(Self::Testing(arch.parse()?)),
+                None => Ok(Self::Stable(selector.parse()?)),
             },
         }
     }

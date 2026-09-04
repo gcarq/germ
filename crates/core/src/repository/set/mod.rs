@@ -11,6 +11,7 @@ use crate::SysConf;
 use crate::deps::atom::Atom;
 use crate::files::PackageEntries;
 use crate::profile::Profile;
+use crate::repository::Arch;
 use crate::repository::tree::PackageResult;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::utils::Inherit;
@@ -183,7 +184,7 @@ impl RepoSet {
     }
 
     /// Validates that at least one available repository supports the given architecture.
-    pub fn validate_arch(&self, arch: &str) -> anyhow::Result<()> {
+    pub fn validate_arch(&self, arch: &Arch) -> anyhow::Result<()> {
         for repository in self.values() {
             if repository.arches.contains(arch) {
                 return Ok(());
@@ -193,7 +194,7 @@ impl RepoSet {
     }
 
     /// Validates that a profile is described by at least one available repository for `arch`.
-    pub fn validate_profile(&self, profile: &Profile, arch: &str) -> anyhow::Result<()> {
+    pub fn validate_profile(&self, profile: &Profile, arch: &Arch) -> anyhow::Result<()> {
         for repo in self.values() {
             let profile_prefix = format!("{}/profiles/", repo.location.display());
             if let Some(profile_path) = profile
@@ -421,8 +422,8 @@ mod tests {
     fn test_validate_arch() -> anyhow::Result<()> {
         let fixture = repo_set([RepoBuilder::new("repo")])?;
 
-        assert!(fixture.validate_arch("amd64").is_ok());
-        assert!(fixture.validate_arch("arm64").is_err());
+        assert!(fixture.validate_arch(&"amd64".parse()?).is_ok());
+        assert!(fixture.validate_arch(&"arm64".parse()?).is_err());
         Ok(())
     }
 
@@ -438,8 +439,12 @@ mod tests {
         )?;
         let invalid = Profile::resolve(&repository.location.join("profiles/other"), &fixture)?;
 
-        assert!(fixture.validate_profile(&valid, "amd64").is_ok());
-        assert!(fixture.validate_profile(&invalid, "amd64").is_err());
+        assert!(fixture.validate_profile(&valid, &"amd64".parse()?).is_ok());
+        assert!(
+            fixture
+                .validate_profile(&invalid, &"amd64".parse()?)
+                .is_err()
+        );
         Ok(())
     }
 

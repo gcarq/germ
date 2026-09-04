@@ -1,7 +1,7 @@
 use crate::SysConf;
 use crate::conf::masks::useflag::UseMasks;
 use crate::conf::masks::{PackageMasks, UserPackageMasks};
-use crate::files::pkgfile::PackageUsePolicy;
+use crate::files::pkgfile::{PackageAcceptKeywords, PackageUsePolicy};
 use crate::files::{UseEntries, entry::Precedence};
 use crate::makenv::MakeEnv;
 use crate::profile::Profile;
@@ -13,6 +13,7 @@ use log::debug;
 /// Holds the portage configuration that usually resides in `/etc/portage`.
 pub struct PortageConf {
     pub make_env: MakeEnv,
+    pub package_accept_keywords: PackageAcceptKeywords,
     pub package_masks: PackageMasks,
     pub use_masks: UseMasks,
 }
@@ -35,9 +36,18 @@ impl PortageConf {
         let arch = make_env
             .get("ARCH")
             .with_context(|| "missing ARCH variable")?
-            .to_string();
+            .to_string()
+            .parse()?;
         repo_set.validate_arch(&arch)?;
         repo_set.validate_profile(&profile, &arch)?;
+
+        let package_accept_keywords = PackageAcceptKeywords::default()
+            .inherit(&profile.package_accept_keywords)?
+            .inherit(&PackageAcceptKeywords::from_path(
+                &path.join("package.accept_keywords"),
+                Precedence::User,
+                true,
+            )?)?;
 
         let package_masks = PackageMasks::new(
             repo_set.package_masks()?,
@@ -62,6 +72,7 @@ impl PortageConf {
 
         Ok(PortageConf {
             make_env,
+            package_accept_keywords,
             package_masks,
             use_masks,
         })

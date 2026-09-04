@@ -126,10 +126,10 @@ impl Repository {
     ///
     /// The repository location prefix must be stripped from the passed `profile_path` string
     /// e.g.: `default/linux/23.0`
-    pub fn is_known_profile(&self, arch: &str, profile_path: &str) -> bool {
+    pub fn is_known_profile(&self, arch: &Arch, profile_path: &str) -> bool {
         self.profiles_desc
             .iter()
-            .any(|desc| desc.keyword == arch && desc.profile_path == profile_path)
+            .any(|desc| &desc.arch == arch && desc.profile_path == profile_path)
     }
 
     /// Resolves all configured categories and eclasses and also clears the CPV index.
