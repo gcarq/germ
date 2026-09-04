@@ -1,66 +1,37 @@
 use std::{mem, path::Path, str::FromStr};
 
+use super::{AtomPolicies, AtomPolicy};
+use crate::deps::atom::Atom;
+use crate::files::entry::{Entry, EntryValue, Precedence};
+use crate::repository::Arch;
+use crate::utils::Inherit;
 use anyhow::Context;
 
-use crate::deps::atom::Atom;
-use crate::files::content_from_path;
-use crate::files::entry::{Entry, EntryValue, Precedence};
-use crate::utils::{Inherit, strip_line_comment};
-use crate::{repository::Arch, types::FxHashMap};
-
+/// Holds all keyword selectors for packages.
 #[derive(Clone, Default, Debug)]
-pub struct PackageAcceptKeywords(FxHashMap<Atom, KeywordSelectors>);
+pub struct PackageAcceptKeywords(AtomPolicies<KeywordSelectors>);
 
 impl PackageAcceptKeywords {
     pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
-        let content = content_from_path(path, recursive, true)?;
-        Self::from_string(content, order)
-            .with_context(|| format!("failed to parse {}", path.display()))
+        Ok(Self(AtomPolicies::from_path(path, order, recursive)?))
     }
 
     pub fn from_string(content: String, order: Precedence) -> anyhow::Result<Self> {
-        let mut map = FxHashMap::default();
-
-        for (lineno, entry) in content.lines().enumerate() {
-            let entry = strip_line_comment(entry);
-            if entry.is_empty() {
-                continue;
-            }
-            let (atom, keywords) = Self::parse_line(entry, order)
-                .with_context(|| format!("error in line {}: {entry}", lineno + 1))?;
-
-            let entry: &mut KeywordSelectors = map.entry(atom).or_default();
-            entry.update_from(keywords);
-        }
-        Ok(Self(map))
+        Ok(Self(AtomPolicies::from_string(content, order)?))
     }
 
     pub fn get(&self, atom: &Atom) -> Option<&KeywordSelectors> {
         self.0.get(atom)
     }
-
-    fn parse_line(line: &str, order: Precedence) -> anyhow::Result<(Atom, KeywordSelectors)> {
-        let (atom, keywords) = match line.split_once(char::is_whitespace) {
-            Some((atom, keywords)) => (atom, keywords),
-            None => (line, ""),
-        };
-        Ok((atom.parse()?, KeywordSelectors::from_str(keywords, order)?))
-    }
 }
 
 impl Inherit for PackageAcceptKeywords {
     fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
-        for (atom, parent_keywords) in &parent.0 {
-            if let Some(keywords) = self.0.get_mut(atom) {
-                keywords.inherit_from(parent_keywords)?;
-            } else {
-                self.0.insert(atom.clone(), parent_keywords.clone());
-            }
-        }
-        Ok(())
+        self.0.inherit_from(&parent.0)
     }
 }
 
+/// This holds a collection of [`KeywordRule`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KeywordSelectors(Vec<KeywordRule>);
 
@@ -69,38 +40,43 @@ impl KeywordSelectors {
         &self.0
     }
 
-    pub fn from_str(keywords: &str, order: Precedence) -> anyhow::Result<Self> {
+    fn contains_reset(&self) -> bool {
+        self.0.iter().any(|r| matches!(r, KeywordRule::Reset(_)))
+    }
+}
+
+impl AtomPolicy for KeywordSelectors {
+    /// Parses a keyword policy for one package.
+    fn parse(value: &str, precedence: Precedence) -> anyhow::Result<Self> {
         let mut rules = Vec::new();
 
-        for keyword in keywords.split_ascii_whitespace() {
+        for keyword in value.split_ascii_whitespace() {
             if keyword == "-*" {
                 rules.clear();
-                rules.push(KeywordRule::Reset(order));
+                rules.push(KeywordRule::Reset(precedence));
                 continue;
             }
 
-            let entry = Entry::from_str(keyword, order)
+            let entry = Entry::from_str(keyword, precedence)
                 .with_context(|| format!("invalid keyword: {keyword}"))?;
             rules.push(KeywordRule::Selector(entry));
         }
 
         // Default to testing if no selectors are specified.
         if rules.is_empty() {
-            rules.push(KeywordRule::Selector(Entry::from_str("~*", order)?));
+            rules.push(KeywordRule::Selector(Entry::from_str("~*", precedence)?));
         }
 
         Ok(Self(rules))
     }
 
-    pub fn update_from(&mut self, other: Self) {
+    /// Updates `self` with the given [`KeywordSelectors`],
+    /// replacing existing keywords and handling resets.
+    fn update_from(&mut self, other: Self) {
         if other.contains_reset() {
             self.0.clear();
         }
         self.0.extend(other.0);
-    }
-
-    fn contains_reset(&self) -> bool {
-        self.0.iter().any(|r| matches!(r, KeywordRule::Reset(_)))
     }
 }
 
@@ -122,6 +98,8 @@ impl Inherit for KeywordSelectors {
 
 impl EntryValue for KeywordSelector {}
 
+/// A rule that can either be a keyword selector or a reset command,
+/// e.g.: `amd64`, `~arm64`, `-*`, etc..
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KeywordRule {
     Selector(Entry<KeywordSelector>),
@@ -161,7 +139,7 @@ mod tests {
 
     #[test]
     fn test_parse_selectors() -> anyhow::Result<()> {
-        let selectors = KeywordSelectors::from_str(
+        let selectors = KeywordSelectors::parse(
             "amd64 ~arm64 * ~* ** -amd64 -~arm64 -~* -**",
             Precedence::User,
         )?;
@@ -180,13 +158,10 @@ mod tests {
                 KeywordRule::Selector(Entry::from_str("-**", Precedence::User)?),
             ]
         );
-        Ok(())
-    }
 
-    #[test]
-    fn test_parse_reset() -> anyhow::Result<()> {
+        let selectors = KeywordSelectors::parse("amd64 -* ~arm64", Precedence::User)?;
         assert_eq!(
-            KeywordSelectors::from_str("amd64 -* ~arm64", Precedence::User)?.as_slice(),
+            selectors.as_slice(),
             &[
                 KeywordRule::Reset(Precedence::User),
                 KeywordRule::Selector(Entry::from_str("~arm64", Precedence::User)?),
@@ -199,7 +174,7 @@ mod tests {
     fn test_parse_atom_only() -> anyhow::Result<()> {
         let entries =
             PackageAcceptKeywords::from_string("net-analyzer/netcat".into(), Precedence::User)?;
-        let selectors = entries.0.get(&Atom::new("net-analyzer/netcat")?).unwrap();
+        let selectors = entries.get(&Atom::new("net-analyzer/netcat")?).unwrap();
 
         assert_eq!(
             selectors.as_slice(),
@@ -222,7 +197,7 @@ mod tests {
             .into(),
             Precedence::User,
         )?;
-        let selectors = entries.0.get(&Atom::new("dev-lang/rust")?).unwrap();
+        let selectors = entries.get(&Atom::new("dev-lang/rust")?).unwrap();
 
         assert_eq!(
             selectors.as_slice(),
@@ -246,7 +221,7 @@ mod tests {
         )?;
 
         child.inherit_from(&parent)?;
-        let selectors = child.0.get(&Atom::new("dev-lang/rust")?).unwrap();
+        let selectors = child.get(&Atom::new("dev-lang/rust")?).unwrap();
 
         assert_eq!(
             selectors.as_slice(),

@@ -173,12 +173,22 @@ mod tests {
     }
 
     #[test]
-    fn test_package_use_mask() -> anyhow::Result<()> {
-        let profile = profile_with_expansions()?;
-        let package_use_mask = PackageUsePolicy::from_string(
-            "dev-lang/rust wasm LLVM_TARGETS: AMDGPU ARCH: amd64".into(),
-            Precedence::User,
+    fn test_package_use_policies() -> anyhow::Result<()> {
+        let mut profile = profile_with_expansions()?;
+        profile.package_use_force = PackageUsePolicy::from_string(
+            "dev-lang/rust rustfmt LLVM_TARGETS: AMDGPU".into(),
+            Precedence::Profile(0),
         )?;
+        profile.package_use_stable_mask = PackageUsePolicy::from_string(
+            "dev-lang/rust LLVM_TARGETS: X86".into(),
+            Precedence::Profile(0),
+        )?;
+        profile.package_use_stable_force = PackageUsePolicy::from_string(
+            "dev-lang/rust ARCH: amd64".into(),
+            Precedence::Profile(0),
+        )?;
+        let package_use_mask =
+            PackageUsePolicy::from_string("dev-lang/rust wasm".into(), Precedence::User)?;
         let masks = UseMasks::new(
             &profile,
             PackageUsePolicy::default(),
@@ -190,56 +200,9 @@ mod tests {
         let repo = "gentoo".parse().unwrap();
         let package = Package::new(cpv, repo, PackageMetadata::default());
         assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("wasm")?));
-        assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("llvm_targets_AMDGPU")?));
-        assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("amd64")?));
-        Ok(())
-    }
-
-    #[test]
-    fn test_package_use_force() -> anyhow::Result<()> {
-        let mut profile = profile_with_expansions()?;
-        profile.package_use_force = PackageUsePolicy::from_string(
-            "dev-lang/rust wasm LLVM_TARGETS: AMDGPU ARCH: amd64".into(),
-            Precedence::Profile(0),
-        )?;
-        let masks = UseMasks::new(
-            &profile,
-            PackageUsePolicy::default(),
-            UseEntries::default(),
-            PackageUsePolicy::default(),
-        )?;
-
-        let cpv = cpv("dev-lang", "rust", "1.97.1");
-        let repo = "gentoo".parse().unwrap();
-        let package = Package::new(cpv, repo, PackageMetadata::default());
-        assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("wasm")?));
+        assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("llvm_targets_X86")?));
+        assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("rustfmt")?));
         assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("llvm_targets_AMDGPU")?));
-        assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("amd64")?));
-        Ok(())
-    }
-
-    #[test]
-    fn test_stable_package_use_policy() -> anyhow::Result<()> {
-        let mut profile = profile_with_expansions()?;
-        profile.package_use_stable_mask = PackageUsePolicy::from_string(
-            "dev-lang/rust LLVM_TARGETS: AMDGPU".into(),
-            Precedence::Profile(0),
-        )?;
-        profile.package_use_stable_force = PackageUsePolicy::from_string(
-            "dev-lang/rust ARCH: amd64".into(),
-            Precedence::Profile(0),
-        )?;
-        let masks = UseMasks::new(
-            &profile,
-            PackageUsePolicy::default(),
-            UseEntries::default(),
-            PackageUsePolicy::default(),
-        )?;
-
-        let cpv = cpv("dev-lang", "rust", "1.97.1");
-        let repo = "gentoo".parse().unwrap();
-        let package = Package::new(cpv, repo, PackageMetadata::default());
-        assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("llvm_targets_AMDGPU")?));
         assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("amd64")?));
         Ok(())
     }

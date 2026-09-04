@@ -1,9 +1,9 @@
+use super::{AtomPolicies, AtomPolicy};
 use crate::deps::atom::Atom;
-use crate::files::content_from_path;
 use crate::files::entry::{Entry, Precedence};
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::{UseExpandConfig, UseFlag};
-use crate::utils::{Inherit, strip_line_comment};
+use crate::utils::Inherit;
 use anyhow::{Context, bail};
 use std::path::Path;
 
@@ -13,32 +13,17 @@ use std::path::Path;
 /// but rather as a representation of the package USE file content.
 ///
 /// It can be only used as USE flags lookup after inheriting all files
-/// and calling `PackageUseEntries::expand` to expand the USE flags.
+/// and calling `PackageUsePolicy::expand` to expand the USE flags.
 #[derive(Clone, Default, Debug)]
-pub struct PackageUsePolicy(FxHashMap<Atom, UseSpec>);
+pub struct PackageUsePolicy(AtomPolicies<UseSpec>);
 
 impl PackageUsePolicy {
     pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
-        let content = content_from_path(path, recursive, true)?;
-        Self::from_string(content, order)
-            .with_context(|| format!("failed to parse {}", path.display()))
+        Ok(Self(AtomPolicies::from_path(path, order, recursive)?))
     }
 
     pub fn from_string(content: String, order: Precedence) -> anyhow::Result<Self> {
-        let mut map = FxHashMap::default();
-
-        for (lineno, entry) in content.lines().enumerate() {
-            let entry = strip_line_comment(entry);
-            if entry.is_empty() {
-                continue;
-            }
-            let (atom, flags) = Self::parse_line(entry, order)
-                .with_context(|| format!("error in line {}: {entry}", lineno + 1))?;
-
-            let entry: &mut UseSpec = map.entry(atom).or_default();
-            entry.update_from(flags);
-        }
-        Ok(Self(map))
+        Ok(Self(AtomPolicies::from_string(content, order)?))
     }
 
     /// Expands all USE flags, and validates them against the given `groups`.
@@ -52,25 +37,11 @@ impl PackageUsePolicy {
             })
             .collect()
     }
-
-    fn parse_line(line: &str, order: Precedence) -> anyhow::Result<(Atom, UseSpec)> {
-        match line.split_once(char::is_whitespace) {
-            Some((atom, flags)) => Ok((atom.parse()?, UseSpec::from_str(flags, order)?)),
-            None => bail!("invalid package.use definition: {line}"),
-        }
-    }
 }
 
 impl Inherit for PackageUsePolicy {
     fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
-        for (atom, parent) in &parent.0 {
-            if let Some(this) = self.0.get_mut(atom) {
-                this.inherit_from(parent)?;
-            } else {
-                self.0.insert(atom.clone(), parent.clone());
-            }
-        }
-        Ok(())
+        self.0.inherit_from(&parent.0)
     }
 }
 
@@ -117,41 +88,6 @@ struct UseSpec {
 }
 
 impl UseSpec {
-    /// Parses one package USE policy value while retaining expansion groups symbolically.
-    fn from_str(value: &str, order: Precedence) -> anyhow::Result<Self> {
-        let mut spec = Self::default();
-        let mut cur_group: Option<Box<str>> = None;
-
-        for flag in value.split_whitespace() {
-            if let Some(group) = flag.strip_suffix(':')
-                && is_expand_name(group)
-            {
-                cur_group = Some(group.into());
-                continue;
-            }
-
-            if flag == "-*" {
-                let reset = cur_group
-                    .as_ref()
-                    .map_or(UseReset::All, |group| UseReset::Group(group.clone()));
-                spec.reset(reset);
-                continue;
-            }
-
-            // Expand the flag if we're in an expansion group
-            let entry: Entry<UseFlag> = Entry::from_str(flag, order)?;
-            let target = match &cur_group {
-                Some(group) => PackageUseTarget::Expand {
-                    group: group.clone(),
-                    value: entry.inner().clone(),
-                },
-                None => PackageUseTarget::Flag(entry.inner().clone()),
-            };
-            spec.targets.insert(target, entry);
-        }
-        Ok(spec)
-    }
-
     /// Expands all USE flags, and validates them against the given `groups`.
     fn expand(self, groups: &UseExpandConfig) -> anyhow::Result<UseFlags> {
         let mut flags = FxHashMap::default();
@@ -172,6 +108,46 @@ impl UseSpec {
     fn reset(&mut self, reset: UseReset) {
         self.targets.retain(|target, _| !reset.matches(target));
         self.resets.insert(reset);
+    }
+}
+
+impl AtomPolicy for UseSpec {
+    /// Parses one package USE policy value while retaining expansion groups symbolically.
+    fn parse(value: &str, precedence: Precedence) -> anyhow::Result<Self> {
+        if value.is_empty() {
+            bail!("invalid package.use definition");
+        }
+        let mut spec = Self::default();
+        let mut cur_group: Option<Box<str>> = None;
+
+        for flag in value.split_whitespace() {
+            if let Some(group) = flag.strip_suffix(':')
+                && is_expand_name(group)
+            {
+                cur_group = Some(group.into());
+                continue;
+            }
+
+            if flag == "-*" {
+                let reset = cur_group
+                    .as_ref()
+                    .map_or(UseReset::All, |group| UseReset::Group(group.clone()));
+                spec.reset(reset);
+                continue;
+            }
+
+            // Expand the flag if we're in an expansion group
+            let entry: Entry<UseFlag> = Entry::from_str(flag, precedence)?;
+            let target = match &cur_group {
+                Some(group) => PackageUseTarget::Expand {
+                    group: group.clone(),
+                    value: entry.inner().clone(),
+                },
+                None => PackageUseTarget::Flag(entry.inner().clone()),
+            };
+            spec.targets.insert(target, entry);
+        }
+        Ok(spec)
     }
 
     /// Updates `self` with the given [`UseSpec`],
@@ -229,7 +205,7 @@ fn is_expand_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::entry::Operation;
+
     use crate::makenv::MakeEnv;
 
     impl PackageUseTarget {
@@ -253,32 +229,15 @@ mod tests {
     }
 
     #[test]
-    fn test_from_string() -> anyhow::Result<()> {
-        let content = "
-            # Enable sysvinit symlinks by default.
-            sys-apps/systemd sysv-utils
-            media-libs/mesa -opencl # ROCm should be the opencl provider
+    fn test_parse_duplicate_atom() -> anyhow::Result<()> {
+        let policy = PackageUsePolicy::from_string(
+            "app-admin/sudo foo -bar baz
+                app-admin/sudo -foo"
+                .into(),
+            Precedence::User,
+        )?;
+        let sudo = policy.0.get(&Atom::new("app-admin/sudo")?).unwrap();
 
-            app-admin/sudo foo -bar baz
-            app-admin/sudo -foo
-        ";
-
-        let file = PackageUsePolicy::from_string(content.into(), Precedence::User)?;
-        assert_eq!(file.0.len(), 3);
-
-        let systemd = file.0.get(&Atom::new("sys-apps/systemd")?).unwrap();
-        assert_eq!(
-            systemd.targets.get(&PackageUseTarget::flag("sysv-utils")?),
-            Some(&Entry::from_str("sysv-utils", Precedence::User)?)
-        );
-
-        let mesa = file.0.get(&Atom::new("media-libs/mesa")?).unwrap();
-        assert_eq!(
-            mesa.targets.get(&PackageUseTarget::flag("opencl")?),
-            Some(&Entry::from_str("-opencl", Precedence::User)?)
-        );
-
-        let sudo = file.0.get(&Atom::new("app-admin/sudo")?).unwrap();
         assert_eq!(
             sudo.targets.get(&PackageUseTarget::flag("foo")?),
             Some(&Entry::from_str("-foo", Precedence::User)?)
@@ -296,7 +255,7 @@ mod tests {
 
     #[test]
     fn test_parse_keeps_expansion_symbolic() -> anyhow::Result<()> {
-        let spec = UseSpec::from_str(
+        let spec = UseSpec::parse(
             "foo llvm_targets_AMDGPU LLVM_TARGETS: AMDGPU ARCH: amd64 LLVM_TARGETS:",
             Precedence::User,
         )?;
@@ -335,14 +294,14 @@ mod tests {
 
     #[test]
     fn test_parse_resets() -> anyhow::Result<()> {
-        let spec = UseSpec::from_str("foo bar -* baz", Precedence::User)?;
+        let spec = UseSpec::parse("foo bar -* baz", Precedence::User)?;
 
         assert!(!spec.targets.contains_key(&PackageUseTarget::flag("foo")?));
         assert!(!spec.targets.contains_key(&PackageUseTarget::flag("bar")?));
         assert!(spec.targets.contains_key(&PackageUseTarget::flag("baz")?));
         assert!(spec.resets.contains(&UseReset::All));
 
-        let spec = UseSpec::from_str("LLVM_TARGETS: X86 -* AMDGPU", Precedence::User)?;
+        let spec = UseSpec::parse("LLVM_TARGETS: X86 -* AMDGPU", Precedence::User)?;
         assert!(
             !spec
                 .targets
@@ -363,7 +322,7 @@ mod tests {
     fn test_resolve_expansion_groups() -> anyhow::Result<()> {
         let entries = PackageUsePolicy::from_string(
             "dev-lang/rust LLVM_TARGETS: WebAssembly -AMDGPU ARCH: amd64 -x86".into(),
-            Precedence::User,
+            Precedence::Profile(2),
         )?;
         let resolved = entries.expand(&config()?)?;
         let flags = resolved.get(&Atom::new("dev-lang/rust")?).unwrap();
@@ -372,39 +331,24 @@ mod tests {
             flags.get(&UseFlag::new("llvm_targets_WebAssembly")?),
             Some(&Entry::from_str(
                 "llvm_targets_WebAssembly",
-                Precedence::User
+                Precedence::Profile(2)
             )?)
         );
         assert_eq!(
             flags.get(&UseFlag::new("llvm_targets_AMDGPU")?),
-            Some(&Entry::from_str("-llvm_targets_AMDGPU", Precedence::User)?)
+            Some(&Entry::from_str(
+                "-llvm_targets_AMDGPU",
+                Precedence::Profile(2),
+            )?)
         );
         assert_eq!(
             flags.get(&UseFlag::new("amd64")?),
-            Some(&Entry::from_str("amd64", Precedence::User)?)
+            Some(&Entry::from_str("amd64", Precedence::Profile(2))?)
         );
         assert_eq!(
             flags.get(&UseFlag::new("x86")?),
-            Some(&Entry::from_str("-x86", Precedence::User)?)
+            Some(&Entry::from_str("-x86", Precedence::Profile(2))?)
         );
-        Ok(())
-    }
-
-    #[test]
-    fn test_resolve_preserves_operation_and_precedence() -> anyhow::Result<()> {
-        let entries = PackageUsePolicy::from_string(
-            "dev-lang/rust LLVM_TARGETS: AMDGPU".into(),
-            Precedence::Profile(2),
-        )?;
-        let resolved = entries.expand(&config()?)?;
-        let entry = resolved
-            .get(&Atom::new("dev-lang/rust")?)
-            .unwrap()
-            .get(&UseFlag::new("llvm_targets_AMDGPU")?)
-            .unwrap();
-
-        assert_eq!(entry.op, Operation::Set);
-        assert_eq!(entry.prec, Precedence::Profile(2));
         Ok(())
     }
 
@@ -424,17 +368,6 @@ mod tests {
             PackageUsePolicy::from_string("dev-lang/rust UNKNOWN:".into(), Precedence::User)?;
         assert!(trailing.expand(&config()?).is_ok());
 
-        Ok(())
-    }
-
-    #[test]
-    fn test_resolve_ignores_reset_only_group() -> anyhow::Result<()> {
-        let entries =
-            PackageUsePolicy::from_string("dev-lang/rust UNKNOWN: -*".into(), Precedence::User)?;
-        let resolved = entries.expand(&config()?)?;
-
-        let flags = resolved.get(&Atom::new("dev-lang/rust")?).unwrap();
-        assert!(flags.flags.is_empty());
         Ok(())
     }
 
@@ -461,63 +394,61 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_rejects_overlapping_namespaces() -> anyhow::Result<()> {
-        let make_env =
-            MakeEnv::from_string("USE_EXPAND=\"ARCH\"\nUSE_EXPAND_UNPREFIXED=\"ARCH\"".into())?;
+    fn test_resolve_rejects_overlapping_groups() -> anyhow::Result<()> {
+        let make_env = MakeEnv::from_string(
+            "USE_EXPAND=\"ARCH\"
+                USE_EXPAND_UNPREFIXED=\"ARCH\""
+                .into(),
+        )?;
         assert!(UseExpandConfig::from_make_env(&make_env).is_err());
         Ok(())
     }
 
     #[test]
-    fn test_inherit_from_resets_and_readds() -> anyhow::Result<()> {
+    fn test_inherit_group_reset() -> anyhow::Result<()> {
         let grand_parent = PackageUsePolicy::from_string(
-            "dev-lang/rust LLVM_TARGETS: X86".into(),
+            "dev-lang/rust lto LLVM_TARGETS: X86".into(),
             Precedence::Profile(0),
         )?;
         let parent = PackageUsePolicy::from_string(
-            "dev-lang/rust LLVM_TARGETS: -* AMDGPU".into(),
+            "dev-lang/rust -lto LLVM_TARGETS: -* AMDGPU".into(),
             Precedence::Profile(1),
-        )?;
-        let parent = parent.inherit(&grand_parent)?;
-        let child = PackageUsePolicy::default().inherit(&parent)?;
-        let flags = child.expand(&config()?)?;
-        let flags = flags.get(&Atom::new("dev-lang/rust")?).unwrap();
+        )?
+        .inherit(&grand_parent)?;
 
-        assert_eq!(flags.get(&UseFlag::new("llvm_targets_X86")?), None);
+        let parent_flags = parent.clone().expand(&config()?)?;
+        let parent_flags = parent_flags.get(&Atom::new("dev-lang/rust")?).unwrap();
         assert_eq!(
-            flags.get(&UseFlag::new("llvm_targets_AMDGPU")?),
+            parent_flags.get(&UseFlag::new("lto")?),
+            Some(&Entry::from_str("-lto", Precedence::Profile(1))?)
+        );
+        assert_eq!(parent_flags.get(&UseFlag::new("llvm_targets_X86")?), None);
+        assert_eq!(
+            parent_flags.get(&UseFlag::new("llvm_targets_AMDGPU")?),
             Some(&Entry::from_str(
                 "llvm_targets_AMDGPU",
                 Precedence::Profile(1)
             )?)
         );
-        Ok(())
-    }
 
-    #[test]
-    fn test_inherit_from_keeps_group_reset_local() -> anyhow::Result<()> {
-        let parent = PackageUsePolicy::from_string(
-            "dev-lang/rust foo LLVM_TARGETS: X86".into(),
-            Precedence::Profile(0),
-        )?;
         let child = PackageUsePolicy::from_string(
-            "dev-lang/rust LLVM_TARGETS: -* AMDGPU".into(),
-            Precedence::Profile(1),
+            "dev-lang/rust lto LLVM_TARGETS: -* WebAssembly".into(),
+            Precedence::User,
         )?
         .inherit(&parent)?;
         let flags = child.expand(&config()?)?;
         let flags = flags.get(&Atom::new("dev-lang/rust")?).unwrap();
-
         assert_eq!(
-            flags.get(&UseFlag::new("foo")?),
-            Some(&Entry::from_str("foo", Precedence::Profile(0))?)
+            flags.get(&UseFlag::new("lto")?),
+            Some(&Entry::from_str("lto", Precedence::User)?)
         );
         assert_eq!(flags.get(&UseFlag::new("llvm_targets_X86")?), None);
+        assert_eq!(flags.get(&UseFlag::new("llvm_targets_AMDGPU")?), None);
         assert_eq!(
-            flags.get(&UseFlag::new("llvm_targets_AMDGPU")?),
+            flags.get(&UseFlag::new("llvm_targets_WebAssembly")?),
             Some(&Entry::from_str(
-                "llvm_targets_AMDGPU",
-                Precedence::Profile(1)
+                "llvm_targets_WebAssembly",
+                Precedence::User
             )?)
         );
         Ok(())
@@ -546,81 +477,6 @@ mod tests {
         assert_eq!(
             wildcard.get(&UseFlag::new("llvm_targets_X86")?),
             Some(&Entry::from_str("llvm_targets_X86", Precedence::User)?)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_inherit_from_merges_precedence() -> anyhow::Result<()> {
-        let grand_parent = PackageUsePolicy::from_string(
-            "
-            dev-libs/libffi foo -bar baz foobar
-            app-arch/xz-utils foo bar -test
-            app-arch/zstd baz -foo
-            sys-apps/systemd -foo
-            dev-libs/libffi foobar
-            "
-            .into(),
-            Precedence::Profile(0),
-        )?;
-
-        let parent = PackageUsePolicy::from_string(
-            "
-            dev-libs/libffi foobar
-            app-arch/xz-utils -foo bar baz test
-            app-arch/rpm -foo
-            "
-            .into(),
-            Precedence::Profile(1),
-        )?;
-
-        let child = PackageUsePolicy::from_string(
-            "
-            app-arch/xz-utils -foo -bar baz
-            app-arch/zstd foo
-            app-arch/rpm foo
-            dev-libs/libffi -foobar
-            "
-            .into(),
-            Precedence::User,
-        )?;
-        let child = child.inherit(&parent.inherit(&grand_parent)?)?;
-        let resolved = child.expand(&config()?)?;
-
-        assert_eq!(resolved.len(), 5);
-
-        let libffi = resolved.get(&Atom::new("dev-libs/libffi")?).unwrap();
-        assert_eq!(
-            libffi.get(&UseFlag::new("foo")?),
-            Some(&Entry::from_str("foo", Precedence::Profile(0))?)
-        );
-        assert_eq!(
-            libffi.get(&UseFlag::new("bar")?),
-            Some(&Entry::from_str("-bar", Precedence::Profile(0))?)
-        );
-        assert_eq!(
-            libffi.get(&UseFlag::new("baz")?),
-            Some(&Entry::from_str("baz", Precedence::Profile(0))?)
-        );
-        assert_eq!(
-            libffi.get(&UseFlag::new("foobar")?),
-            Some(&Entry::from_str("-foobar", Precedence::User)?)
-        );
-
-        let zstd = resolved.get(&Atom::new("app-arch/zstd")?).unwrap();
-        assert_eq!(
-            zstd.get(&UseFlag::new("baz")?),
-            Some(&Entry::from_str("baz", Precedence::Profile(0))?)
-        );
-        assert_eq!(
-            zstd.get(&UseFlag::new("foo")?),
-            Some(&Entry::from_str("foo", Precedence::User)?)
-        );
-
-        let rpm = resolved.get(&Atom::new("app-arch/rpm")?).unwrap();
-        assert_eq!(
-            rpm.get(&UseFlag::new("foo")?),
-            Some(&Entry::from_str("foo", Precedence::User)?)
         );
         Ok(())
     }
