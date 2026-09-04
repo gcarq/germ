@@ -3,9 +3,8 @@ mod make;
 mod parent;
 
 use crate::eapi::Eapi;
-use crate::files::{
-    PackageEntries, SysPackageEntries, UseEntries, entry::Precedence, pkguse::PackageUseEntries,
-};
+use crate::files::pkgfile::{PackageAcceptKeywords, PackageUsePolicy};
+use crate::files::{PackageEntries, SysPackageEntries, UseEntries, entry::Precedence};
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
 use crate::profile::parent::ParentEntry;
@@ -63,20 +62,24 @@ pub struct Profile {
 
     // Defines a system set for this profile
     packages: SysPackageEntries,
+
+    // Defines the keywords that are accepted for packages in this profile
+    pub package_accept_keywords: PackageAcceptKeywords,
+
     // Prevents packages from being installed in this profile
     pub package_mask: PackageEntries,
     // Allows packages to be installed that would otherwise be masked
     pub package_unmask: PackageEntries,
 
     // Override the default USE flags specified by make.defaults on a per-package basis
-    pub package_use: PackageUseEntries,
+    pub package_use: PackageUsePolicy,
     // USE flags that must never be enabled on a per-package or per-version basis
-    pub package_use_mask: PackageUseEntries,
+    pub package_use_mask: PackageUsePolicy,
     // USE flags that must always be enabled on a per-package or per-version basis
-    pub package_use_force: PackageUseEntries,
+    pub package_use_force: PackageUsePolicy,
     // Same as above but for merged packages due to a stable keyword
-    pub package_use_stable_mask: PackageUseEntries,
-    pub package_use_stable_force: PackageUseEntries,
+    pub package_use_stable_mask: PackageUsePolicy,
+    pub package_use_stable_force: PackageUsePolicy,
 
     // USE flags that must never be enabled in this profile
     pub use_mask: UseEntries,
@@ -121,6 +124,11 @@ impl Profile {
             make_defaults: MakeEnv::from_path(&path.join("make.defaults"), false, true)?,
             deprecated: DeprecationInfo::from_path(&path.join("deprecated"))?,
             packages: SysPackageEntries::from_path(&path.join("packages"), order, false)?,
+            package_accept_keywords: PackageAcceptKeywords::from_path(
+                &path.join("package.accept_keywords"),
+                order,
+                supports_file_dirs,
+            )?,
             package_mask: PackageEntries::from_path(
                 &path.join("package.mask"),
                 order,
@@ -131,7 +139,7 @@ impl Profile {
                 order,
                 supports_file_dirs,
             )?,
-            package_use: PackageUseEntries::from_path(
+            package_use: PackageUsePolicy::from_path(
                 &path.join("package.use"),
                 order,
                 supports_file_dirs,
@@ -148,22 +156,22 @@ impl Profile {
                 order,
                 supports_file_dirs,
             )?,
-            package_use_mask: PackageUseEntries::from_path(
+            package_use_mask: PackageUsePolicy::from_path(
                 &path.join("package.use.mask"),
                 order,
                 supports_file_dirs,
             )?,
-            package_use_force: PackageUseEntries::from_path(
+            package_use_force: PackageUsePolicy::from_path(
                 &path.join("package.use.force"),
                 order,
                 supports_file_dirs,
             )?,
-            package_use_stable_mask: PackageUseEntries::from_path(
+            package_use_stable_mask: PackageUsePolicy::from_path(
                 &path.join("package.use.stable.mask"),
                 order,
                 supports_file_dirs,
             )?,
-            package_use_stable_force: PackageUseEntries::from_path(
+            package_use_stable_force: PackageUsePolicy::from_path(
                 &path.join("package.use.stable.force"),
                 order,
                 supports_file_dirs,
@@ -184,6 +192,8 @@ impl Profile {
     /// incremental and literal variables.
     fn inherit(mut self, parent: &Profile) -> anyhow::Result<Self> {
         self.packages.inherit_from(&parent.packages)?;
+        self.package_accept_keywords
+            .inherit_from(&parent.package_accept_keywords)?;
         self.package_mask.inherit_from(&parent.package_mask)?;
         self.package_unmask.inherit_from(&parent.package_unmask)?;
         self.package_use.inherit_from(&parent.package_use)?;
@@ -247,6 +257,7 @@ impl fmt::Display for Profile {
 mod tests {
     use super::*;
     use crate::files::entry::Entry;
+    use crate::files::pkgfile::KeywordRule;
     use crate::useflag::UseExpandConfig;
 
     use crate::repository::test_support::{RepoBuilder, repo_set};
@@ -273,6 +284,34 @@ mod tests {
         Ok(())
     }
 
+    fn assert_package_accept_keywords(profile: &Profile) -> anyhow::Result<()> {
+        let rust_keywords = profile
+            .package_accept_keywords
+            .get(&"dev-lang/rust".parse()?)
+            .unwrap();
+        assert_eq!(
+            rust_keywords.as_slice(),
+            &[
+                KeywordRule::Selector(Entry::from_str("amd64", Precedence::Profile(0))?),
+                KeywordRule::Selector(Entry::from_str("~amd64", Precedence::Profile(1))?),
+                KeywordRule::Selector(Entry::from_str("**", Precedence::Profile(2))?),
+            ]
+        );
+
+        let vim_keywords = profile
+            .package_accept_keywords
+            .get(&"app-editors/vim".parse()?)
+            .unwrap();
+        assert_eq!(
+            vim_keywords.as_slice(),
+            &[
+                KeywordRule::Reset(Precedence::Profile(1)),
+                KeywordRule::Selector(Entry::from_str("~amd64", Precedence::Profile(1))?),
+            ]
+        );
+        Ok(())
+    }
+
     #[test]
     fn test_profile_resolve() -> anyhow::Result<()> {
         let fixture = repo_set(vec![
@@ -285,12 +324,24 @@ mod tests {
                 .parents("selected", ["../parent"])
                 .profile_file(
                     "base/make.defaults",
-                    "USE_EXPAND=\"CAMERAS LLVM_TARGETS\"\nCAMERAS=\"canon ptp2\"\n",
+                    "USE_EXPAND=\"CAMERAS LLVM_TARGETS\"\n\
+                    CAMERAS=\"canon ptp2\"\n",
                 )
                 .profile_file("parent/make.defaults", "CAMERAS=\"-canon nikon\"\n")
                 .profile_file("base/use.mask", "foo\nbar\n")
                 .profile_file("parent/use.mask", "-bar\nbaz\n")
                 .profile_file("selected/use.mask", "-bar\nqux\n")
+                .profile_file(
+                    "base/package.accept_keywords",
+                    "dev-lang/rust amd64\n\
+                    app-editors/vim amd64\n",
+                )
+                .profile_file(
+                    "parent/package.accept_keywords",
+                    "dev-lang/rust ~amd64\n\
+                    app-editors/vim -* ~amd64\n",
+                )
+                .profile_file("selected/package.accept_keywords", "dev-lang/rust **\n")
                 .profile_file(
                     "base/package.use.mask",
                     "sys-libs/glibc cet stack-realign\n\
@@ -313,6 +364,8 @@ mod tests {
             "ptp2 nikon"
         );
         let groups = UseExpandConfig::from_make_env(&profile.make_defaults)?;
+        assert_package_accept_keywords(&profile)?;
+
         assert_eq!(
             profile.use_mask.into_iter().collect::<Vec<_>>(),
             vec![

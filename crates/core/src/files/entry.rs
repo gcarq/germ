@@ -6,15 +6,15 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::str::FromStr;
 
-/// This trait abstracts a single item in a line-based file, such as `package.mask` or `use.mask`.
-pub trait FileEntry:
+/// This trait abstracts a single value in a line-based file, such as `use.mask`.
+pub trait EntryValue:
     FromStr<Err = anyhow::Error> + Eq + PartialEq + Ord + PartialOrd + Hash + Clone
 {
 }
 
-impl FileEntry for SysAtom {}
-impl FileEntry for Atom {}
-impl FileEntry for UseFlag {}
+impl EntryValue for SysAtom {}
+impl EntryValue for Atom {}
+impl EntryValue for UseFlag {}
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Copy, Clone, Debug)]
 pub enum Operation {
@@ -73,19 +73,19 @@ impl Hash for Precedence {
     }
 }
 
-/// This wraps a [`FileEntry`], usually a [`Atom`] or USE flags in line based files.
+/// This wraps a [`EntryValue`], usually a [`Atom`] or USE flags in line based files.
 ///
 /// Values prefixed with a hyphen are considered [`Operation::Unset`] and clear all previous entries
 /// with the same inner value.
 /// The [`Precedence`] holds the original inheritance chain necessary for lookups.
 #[derive(Eq, Ord, PartialOrd, PartialEq, Hash, Clone, Debug)]
-pub struct Entry<T: FileEntry> {
+pub struct Entry<T: EntryValue> {
     pub prec: Precedence,
     pub op: Operation,
     inner: T,
 }
 
-impl<T: FileEntry> Entry<T> {
+impl<T: EntryValue> Entry<T> {
     pub fn from_str(value: &str, prec: Precedence) -> anyhow::Result<Self> {
         let (op, inner) = match value.strip_prefix('-') {
             Some(value) => (Operation::Unset, value.parse()?),
@@ -103,7 +103,7 @@ impl<T: FileEntry> Entry<T> {
     }
 }
 
-impl<T: FileEntry> Deref for Entry<T> {
+impl<T: EntryValue> Deref for Entry<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {

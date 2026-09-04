@@ -1,7 +1,8 @@
 use crate::SysConf;
 use crate::conf::masks::useflag::UseMasks;
 use crate::conf::masks::{PackageMasks, UserPackageMasks};
-use crate::files::{UseEntries, entry::Precedence, pkguse::PackageUseEntries};
+use crate::files::pkgfile::PackageUsePolicy;
+use crate::files::{UseEntries, entry::Precedence};
 use crate::makenv::MakeEnv;
 use crate::profile::Profile;
 use crate::repository::RepoSet;
@@ -46,13 +47,13 @@ impl PortageConf {
 
         let use_masks = UseMasks::new(
             &profile,
-            PackageUseEntries::from_path(&path.join("package.use"), Precedence::User, true)?,
+            PackageUsePolicy::from_path(&path.join("package.use"), Precedence::User, true)?,
             UseEntries::from_path(
                 &path.join("profile").join("use.mask"),
                 Precedence::User,
                 true,
             )?,
-            PackageUseEntries::from_path(
+            PackageUsePolicy::from_path(
                 &path.join("profile").join("package.use.mask"),
                 Precedence::User,
                 true,

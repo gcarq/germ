@@ -70,7 +70,7 @@ impl ProfileDescription {
 }
 
 /// Represents a single architecture e.g.: `amd64`.
-#[derive(Archive, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Archive, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Arch(Box<str>);
 
 impl Arch {

@@ -1,20 +1,20 @@
 use crate::files::content_from_path;
-use crate::files::entry::{Entry, FileEntry, Precedence};
+use crate::files::entry::{Entry, EntryValue, Precedence};
 use crate::types::FxHashSet;
 use crate::utils::{Inherit, strip_line_comment};
 use anyhow::Context;
 use std::path::Path;
 
-/// Represents a one-item-per-line file.
+/// Holds entries from a line-based file.
 ///
 /// EAPI > 6 supports directories, in that case all files in that directory are merged together.
 /// Lines beginning with a hyphen clear the content of previous lines that are equal to the
 /// remainder of that line.
 /// TODO: consider saving relevant file path and line numbers for better error messages.
 #[derive(Clone, Debug)]
-pub struct LineBasedFile<T: FileEntry>(Vec<Entry<T>>);
+pub struct LineEntries<T: EntryValue>(Vec<Entry<T>>);
 
-impl<T: FileEntry> LineBasedFile<T> {
+impl<T: EntryValue> LineEntries<T> {
     pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
         let content = content_from_path(path, recursive, true)?;
         Self::from_string(content, order)
@@ -44,14 +44,14 @@ impl<T: FileEntry> LineBasedFile<T> {
     }
 }
 
-impl<T: FileEntry> Default for LineBasedFile<T> {
+impl<T: EntryValue> Default for LineEntries<T> {
     fn default() -> Self {
         Self(Vec::default())
     }
 }
 
-impl<T: FileEntry> Inherit for LineBasedFile<T> {
-    fn inherit_from(&mut self, parent: &LineBasedFile<T>) -> anyhow::Result<()> {
+impl<T: EntryValue> Inherit for LineEntries<T> {
+    fn inherit_from(&mut self, parent: &LineEntries<T>) -> anyhow::Result<()> {
         let mut seen = FxHashSet::default();
         let mut result = Vec::new();
         for item in self.0.iter().rev().chain(parent.0.iter().rev()) {

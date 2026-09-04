@@ -1,7 +1,7 @@
 use crate::deps::atom::Atom;
 use crate::files::UseEntries;
 use crate::files::entry::Entry;
-use crate::files::pkguse::{PackageUseEntries, UseFlags};
+use crate::files::pkgfile::{PackageUsePolicy, UseFlags};
 use crate::package::PackageView;
 use crate::profile::Profile;
 use crate::types::{FxHashMap, FxHashSet};
@@ -36,9 +36,9 @@ pub struct UseMasks {
 impl UseMasks {
     pub fn new(
         profile: &Profile,
-        package_use: PackageUseEntries,
+        package_use: PackageUsePolicy,
         use_mask: UseEntries,
-        package_use_mask: PackageUseEntries,
+        package_use_mask: PackageUsePolicy,
     ) -> anyhow::Result<Self> {
         let expand_conf = UseExpandConfig::from_make_env(&profile.make_defaults)
             .with_context(|| "failed to build the package USE expansion namespace")?;
@@ -112,8 +112,8 @@ impl UseMasks {
             return true;
         }
 
-        let mask = Self::find_pkguse_match(pkg, flag, &self.package_use_mask);
-        let stable_mask = Self::find_pkguse_match(pkg, flag, &self.package_use_stable_mask);
+        let mask = Self::find_package_use_match(pkg, flag, &self.package_use_mask);
+        let stable_mask = Self::find_package_use_match(pkg, flag, &self.package_use_stable_mask);
         match (mask, stable_mask) {
             (Some(mask), Some(stable_mask)) => mask.max(stable_mask).op.as_bool(),
             (Some(mask), None) => mask.op.as_bool(),
@@ -133,8 +133,8 @@ impl UseMasks {
             return true;
         }
 
-        let force = Self::find_pkguse_match(pkg, flag, &self.package_use_force);
-        let stable_force = Self::find_pkguse_match(pkg, flag, &self.package_use_stable_force);
+        let force = Self::find_package_use_match(pkg, flag, &self.package_use_force);
+        let stable_force = Self::find_package_use_match(pkg, flag, &self.package_use_stable_force);
         match (force, stable_force) {
             (Some(force), Some(stable_force)) => force.max(stable_force).op.as_bool(),
             (Some(force), None) => force.op.as_bool(),
@@ -144,7 +144,7 @@ impl UseMasks {
     }
 
     /// Returns the match with the highest precedence from the given `map`.
-    fn find_pkguse_match<'a, P: PackageView>(
+    fn find_package_use_match<'a, P: PackageView>(
         pkg: &P,
         flag: &UseFlag,
         map: &'a FxHashMap<Atom, UseFlags>,
@@ -175,13 +175,13 @@ mod tests {
     #[test]
     fn test_package_use_mask() -> anyhow::Result<()> {
         let profile = profile_with_expansions()?;
-        let package_use_mask = PackageUseEntries::from_string(
+        let package_use_mask = PackageUsePolicy::from_string(
             "dev-lang/rust wasm LLVM_TARGETS: AMDGPU ARCH: amd64".into(),
             Precedence::User,
         )?;
         let masks = UseMasks::new(
             &profile,
-            PackageUseEntries::default(),
+            PackageUsePolicy::default(),
             UseEntries::default(),
             package_use_mask,
         )?;
@@ -198,15 +198,15 @@ mod tests {
     #[test]
     fn test_package_use_force() -> anyhow::Result<()> {
         let mut profile = profile_with_expansions()?;
-        profile.package_use_force = PackageUseEntries::from_string(
+        profile.package_use_force = PackageUsePolicy::from_string(
             "dev-lang/rust wasm LLVM_TARGETS: AMDGPU ARCH: amd64".into(),
             Precedence::Profile(0),
         )?;
         let masks = UseMasks::new(
             &profile,
-            PackageUseEntries::default(),
+            PackageUsePolicy::default(),
             UseEntries::default(),
-            PackageUseEntries::default(),
+            PackageUsePolicy::default(),
         )?;
 
         let cpv = cpv("dev-lang", "rust", "1.97.1");
@@ -221,19 +221,19 @@ mod tests {
     #[test]
     fn test_stable_package_use_policy() -> anyhow::Result<()> {
         let mut profile = profile_with_expansions()?;
-        profile.package_use_stable_mask = PackageUseEntries::from_string(
+        profile.package_use_stable_mask = PackageUsePolicy::from_string(
             "dev-lang/rust LLVM_TARGETS: AMDGPU".into(),
             Precedence::Profile(0),
         )?;
-        profile.package_use_stable_force = PackageUseEntries::from_string(
+        profile.package_use_stable_force = PackageUsePolicy::from_string(
             "dev-lang/rust ARCH: amd64".into(),
             Precedence::Profile(0),
         )?;
         let masks = UseMasks::new(
             &profile,
-            PackageUseEntries::default(),
+            PackageUsePolicy::default(),
             UseEntries::default(),
-            PackageUseEntries::default(),
+            PackageUsePolicy::default(),
         )?;
 
         let cpv = cpv("dev-lang", "rust", "1.97.1");

@@ -1,25 +1,25 @@
 //! This module contains common logic to handle file types often used in [`Repository`],
 //! [`Profile`], etc.
 //!
-//! The most used one is [`LineBasedFile`], which is expressed as text file where each line holds
-//! a value. [`LineBasedFile`] can be inherited and any value prefixed with a hyphen negates
+//! The most used one is [`LineEntries`], which is expressed as text file where each line holds
+//! a value. [`LineEntries`] can be inherited and any value prefixed with a hyphen negates
 //! the same previous defined item, e.g.: `package.use`, `use.mask`, etc.
 pub mod entry;
 mod linefile;
-pub mod pkguse;
+pub mod pkgfile;
 
 use crate::deps::atom::Atom;
 use crate::files::entry::SysAtom;
 use crate::useflag::UseFlag;
 use crate::utils;
 use anyhow::{Context, anyhow, bail};
-use linefile::LineBasedFile;
+use linefile::LineEntries;
 use std::fs;
 use std::path::Path;
 
-pub type PackageEntries = LineBasedFile<Atom>;
-pub type SysPackageEntries = LineBasedFile<SysAtom>;
-pub type UseEntries = LineBasedFile<UseFlag>;
+pub type PackageEntries = LineEntries<Atom>;
+pub type SysPackageEntries = LineEntries<SysAtom>;
+pub type UseEntries = LineEntries<UseFlag>;
 
 /// Reads the content from the given file or folder `path`.
 ///

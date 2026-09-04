@@ -14,11 +14,10 @@ use std::path::Path;
 ///
 /// It can be only used as USE flags lookup after inheriting all files
 /// and calling `PackageUseEntries::expand` to expand the USE flags.
-#[derive(Clone, Default)]
-#[cfg_attr(test, derive(Debug))]
-pub struct PackageUseEntries(FxHashMap<Atom, UseSpec>);
+#[derive(Clone, Default, Debug)]
+pub struct PackageUsePolicy(FxHashMap<Atom, UseSpec>);
 
-impl PackageUseEntries {
+impl PackageUsePolicy {
     pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
         let content = content_from_path(path, recursive, true)?;
         Self::from_string(content, order)
@@ -62,7 +61,7 @@ impl PackageUseEntries {
     }
 }
 
-impl Inherit for PackageUseEntries {
+impl Inherit for PackageUsePolicy {
     fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
         for (atom, parent) in &parent.0 {
             if let Some(this) = self.0.get_mut(atom) {
@@ -264,7 +263,7 @@ mod tests {
             app-admin/sudo -foo
         ";
 
-        let file = PackageUseEntries::from_string(content.into(), Precedence::User)?;
+        let file = PackageUsePolicy::from_string(content.into(), Precedence::User)?;
         assert_eq!(file.0.len(), 3);
 
         let systemd = file.0.get(&Atom::new("sys-apps/systemd")?).unwrap();
@@ -321,7 +320,7 @@ mod tests {
 
     #[test]
     fn test_parse_group_context_is_line_local() -> anyhow::Result<()> {
-        let entries = PackageUseEntries::from_string(
+        let entries = PackageUsePolicy::from_string(
             "dev-lang/rust LLVM_TARGETS: AMDGPU\napp-arch/xz-utils direct_flag".into(),
             Precedence::User,
         )?;
@@ -362,7 +361,7 @@ mod tests {
 
     #[test]
     fn test_resolve_expansion_groups() -> anyhow::Result<()> {
-        let entries = PackageUseEntries::from_string(
+        let entries = PackageUsePolicy::from_string(
             "dev-lang/rust LLVM_TARGETS: WebAssembly -AMDGPU ARCH: amd64 -x86".into(),
             Precedence::User,
         )?;
@@ -393,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_resolve_preserves_operation_and_precedence() -> anyhow::Result<()> {
-        let entries = PackageUseEntries::from_string(
+        let entries = PackageUsePolicy::from_string(
             "dev-lang/rust LLVM_TARGETS: AMDGPU".into(),
             Precedence::Profile(2),
         )?;
@@ -417,12 +416,12 @@ mod tests {
             "dev-lang/rust foo ARCH: foo",
         ];
         for line in cases {
-            let entries = PackageUseEntries::from_string(line.into(), Precedence::User)?;
+            let entries = PackageUsePolicy::from_string(line.into(), Precedence::User)?;
             assert!(entries.expand(&config()?).is_err(), "{line}");
         }
 
         let trailing =
-            PackageUseEntries::from_string("dev-lang/rust UNKNOWN:".into(), Precedence::User)?;
+            PackageUsePolicy::from_string("dev-lang/rust UNKNOWN:".into(), Precedence::User)?;
         assert!(trailing.expand(&config()?).is_ok());
 
         Ok(())
@@ -431,7 +430,7 @@ mod tests {
     #[test]
     fn test_resolve_ignores_reset_only_group() -> anyhow::Result<()> {
         let entries =
-            PackageUseEntries::from_string("dev-lang/rust UNKNOWN: -*".into(), Precedence::User)?;
+            PackageUsePolicy::from_string("dev-lang/rust UNKNOWN: -*".into(), Precedence::User)?;
         let resolved = entries.expand(&config()?)?;
 
         let flags = resolved.get(&Atom::new("dev-lang/rust")?).unwrap();
@@ -441,12 +440,12 @@ mod tests {
 
     #[test]
     fn test_inherit_ignores_reset_only_group() -> anyhow::Result<()> {
-        let parent = PackageUseEntries::from_string(
+        let parent = PackageUsePolicy::from_string(
             "dev-lang/rust LLVM_TARGETS: X86".into(),
             Precedence::Profile(0),
         )?;
         let child =
-            PackageUseEntries::from_string("dev-lang/rust UNKNOWN: -*".into(), Precedence::User)?
+            PackageUsePolicy::from_string("dev-lang/rust UNKNOWN: -*".into(), Precedence::User)?
                 .inherit(&parent)?;
         let resolved = child.expand(&config()?)?;
         let flags = resolved.get(&Atom::new("dev-lang/rust")?).unwrap();
@@ -471,16 +470,16 @@ mod tests {
 
     #[test]
     fn test_inherit_from_resets_and_readds() -> anyhow::Result<()> {
-        let grand_parent = PackageUseEntries::from_string(
+        let grand_parent = PackageUsePolicy::from_string(
             "dev-lang/rust LLVM_TARGETS: X86".into(),
             Precedence::Profile(0),
         )?;
-        let parent = PackageUseEntries::from_string(
+        let parent = PackageUsePolicy::from_string(
             "dev-lang/rust LLVM_TARGETS: -* AMDGPU".into(),
             Precedence::Profile(1),
         )?;
         let parent = parent.inherit(&grand_parent)?;
-        let child = PackageUseEntries::default().inherit(&parent)?;
+        let child = PackageUsePolicy::default().inherit(&parent)?;
         let flags = child.expand(&config()?)?;
         let flags = flags.get(&Atom::new("dev-lang/rust")?).unwrap();
 
@@ -497,11 +496,11 @@ mod tests {
 
     #[test]
     fn test_inherit_from_keeps_group_reset_local() -> anyhow::Result<()> {
-        let parent = PackageUseEntries::from_string(
+        let parent = PackageUsePolicy::from_string(
             "dev-lang/rust foo LLVM_TARGETS: X86".into(),
             Precedence::Profile(0),
         )?;
-        let child = PackageUseEntries::from_string(
+        let child = PackageUsePolicy::from_string(
             "dev-lang/rust LLVM_TARGETS: -* AMDGPU".into(),
             Precedence::Profile(1),
         )?
@@ -526,7 +525,7 @@ mod tests {
 
     #[test]
     fn test_resets_are_local_to_atom() -> anyhow::Result<()> {
-        let entries = PackageUseEntries::from_string(
+        let entries = PackageUsePolicy::from_string(
             "
             dev-lang/rust LLVM_TARGETS: -* AMDGPU
             */* LLVM_TARGETS: X86
@@ -553,7 +552,7 @@ mod tests {
 
     #[test]
     fn test_inherit_from_merges_precedence() -> anyhow::Result<()> {
-        let grand_parent = PackageUseEntries::from_string(
+        let grand_parent = PackageUsePolicy::from_string(
             "
             dev-libs/libffi foo -bar baz foobar
             app-arch/xz-utils foo bar -test
@@ -565,7 +564,7 @@ mod tests {
             Precedence::Profile(0),
         )?;
 
-        let parent = PackageUseEntries::from_string(
+        let parent = PackageUsePolicy::from_string(
             "
             dev-libs/libffi foobar
             app-arch/xz-utils -foo bar baz test
@@ -575,7 +574,7 @@ mod tests {
             Precedence::Profile(1),
         )?;
 
-        let child = PackageUseEntries::from_string(
+        let child = PackageUsePolicy::from_string(
             "
             app-arch/xz-utils -foo -bar baz
             app-arch/zstd foo
