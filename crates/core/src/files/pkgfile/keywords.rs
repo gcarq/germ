@@ -1,27 +1,37 @@
-use std::{mem, path::Path, str::FromStr};
+use std::{mem, path::Path};
 
 use super::{AtomPolicies, AtomPolicy};
 use crate::deps::atom::Atom;
 use crate::files::entry::{Entry, EntryValue, Precedence};
-use crate::repository::Arch;
+use crate::keyword::KeywordSelector;
 use crate::utils::Inherit;
 use anyhow::Context;
 
-/// Holds all keyword selectors for packages.
+/// Represents the content of a package accept keywords file.
+///
+/// This should not be used as a source of truth for keyword acceptance,
+/// but rather as a representation of the package accept keywords file content.
+///
+/// It can only be used for keyword acceptance after inheriting all files
+/// and compiling a keyword policy.
 #[derive(Clone, Default, Debug)]
-pub struct PackageAcceptKeywords(AtomPolicies<KeywordSelectors>);
+pub struct PackageAcceptKeywords(AtomPolicies<KeywordSpec>);
 
 impl PackageAcceptKeywords {
     pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
         Ok(Self(AtomPolicies::from_path(path, order, recursive)?))
     }
 
+    #[cfg(test)]
     pub fn from_string(content: String, order: Precedence) -> anyhow::Result<Self> {
         Ok(Self(AtomPolicies::from_string(content, order)?))
     }
 
-    pub fn get(&self, atom: &Atom) -> Option<&KeywordSelectors> {
-        self.0.get(atom)
+    /// Consumes this configuration and returns [`Atom`] and [`KeywordRule`] pairs.
+    pub fn into_rules(self) -> impl Iterator<Item = (Atom, KeywordRule)> {
+        self.0
+            .into_iter()
+            .flat_map(|(atom, spec)| spec.0.into_iter().map(move |rule| (atom.clone(), rule)))
     }
 }
 
@@ -31,21 +41,18 @@ impl Inherit for PackageAcceptKeywords {
     }
 }
 
-/// This holds a collection of [`KeywordRule`].
+/// Helper struct to manage keyword rules for a single atom,
+/// while parsing `package.accept_keywords` files.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct KeywordSelectors(Vec<KeywordRule>);
+struct KeywordSpec(Vec<KeywordRule>);
 
-impl KeywordSelectors {
-    pub fn as_slice(&self) -> &[KeywordRule] {
-        &self.0
-    }
-
+impl KeywordSpec {
     fn contains_reset(&self) -> bool {
         self.0.iter().any(|r| matches!(r, KeywordRule::Reset(_)))
     }
 }
 
-impl AtomPolicy for KeywordSelectors {
+impl AtomPolicy for KeywordSpec {
     /// Parses a keyword policy for one package.
     fn parse(value: &str, precedence: Precedence) -> anyhow::Result<Self> {
         let mut rules = Vec::new();
@@ -70,7 +77,7 @@ impl AtomPolicy for KeywordSelectors {
         Ok(Self(rules))
     }
 
-    /// Updates `self` with the given [`KeywordSelectors`],
+    /// Updates `self` with the given [`KeywordSpec`],
     /// replacing existing keywords and handling resets.
     fn update_from(&mut self, other: Self) {
         if other.contains_reset() {
@@ -80,7 +87,7 @@ impl AtomPolicy for KeywordSelectors {
     }
 }
 
-impl Inherit for KeywordSelectors {
+impl Inherit for KeywordSpec {
     fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
         if self.contains_reset() {
             return Ok(());
@@ -98,7 +105,7 @@ impl Inherit for KeywordSelectors {
 
 impl EntryValue for KeywordSelector {}
 
-/// A rule that can either be a keyword selector or a reset command,
+/// Represents a keyword selector or reset command,
 /// e.g.: `amd64`, `~arm64`, `-*`, etc..
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KeywordRule {
@@ -106,29 +113,12 @@ pub enum KeywordRule {
     Reset(Precedence),
 }
 
-/// Represents a selector for keywords, which can be used to filter
-/// packages based on their keyword status.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum KeywordSelector {
-    Stable(Arch),  // arch
-    Testing(Arch), // ~arch
-    AnyStable,     // *
-    AnyTesting,    // ~*
-    Any,           // **
-}
-
-impl FromStr for KeywordSelector {
-    type Err = anyhow::Error;
-
-    fn from_str(selector: &str) -> Result<Self, Self::Err> {
-        match selector {
-            "*" => Ok(Self::AnyStable),
-            "~*" => Ok(Self::AnyTesting),
-            "**" => Ok(Self::Any),
-            _ => match selector.strip_prefix('~') {
-                Some(arch) => Ok(Self::Testing(arch.parse()?)),
-                None => Ok(Self::Stable(selector.parse()?)),
-            },
+impl KeywordRule {
+    /// Returns the source precedence.
+    pub const fn precedence(&self) -> Precedence {
+        match self {
+            Self::Selector(entry) => entry.prec,
+            Self::Reset(precedence) => *precedence,
         }
     }
 }
@@ -138,15 +128,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_selectors() -> anyhow::Result<()> {
-        let selectors = KeywordSelectors::parse(
+    fn test_keyword_spec_parse() -> anyhow::Result<()> {
+        let spec = KeywordSpec::parse(
             "amd64 ~arm64 * ~* ** -amd64 -~arm64 -~* -**",
             Precedence::User,
         )?;
 
         assert_eq!(
-            selectors.as_slice(),
-            &[
+            spec.0,
+            [
                 KeywordRule::Selector(Entry::from_str("amd64", Precedence::User)?),
                 KeywordRule::Selector(Entry::from_str("~arm64", Precedence::User)?),
                 KeywordRule::Selector(Entry::from_str("*", Precedence::User)?),
@@ -159,10 +149,10 @@ mod tests {
             ]
         );
 
-        let selectors = KeywordSelectors::parse("amd64 -* ~arm64", Precedence::User)?;
+        let spec = KeywordSpec::parse("amd64 -* ~arm64", Precedence::User)?;
         assert_eq!(
-            selectors.as_slice(),
-            &[
+            spec.0,
+            [
                 KeywordRule::Reset(Precedence::User),
                 KeywordRule::Selector(Entry::from_str("~arm64", Precedence::User)?),
             ]
@@ -171,23 +161,23 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_atom_only() -> anyhow::Result<()> {
+    fn test_atom_only_defaults_testing() -> anyhow::Result<()> {
         let entries =
             PackageAcceptKeywords::from_string("net-analyzer/netcat".into(), Precedence::User)?;
-        let selectors = entries.get(&Atom::new("net-analyzer/netcat")?).unwrap();
+        let rules = entries.into_rules().collect::<Vec<_>>();
 
         assert_eq!(
-            selectors.as_slice(),
-            vec![KeywordRule::Selector(Entry::from_str(
-                "~*",
-                Precedence::User
-            )?)]
+            rules,
+            [(
+                Atom::new("net-analyzer/netcat")?,
+                KeywordRule::Selector(Entry::from_str("~*", Precedence::User)?),
+            ),]
         );
         Ok(())
     }
 
     #[test]
-    fn test_update_applies_reset() -> anyhow::Result<()> {
+    fn test_duplicate_atom_reset() -> anyhow::Result<()> {
         let entries = PackageAcceptKeywords::from_string(
             r#"
                 dev-lang/rust amd64
@@ -197,11 +187,14 @@ mod tests {
             .into(),
             Precedence::User,
         )?;
-        let selectors = entries.get(&Atom::new("dev-lang/rust")?).unwrap();
+        let rules = entries
+            .into_rules()
+            .map(|(_, rule)| rule)
+            .collect::<Vec<_>>();
 
         assert_eq!(
-            selectors.as_slice(),
-            vec![
+            rules,
+            [
                 KeywordRule::Reset(Precedence::User),
                 KeywordRule::Selector(Entry::from_str("~amd64", Precedence::User)?),
             ]
@@ -210,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inherit_parent_before_child() -> anyhow::Result<()> {
+    fn test_keyword_spec_inherit_reset() -> anyhow::Result<()> {
         let parent = PackageAcceptKeywords::from_string(
             "dev-lang/rust amd64".into(),
             Precedence::Profile(0),
@@ -221,11 +214,11 @@ mod tests {
         )?;
 
         child.inherit_from(&parent)?;
-        let selectors = child.get(&Atom::new("dev-lang/rust")?).unwrap();
+        let rules = child.into_rules().map(|(_, rule)| rule).collect::<Vec<_>>();
 
         assert_eq!(
-            selectors.as_slice(),
-            &[
+            rules,
+            [
                 KeywordRule::Reset(Precedence::Profile(1)),
                 KeywordRule::Selector(Entry::from_str("~amd64", Precedence::Profile(1))?),
             ]

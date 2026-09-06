@@ -3,6 +3,7 @@ use crate::conf::masks::useflag::UseMasks;
 use crate::conf::masks::{PackageMasks, UserPackageMasks};
 use crate::files::pkgfile::{PackageAcceptKeywords, PackageUsePolicy};
 use crate::files::{UseEntries, entry::Precedence};
+use crate::keyword::KeywordPolicy;
 use crate::makenv::MakeEnv;
 use crate::profile::Profile;
 use crate::repository::RepoSet;
@@ -13,7 +14,7 @@ use log::debug;
 /// Holds the portage configuration that usually resides in `/etc/portage`.
 pub struct PortageConf {
     pub make_env: MakeEnv,
-    pub package_accept_keywords: PackageAcceptKeywords,
+    pub keyword_policy: KeywordPolicy,
     pub package_masks: PackageMasks,
     pub use_masks: UseMasks,
 }
@@ -48,6 +49,7 @@ impl PortageConf {
                 Precedence::User,
                 true,
             )?)?;
+        let keyword_policy = KeywordPolicy::new(&make_env, package_accept_keywords)?;
 
         let package_masks = PackageMasks::new(
             repo_set.package_masks()?,
@@ -72,7 +74,7 @@ impl PortageConf {
 
         Ok(PortageConf {
             make_env,
-            package_accept_keywords,
+            keyword_policy,
             package_masks,
             use_masks,
         })

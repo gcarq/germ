@@ -1,7 +1,6 @@
 mod keywords;
 mod useflags;
 
-#[allow(unused)]
 pub use keywords::{KeywordRule, PackageAcceptKeywords};
 pub use useflags::{PackageUsePolicy, UseFlags};
 
@@ -11,8 +10,8 @@ use std::path::Path;
 use crate::deps::atom::Atom;
 use crate::files::content_from_path;
 use crate::files::entry::Precedence;
-use crate::types::FxHashMap;
 use crate::utils::{Inherit, strip_line_comment};
+use indexmap::IndexMap;
 
 /// This trait abstracts multiple values in a line-based file, such as `package.use`.
 pub trait AtomPolicy: Default + Inherit {
@@ -20,9 +19,9 @@ pub trait AtomPolicy: Default + Inherit {
     fn update_from(&mut self, other: Self);
 }
 
-/// Maps an [`Atom`] to corresponding [`AtomPolicies`].
+/// Maps atoms to their policies while preserving insertion order.
 #[derive(Clone, Debug, Default)]
-pub struct AtomPolicies<T: AtomPolicy>(FxHashMap<Atom, T>);
+pub struct AtomPolicies<T: AtomPolicy>(IndexMap<Atom, T>);
 
 impl<T: AtomPolicy> AtomPolicies<T> {
     pub fn from_path(path: &Path, precedence: Precedence, recursive: bool) -> anyhow::Result<Self> {
@@ -32,7 +31,7 @@ impl<T: AtomPolicy> AtomPolicies<T> {
     }
 
     pub fn from_string(content: String, precedence: Precedence) -> anyhow::Result<Self> {
-        let mut policies = FxHashMap::<Atom, T>::default();
+        let mut policies = IndexMap::<Atom, T>::default();
 
         for (lineno, line) in content.lines().enumerate() {
             let line = strip_line_comment(line);
@@ -46,10 +45,6 @@ impl<T: AtomPolicy> AtomPolicies<T> {
         }
 
         Ok(Self(policies))
-    }
-
-    pub fn get(&self, atom: &Atom) -> Option<&T> {
-        self.0.get(atom)
     }
 
     pub fn into_iter(self) -> impl Iterator<Item = (Atom, T)> {
@@ -111,7 +106,7 @@ mod tests {
     }
 
     #[test]
-    fn test_from_string() -> anyhow::Result<()> {
+    fn test_parse_atom_order() -> anyhow::Result<()> {
         let policies = AtomPolicies::<TestPolicy>::from_string(
             "
                 # ignored
@@ -124,18 +119,25 @@ mod tests {
         )?;
 
         assert_eq!(
-            policies.get(&Atom::new("dev-lang/rust")?),
+            policies.0.get(&Atom::new("dev-lang/rust")?),
             Some(&policy(&["first", "second"]))
         );
         assert_eq!(
-            policies.get(&Atom::new("app-editors/vim")?),
+            policies.0.get(&Atom::new("app-editors/vim")?),
             Some(&policy(&["third"]))
+        );
+        assert_eq!(
+            policies
+                .into_iter()
+                .map(|(atom, _)| atom)
+                .collect::<Vec<_>>(),
+            [Atom::new("dev-lang/rust")?, Atom::new("app-editors/vim")?,]
         );
         Ok(())
     }
 
     #[test]
-    fn test_inherit_from() -> anyhow::Result<()> {
+    fn test_inherit_atom_order() -> anyhow::Result<()> {
         let parent = AtomPolicies::<TestPolicy>::from_string(
             "dev-lang/rust parent\napp-editors/vim inherited".into(),
             Precedence::Profile(0),
@@ -148,22 +150,30 @@ mod tests {
         child.inherit_from(&parent)?;
 
         assert_eq!(
-            child.get(&Atom::new("dev-lang/rust")?),
+            child.0.get(&Atom::new("dev-lang/rust")?),
             Some(&policy(&["parent", "child"]))
         );
         assert_eq!(
-            child.get(&Atom::new("app-editors/vim")?),
+            child.0.get(&Atom::new("app-editors/vim")?),
             Some(&policy(&["inherited"]))
+        );
+        assert_eq!(
+            child.into_iter().map(|(atom, _)| atom).collect::<Vec<_>>(),
+            [
+                Atom::new("dev-lang/rust")?,
+                Atom::new("app-editors/nano")?,
+                Atom::new("app-editors/vim")?,
+            ]
         );
         Ok(())
     }
 
     #[test]
-    fn test_from_path() -> anyhow::Result<()> {
+    fn test_path_file_order() -> anyhow::Result<()> {
         let temp = tempfile::tempdir()?;
         let missing = temp.path().join("missing");
         let policies = AtomPolicies::<TestPolicy>::from_path(&missing, Precedence::User, true)?;
-        assert!(policies.get(&Atom::new("dev-lang/rust")?).is_none());
+        assert!(policies.0.get(&Atom::new("dev-lang/rust")?).is_none());
 
         let directory = temp.path().join("package.use");
         fs::create_dir(&directory)?;
@@ -172,7 +182,7 @@ mod tests {
 
         let policies = AtomPolicies::<TestPolicy>::from_path(&directory, Precedence::User, true)?;
         assert_eq!(
-            policies.get(&Atom::new("dev-lang/rust")?),
+            policies.0.get(&Atom::new("dev-lang/rust")?),
             Some(&policy(&["first", "second"]))
         );
         Ok(())

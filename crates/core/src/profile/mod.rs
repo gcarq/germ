@@ -285,26 +285,32 @@ mod tests {
     }
 
     fn assert_package_accept_keywords(profile: &Profile) -> anyhow::Result<()> {
+        let rust_atom = "dev-lang/rust".parse()?;
         let rust_keywords = profile
             .package_accept_keywords
-            .get(&"dev-lang/rust".parse()?)
-            .unwrap();
+            .clone()
+            .into_rules()
+            .filter_map(|(atom, rule)| (atom == rust_atom).then_some(rule))
+            .collect::<Vec<_>>();
         assert_eq!(
-            rust_keywords.as_slice(),
-            &[
+            rust_keywords,
+            [
                 KeywordRule::Selector(Entry::from_str("amd64", Precedence::Profile(0))?),
                 KeywordRule::Selector(Entry::from_str("~amd64", Precedence::Profile(1))?),
                 KeywordRule::Selector(Entry::from_str("**", Precedence::Profile(2))?),
             ]
         );
 
+        let vim_atom = "app-editors/vim".parse()?;
         let vim_keywords = profile
             .package_accept_keywords
-            .get(&"app-editors/vim".parse()?)
-            .unwrap();
+            .clone()
+            .into_rules()
+            .filter_map(|(atom, rule)| (atom == vim_atom).then_some(rule))
+            .collect::<Vec<_>>();
         assert_eq!(
-            vim_keywords.as_slice(),
-            &[
+            vim_keywords,
+            [
                 KeywordRule::Reset(Precedence::Profile(1)),
                 KeywordRule::Selector(Entry::from_str("~amd64", Precedence::Profile(1))?),
             ]

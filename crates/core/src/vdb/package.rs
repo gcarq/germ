@@ -1,7 +1,6 @@
 use crate::package::PackageView;
 use crate::package::cpv::CPV;
 use crate::package::metadata::PackageMetadata;
-use crate::package::slot::PackageSlot;
 use crate::repository::RepoName;
 use crate::useflag::UseFlag;
 use anyhow::Context;
@@ -51,8 +50,8 @@ impl PackageView for InstalledPackage {
         &self.repo
     }
 
-    fn slot(&self) -> &PackageSlot {
-        &self.metadata.slot
+    fn metadata(&self) -> &PackageMetadata {
+        &self.metadata
     }
 }
 

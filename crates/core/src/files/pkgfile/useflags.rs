@@ -236,7 +236,7 @@ mod tests {
                 .into(),
             Precedence::User,
         )?;
-        let sudo = policy.0.get(&Atom::new("app-admin/sudo")?).unwrap();
+        let sudo = policy.0.0.get(&Atom::new("app-admin/sudo")?).unwrap();
 
         assert_eq!(
             sudo.targets.get(&PackageUseTarget::flag("foo")?),
@@ -284,7 +284,7 @@ mod tests {
             Precedence::User,
         )?;
 
-        let xz = entries.0.get(&Atom::new("app-arch/xz-utils")?).unwrap();
+        let xz = entries.0.0.get(&Atom::new("app-arch/xz-utils")?).unwrap();
         assert!(
             xz.targets
                 .contains_key(&PackageUseTarget::flag("direct_flag")?)

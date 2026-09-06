@@ -6,7 +6,6 @@ pub mod version;
 
 use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
-use crate::package::slot::PackageSlot;
 use crate::repository::RepoName;
 use metadata::PackageMetadata;
 use std::fmt;
@@ -16,7 +15,7 @@ use std::fmt;
 pub trait PackageView {
     fn cpv(&self) -> &CPV;
     fn repo(&self) -> &RepoName;
-    fn slot(&self) -> &PackageSlot;
+    fn metadata(&self) -> &PackageMetadata;
 
     /// Returns the qualified name of the package in the format `category/name`.
     fn qualified_name(&self) -> String {
@@ -31,7 +30,7 @@ pub trait PackageView {
             return false;
         }
         if let Some(slot) = &atom.slot
-            && slot != self.slot()
+            && slot != &self.metadata().slot
         {
             return false;
         }
@@ -68,8 +67,8 @@ impl PackageView for Package {
         &self.repo
     }
 
-    fn slot(&self) -> &PackageSlot {
-        &self.metadata.slot
+    fn metadata(&self) -> &PackageMetadata {
+        &self.metadata
     }
 }
 
@@ -82,6 +81,7 @@ impl fmt::Display for Package {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::package::slot::PackageSlot;
     use crate::test_support::cpv;
     use crate::useflag::UseFlag;
     use crate::vdb::package::InstalledPackage;

@@ -87,6 +87,11 @@ impl MakeEnv {
         Ok(Self(vars.into_iter().collect()))
     }
 
+    /// Consumes self and returns the inner map.
+    pub fn into_inner(self) -> FxHashMap<Box<str>, EnvValue> {
+        self.0
+    }
+
     /// Inherits a parent environment using supplied incremental variables.
     pub(super) fn inherit_vars(
         &mut self,
@@ -119,11 +124,6 @@ impl MakeEnv {
             }
         }
         Ok(())
-    }
-
-    /// Consumes self and returns the inner map.
-    pub fn into_inner(self) -> FxHashMap<Box<str>, EnvValue> {
-        self.0
     }
 }
 

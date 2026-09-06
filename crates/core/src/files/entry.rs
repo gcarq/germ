@@ -31,7 +31,8 @@ impl Operation {
     }
 }
 
-/// Defines the precedence in inheritance chains for resolving package masks.
+/// Defines the precedence in inheritance chains for resolving
+/// keywords and masks in the correct order.
 #[derive(Eq, Copy, Clone, Debug)]
 pub enum Precedence {
     Profile(usize),
