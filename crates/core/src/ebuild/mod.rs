@@ -162,7 +162,6 @@ mod tests {
     use crate::test_support::cpv;
 
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_eapi_declarations() {

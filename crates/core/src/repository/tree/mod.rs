@@ -462,47 +462,20 @@ mod tests {
     }
 
     #[test]
-    fn test_optional_data_validation() {
-        let temp = tempfile::tempdir().unwrap();
-        let valid_location = temp.path().join("valid");
-        RepoBuilder::new("valid").write_to(&valid_location).unwrap();
-        let invalid_location = temp.path().join("invalid");
-        RepoBuilder::new("invalid")
-            .formats(["pms"])
-            .eapi("0")
-            .profile_entries_dir("package.mask", "app-misc/foo\n")
-            .write_to(&invalid_location)
-            .unwrap();
-
-        let sysconf = Arc::new(SysConf::default());
-        let valid = Repository::load(&RepoName::default(), &valid_location, 0, sysconf.clone());
-        let invalid = Repository::load(&RepoName::default(), &invalid_location, 0, sysconf.clone());
-
-        assert!(valid.is_ok());
-        assert!(matches!(invalid, Err(RepositoryError::Profile(_))));
-    }
-
-    #[test]
-    fn test_portage_mask_directories() {
-        for format in ["portage-1", "portage-2"] {
-            RepoBuilder::new("repo")
+    fn test_profile_directory_support() {
+        for (format, eapi, supported) in [
+            ("pms", "0", false),
+            ("portage-1", "0", true),
+            ("portage-2", "0", true),
+            ("pms", "7", true),
+        ] {
+            let result = RepoBuilder::new("repo")
                 .formats([format])
-                .eapi("0")
-                .profile_entries_dir("package.mask", "app-misc/foo\n")
-                .finalize()
-                .unwrap();
-        }
-    }
-
-    #[test]
-    fn test_eapi_mask_directories() {
-        for eapi in ["7", "8"] {
-            RepoBuilder::new("repo")
-                .formats(["pms"])
                 .eapi(eapi)
                 .profile_entries_dir("package.mask", "app-misc/foo\n")
-                .finalize()
-                .unwrap();
+                .finalize();
+
+            assert_eq!(result.is_ok(), supported);
         }
     }
 }

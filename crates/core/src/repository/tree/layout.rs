@@ -121,7 +121,6 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::RepoName;
 
     fn parse_layout(profile_formats: Option<&str>) -> Layout {
         let profile_formats = profile_formats
@@ -157,27 +156,17 @@ mod tests {
     }
 
     #[test]
-    fn test_pms_capabilities() {
-        let layout = parse_layout(Some("pms"));
-        assert!(!layout.supports_profile_file_dirs());
-        assert!(!layout.supports_cross_repo_parents());
-        assert!(!layout.supports_root_relative_parents());
-    }
-
-    #[test]
-    fn test_portage1_capabilities() {
-        let layout = parse_layout(Some("portage-1"));
-        assert!(layout.supports_profile_file_dirs());
-        assert!(!layout.supports_cross_repo_parents());
-        assert!(!layout.supports_root_relative_parents());
-    }
-
-    #[test]
-    fn test_portage2_capabilities() {
-        let layout = parse_layout(Some("portage-2"));
-        assert!(layout.supports_profile_file_dirs());
-        assert!(layout.supports_cross_repo_parents());
-        assert!(layout.supports_root_relative_parents());
+    fn test_profile_format_capabilities() {
+        for (format, dirs, cross_repo, root_relative) in [
+            ("pms", false, false, false),
+            ("portage-1", true, false, false),
+            ("portage-2", true, true, true),
+        ] {
+            let layout = parse_layout(Some(format));
+            assert_eq!(layout.supports_profile_file_dirs(), dirs);
+            assert_eq!(layout.supports_cross_repo_parents(), cross_repo);
+            assert_eq!(layout.supports_root_relative_parents(), root_relative);
+        }
     }
 
     #[test]

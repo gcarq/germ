@@ -2,10 +2,8 @@ use super::ProfileSource;
 use crate::repository::{RepoName, RepoSet};
 use crate::utils::is_blank_or_comment;
 use anyhow::{Context, anyhow, bail};
-use std::{
-    fmt, fs,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
+use std::{fmt, fs};
 
 /// Represents a parsed entry from a profile's `parent` file.
 /// This can be in multiple formats, depending on the profile format.

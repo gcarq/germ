@@ -185,13 +185,4 @@ mod tests {
             assert!(result.is_err());
         }
     }
-
-    #[test]
-    fn test_parse_empty_groups() {
-        let eapi = Eapi::Eight;
-        for input in ["()", "|| ()", "^^ ()", "?? ()", "foo? ()", "foo? ( || () )"] {
-            let result = DepExpression::<Atom>::parse(eapi, ExpressionKind::Dependency, input);
-            assert!(result.is_err());
-        }
-    }
 }

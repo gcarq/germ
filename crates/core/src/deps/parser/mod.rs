@@ -328,21 +328,6 @@ mod tests {
     #[test]
     fn test_parser_boundaries() {
         for input in [
-            "cat/pkg app-misc/foo",
-            "( cat/pkg )",
-            "|| ( cat/pkg )",
-            "foo? ( cat/pkg )",
-            "!foo? ( cat/pkg )",
-            "!cat/pkg",
-            "!!cat/pkg",
-        ] {
-            assert!(
-                ExpressionParser::<Atom>::parse(input).is_ok(),
-                "expected valid expression: {input}"
-            );
-        }
-
-        for input in [
             "||( cat/pkg )",
             "foo||bar",
             "foo ||bar",

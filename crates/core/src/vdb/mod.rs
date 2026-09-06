@@ -154,7 +154,6 @@ impl Vdb {
 mod tests {
     use super::*;
     use crate::test_support::cpv;
-    use std::fs;
 
     fn write_vdb_package(path: &Path, repository: &str) {
         fs::create_dir_all(path).unwrap();

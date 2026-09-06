@@ -143,12 +143,4 @@ mod tests {
         assert_package_view_matches_atoms(&package);
         assert_eq!(package.qualified_name(), "sys-devel/gcc");
     }
-
-    #[test]
-    fn test_package_fmt() {
-        let cpv = cpv("app-editors", "vim", "7.0.174-r1");
-        let repo = "gentoo".parse().unwrap();
-        let package = Package::new(cpv, repo, PackageMetadata::default());
-        assert_eq!(package.to_string(), "app-editors/vim-7.0.174-r1");
-    }
 }

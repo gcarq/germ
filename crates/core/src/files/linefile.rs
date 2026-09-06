@@ -67,8 +67,9 @@ impl<T: EntryValue> Inherit for LineEntries<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::files::PackageEntries;
+
+    use super::*;
 
     #[test]
     fn test_from_string() -> anyhow::Result<()> {

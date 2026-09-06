@@ -251,23 +251,6 @@ mod tests {
     }
 
     #[test]
-    fn test_package_version_wildcard_atom() {
-        let version = PackageVersion::new("15.2.1a", None, None).unwrap();
-        let cases = [
-            ("=dev-libs/pkg-15*", true),
-            ("=dev-libs/pkg-15.2*", true),
-            ("=dev-libs/pkg-15.2.1*", true),
-            ("=dev-libs/pkg-15.2.1a*", true),
-            ("=dev-libs/pkg-15.2.1b*", false),
-            ("=dev-libs/pkg-15.2.2*", false),
-        ];
-
-        for (atom, expected) in cases {
-            assert_eq!(version.matches_atom(&Atom::new(atom).unwrap()), expected);
-        }
-    }
-
-    #[test]
     fn test_package_version_zero_revision_atom() {
         let version = PackageVersion::new("1.0.0", None, Some("0")).unwrap();
         for atom in ["=dev-libs/pkg-1.0.0", "=dev-libs/pkg-1.0.0-r0"] {

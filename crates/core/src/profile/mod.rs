@@ -262,7 +262,6 @@ mod tests {
 
     use crate::repository::test_support::{RepoBuilder, repo_set};
     use std::fs;
-    use std::path::{Path, PathBuf};
 
     fn profile_path(repository: &Path, profile: &str) -> PathBuf {
         repository.join("profiles").join(profile)

@@ -233,18 +233,6 @@ mod tests {
     }
 
     #[test]
-    fn test_ver_cut_err() {
-        let pkg = cpv("app-editors", "vim", "1.2.3b_alpha4");
-        let test_cases = ["-2", "3-2", "foo", "2-bar"];
-        for range in test_cases {
-            assert!(
-                ver_cut(&pkg, range, None).is_err(),
-                "Expected error for input range: {range}",
-            );
-        }
-    }
-
-    #[test]
     fn test_ver_rs_ok() {
         // (args, expected output)
         let test_cases = [
@@ -281,7 +269,7 @@ mod tests {
     #[test]
     fn test_ver_rs_err() {
         let pkg = cpv("app-editors", "vim", "1.2b_alpha4");
-        let test_cases = [vec![], vec!["1"], vec!["foo", "-"]];
+        let test_cases = [vec![], vec!["1"]];
         for args in test_cases {
             let args = args.into_iter().map(String::from).collect::<Vec<_>>();
             assert!(

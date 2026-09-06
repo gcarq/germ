@@ -115,6 +115,12 @@ mod tests {
             ("=cat/pkg-1.1*", "1.10-r1", false),
             // ordinary prefix
             ("=cat/pkg-1*", "1.1", true),
+            ("=cat/pkg-15*", "15.2.1a", true),
+            ("=cat/pkg-15.2*", "15.2.1a", true),
+            ("=cat/pkg-15.2.1*", "15.2.1a", true),
+            ("=cat/pkg-15.2.1a*", "15.2.1a", true),
+            ("=cat/pkg-15.2.1b*", "15.2.1a", false),
+            ("=cat/pkg-15.2.2*", "15.2.1a", false),
         ];
 
         for (atom, version, expected) in tests {

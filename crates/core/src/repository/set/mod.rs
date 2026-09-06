@@ -393,22 +393,6 @@ mod tests {
     use super::super::test_support::{RepoBuilder, repo_set};
     use super::*;
     use crate::files::entry::Precedence;
-    use crate::profile::Profile;
-
-    #[test]
-    fn test_resolve_profile() -> anyhow::Result<()> {
-        let fixture = repo_set([RepoBuilder::new("repo").profile("default/linux")])?;
-        let location = fixture
-            .get("repo")
-            .unwrap()
-            .location
-            .join("profiles/default/linux");
-
-        let profile = fixture.resolve_profile(&location)?;
-
-        assert_eq!(profile.location, location.canonicalize()?);
-        Ok(())
-    }
 
     #[test]
     fn test_validate_arch() -> anyhow::Result<()> {

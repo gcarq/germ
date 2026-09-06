@@ -324,11 +324,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_background_process() {
+    async fn test_run_background_process_cleanup() {
         let mut execution = spawn_execution("sleep 30 & exit 0");
+        execution.timeouts.sigterm_grace = Duration::from_secs(2);
+        let started_at = Instant::now();
 
         let result = execution.run(async |_| Ok(42)).await;
+
         assert_eq!(result.unwrap(), 42);
+        assert!(started_at.elapsed() < Duration::from_secs(1));
     }
 
     #[tokio::test]
@@ -352,19 +356,6 @@ mod tests {
         execution.natural_exit_or_escalate().await.unwrap();
 
         assert!(started_at.elapsed() >= TEST_TIMEOUTS.sigterm_grace);
-    }
-
-    #[tokio::test]
-    async fn test_orphaned_process_cleanup() {
-        let mut execution = spawn_execution("sleep 30 & exit 0");
-        execution.timeouts.sigterm_grace = Duration::from_secs(2);
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        let started_at = Instant::now();
-
-        execution.close_ipc();
-        execution.natural_exit_or_escalate().await.unwrap();
-
-        assert!(started_at.elapsed() < Duration::from_secs(1));
     }
 
     #[tokio::test]

@@ -202,24 +202,6 @@ mod tests {
     }
 
     #[test]
-    fn test_metadata_cache_retain_removes_unknown_entries() {
-        let temp = tempfile::tempdir().unwrap();
-        let known = cpv("app-misc", "foo", "1");
-        let unknown = cpv("app-misc", "bar", "1");
-
-        let cache = MetadataCache::new(temp.path());
-        cache
-            .insert_batch([
-                (&known, &PackageMetadata::default()),
-                (&unknown, &PackageMetadata::default()),
-            ])
-            .unwrap();
-        cache.retain([&known]).unwrap();
-        assert!(cache.get(&known).unwrap().is_some());
-        assert_eq!(cache.get(&unknown).unwrap(), None);
-    }
-
-    #[test]
     fn test_metadata_cache_retain_compact() {
         let temp = tempfile::tempdir().unwrap();
         let known = cpv("app-misc", "foo", "1");
@@ -233,6 +215,9 @@ mod tests {
             ])
             .unwrap();
         cache.retain([&known]).unwrap();
+        assert!(cache.get(&known).unwrap().is_some());
+        assert_eq!(cache.get(&unknown).unwrap(), None);
+
         cache.compact().unwrap();
         drop(cache);
 

@@ -1,13 +1,9 @@
 use anyhow::anyhow;
 use thiserror::Error;
 
-use crate::{
-    ebuild::{
-        EbuildError,
-        handler::error::{MetadataGenerationError, PhaseExecutionError},
-    },
-    repository::RepositoryError,
-};
+use crate::ebuild::EbuildError;
+use crate::ebuild::handler::error::{MetadataGenerationError, PhaseExecutionError};
+use crate::repository::RepositoryError;
 
 /// Defines failures while resolving packages from repositories.
 #[derive(Debug, Error)]
