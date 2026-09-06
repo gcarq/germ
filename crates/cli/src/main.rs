@@ -1,13 +1,15 @@
 mod commands;
+mod utils;
 
 use crate::commands::Command;
+use crate::utils::format_error;
 use clap::Parser;
 use colored::{Color, Colorize};
 use germ_core::SysConf;
 use log::error;
-use std::io;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::{io, process};
 
 /// Package management tool for Gentoo-like systems.
 #[derive(Parser)]
@@ -40,9 +42,9 @@ async fn main() {
     setup_logger(log_level).expect("unable to setup logger");
 
     let sysconf = build_sysconf(&args).into();
-    match commands::execute(&args, sysconf).await {
-        Ok(()) => {}
-        Err(err) => handle_error(err),
+    if let Err(err) = commands::execute(&args, sysconf).await {
+        error!("{}", format_error(&err));
+        process::exit(1);
     }
 }
 
@@ -53,23 +55,6 @@ fn build_sysconf(args: &Args) -> SysConf {
         sysconf = sysconf.with_ebuild_jobs(jobs);
     }
     sysconf
-}
-
-/// Logs the error cause and stops the process with a non-zero exit code.
-fn handle_error(err: anyhow::Error) -> ! {
-    let error_cause = err
-        .chain()
-        .skip(1)
-        .enumerate()
-        .map(|(i, cause)| format!("   {i}: {cause}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    if error_cause.is_empty() {
-        error!("{err}");
-    } else {
-        error!("{err}\nCaused by\n{error_cause}");
-    }
-    std::process::exit(1);
 }
 
 /// Sets up application logger with the given `log_level`.
