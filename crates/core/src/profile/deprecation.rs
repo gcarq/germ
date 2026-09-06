@@ -41,7 +41,9 @@ mod tests {
 
     #[test]
     fn test_deprecation_info_from_string() {
-        let content = "default/linux/amd64/23.0\n\nThis profile is deprecated. Please upgrade.";
+        let content = "default/linux/amd64/23.0
+
+            This profile is deprecated. Please upgrade.";
         let deprecation_info = DeprecationInfo::from_string(content.to_owned()).unwrap();
         assert_eq!(
             deprecation_info.recommended_profile,

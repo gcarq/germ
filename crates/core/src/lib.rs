@@ -10,6 +10,7 @@ mod grammar;
 mod keyword;
 pub mod makenv;
 pub mod package;
+pub mod policy;
 mod profile;
 pub mod repository;
 pub mod useflag;

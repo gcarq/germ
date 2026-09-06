@@ -139,11 +139,15 @@ mod tests {
     #[test]
     fn test_inherit_atom_order() -> anyhow::Result<()> {
         let parent = AtomPolicies::<TestPolicy>::from_string(
-            "dev-lang/rust parent\napp-editors/vim inherited".into(),
+            "dev-lang/rust parent
+                app-editors/vim inherited"
+                .into(),
             Precedence::Profile(0),
         )?;
         let mut child = AtomPolicies::<TestPolicy>::from_string(
-            "dev-lang/rust child\napp-editors/nano own".into(),
+            "dev-lang/rust child
+                app-editors/nano own"
+                .into(),
             Precedence::Profile(1),
         )?;
 

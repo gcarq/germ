@@ -55,7 +55,8 @@ mod tests {
     #[test]
     fn test_fold_profile_incremental_reset() {
         let env = fold_profile_contents(&[
-            "USE_EXPAND=\"CAMERAS ROOT\"\nROOT=\"-* root\"",
+            "USE_EXPAND=\"CAMERAS ROOT\"
+            ROOT=\"-* root\"",
             "CAMERAS=\"-* ptp2\"",
         ])
         .unwrap();
@@ -66,7 +67,8 @@ mod tests {
     #[test]
     fn test_fold_profile_unprefixed() {
         let env = fold_profile_contents(&[
-            "USE_EXPAND_UNPREFIXED=\"ARCH\"\nARCH=\"amd64 x86\"",
+            "USE_EXPAND_UNPREFIXED=\"ARCH\"
+            ARCH=\"amd64 x86\"",
             "ARCH=\"-x86 arm64\"",
         ])
         .unwrap();
@@ -76,8 +78,11 @@ mod tests {
     #[test]
     fn test_fold_profile_multiple_members() {
         let env = fold_profile_contents(&[
-            "USE_EXPAND=\"CAMERAS VIDEO_CARDS\"\nCAMERAS=\"canon\"\nVIDEO_CARDS=\"amdgpu\"",
-            "CAMERAS=\"ptp2\"\nVIDEO_CARDS=\"-amdgpu radeonsi\"",
+            "USE_EXPAND=\"CAMERAS VIDEO_CARDS\"
+            CAMERAS=\"canon\"
+            VIDEO_CARDS=\"amdgpu\"",
+            "CAMERAS=\"ptp2\"
+            VIDEO_CARDS=\"-amdgpu radeonsi\"",
         ])
         .unwrap();
         assert_eq!(env.get("CAMERAS").unwrap().to_string(), "canon ptp2");
@@ -87,8 +92,12 @@ mod tests {
     #[test]
     fn test_fold_profile_name_removal() {
         let env = fold_profile_contents(&[
-            "USE_EXPAND=\"CAMERAS VIDEO_CARDS\"\nCAMERAS=\"canon\"\nVIDEO_CARDS=\"amdgpu\"",
-            "USE_EXPAND=\"-CAMERAS PYTHON_TARGETS\"\nCAMERAS=\"-canon nikon\"\nPYTHON_TARGETS=\"python3_12\"",
+            "USE_EXPAND=\"CAMERAS VIDEO_CARDS\"
+            CAMERAS=\"canon\"
+            VIDEO_CARDS=\"amdgpu\"",
+            "USE_EXPAND=\"-CAMERAS PYTHON_TARGETS\"
+            CAMERAS=\"-canon nikon\"
+            PYTHON_TARGETS=\"python3_12\"",
         ])
         .unwrap();
         assert_eq!(env.get("CAMERAS").unwrap().to_string(), "-canon nikon");
@@ -99,8 +108,11 @@ mod tests {
     #[test]
     fn test_fold_profile_control_reset() {
         let env = fold_profile_contents(&[
-            "USE_EXPAND=\"CAMERAS -* VIDEO_CARDS\"\nCAMERAS=\"canon\"\nVIDEO_CARDS=\"amdgpu\"",
-            "CAMERAS=\"-canon nikon\"\nVIDEO_CARDS=\"-amdgpu radeonsi\"",
+            "USE_EXPAND=\"CAMERAS -* VIDEO_CARDS\"
+            CAMERAS=\"canon\"
+            VIDEO_CARDS=\"amdgpu\"",
+            "CAMERAS=\"-canon nikon\"
+            VIDEO_CARDS=\"-amdgpu radeonsi\"",
         ])
         .unwrap();
         assert_eq!(env.get("CAMERAS").unwrap().to_string(), "-canon nikon");
@@ -110,9 +122,12 @@ mod tests {
     #[test]
     fn test_fold_profile_name_readdition() {
         let env = fold_profile_contents(&[
-            "USE_EXPAND=\"CAMERAS\"\nCAMERAS=\"canon\"",
-            "USE_EXPAND=\"-CAMERAS\"\nCAMERAS=\"-canon nikon\"",
-            "USE_EXPAND=\"CAMERAS\"\nCAMERAS=\"ptp2\"",
+            "USE_EXPAND=\"CAMERAS\"
+            CAMERAS=\"canon\"",
+            "USE_EXPAND=\"-CAMERAS\"
+            CAMERAS=\"-canon nikon\"",
+            "USE_EXPAND=\"CAMERAS\"
+            CAMERAS=\"ptp2\"",
         ])
         .unwrap();
         assert_eq!(env.get("CAMERAS").unwrap().to_string(), "nikon ptp2");
@@ -121,8 +136,10 @@ mod tests {
     #[test]
     fn test_fold_profile_context_expansion() {
         let env = fold_profile_contents(&[
-            "MEMBER_NAMES=\"CAMERAS\"\nCAMERAS=\"canon\"",
-            "USE_EXPAND=\"${MEMBER_NAMES}\"\nCAMERAS=\"-canon nikon\"",
+            "MEMBER_NAMES=\"CAMERAS\"
+            CAMERAS=\"canon\"",
+            "USE_EXPAND=\"${MEMBER_NAMES}\"
+            CAMERAS=\"-canon nikon\"",
         ])
         .unwrap();
         assert_eq!(env.get("CAMERAS").unwrap().to_string(), "nikon");

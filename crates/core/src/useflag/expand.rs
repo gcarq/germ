@@ -78,7 +78,9 @@ mod tests {
     #[test]
     fn test_from_make_env() -> anyhow::Result<()> {
         let make_env = MakeEnv::from_string(
-            "USE_EXPAND=\"LLVM_TARGETS\"\nUSE_EXPAND_UNPREFIXED=\"ARCH\"".into(),
+            "USE_EXPAND=\"LLVM_TARGETS\"
+                USE_EXPAND_UNPREFIXED=\"ARCH\""
+                .into(),
         )?;
         let config = UseExpandConfig::from_make_env(&make_env)?;
 
@@ -93,7 +95,9 @@ mod tests {
     #[test]
     fn test_expand_entry() -> anyhow::Result<()> {
         let make_env = MakeEnv::from_string(
-            "USE_EXPAND=\"LLVM_TARGETS\"\nUSE_EXPAND_UNPREFIXED=\"ARCH\"".into(),
+            "USE_EXPAND=\"LLVM_TARGETS\"
+                USE_EXPAND_UNPREFIXED=\"ARCH\""
+                .into(),
         )?;
         let config = UseExpandConfig::from_make_env(&make_env)?;
 
@@ -111,7 +115,9 @@ mod tests {
     #[test]
     fn test_rejects_overlapping_groups() -> anyhow::Result<()> {
         let make_env = MakeEnv::from_string(
-            "USE_EXPAND=\"LLVM_TARGETS\"\nUSE_EXPAND_UNPREFIXED=\"LLVM_TARGETS\"".into(),
+            "USE_EXPAND=\"LLVM_TARGETS\"
+                USE_EXPAND_UNPREFIXED=\"LLVM_TARGETS\""
+                .into(),
         )?;
 
         assert!(UseExpandConfig::from_make_env(&make_env).is_err());

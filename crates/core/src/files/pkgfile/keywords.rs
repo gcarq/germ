@@ -70,6 +70,7 @@ impl AtomPolicy for KeywordSpec {
         }
 
         // Default to testing if no selectors are specified.
+        // TODO: this is incorrect and should have its own variant.
         if rules.is_empty() {
             rules.push(KeywordRule::Selector(Entry::from_str("~*", precedence)?));
         }

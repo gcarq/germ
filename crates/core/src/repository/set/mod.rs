@@ -9,7 +9,7 @@ use super::RepoName;
 use super::tree::{Repository, RepositoryError};
 use crate::SysConf;
 use crate::deps::atom::Atom;
-use crate::files::PackageEntries;
+use crate::policy::pkgmask::RepositorySource;
 use crate::profile::Profile;
 use crate::repository::Arch;
 use crate::repository::tree::PackageResult;
@@ -32,13 +32,6 @@ pub struct RepoSet {
     sysconf: Arc<SysConf>,
     config: RepoSetConfig,
     entries: IndexMap<RepoName, RepositoryEntry>,
-}
-
-/// Holds repository package masks aggregated from all available repositories.
-#[derive(Default)]
-pub struct RepoPackageMasks {
-    pub mask: PackageEntries,
-    pub unmask: PackageEntries,
 }
 
 /// Holds the result and sync handler of a configured repository.
@@ -210,15 +203,14 @@ impl RepoSet {
         anyhow::bail!("Profile {profile} is not valid for any configured repository")
     }
 
-    /// Aggregates package masks and unmasks from all available repositories.
-    pub fn package_masks(&self) -> anyhow::Result<RepoPackageMasks> {
-        let mut mask = PackageEntries::default();
-        let mut unmask = PackageEntries::default();
+    /// Returns the aggregated package mask/unmask entries from all available repos.
+    pub fn package_mask_source(&self) -> anyhow::Result<RepositorySource> {
+        let mut source = RepositorySource::default();
         for repository in self.values() {
-            mask.inherit_from(&repository.package_mask)?;
-            unmask.inherit_from(&repository.package_unmask)?;
+            source.mask.inherit_from(&repository.package_mask)?;
+            source.unmask.inherit_from(&repository.package_unmask)?;
         }
-        Ok(RepoPackageMasks { mask, unmask })
+        Ok(source)
     }
 
     /// Reloads all repository data from disk.
@@ -449,14 +441,14 @@ mod tests {
     }
 
     #[test]
-    fn test_package_masks() -> anyhow::Result<()> {
+    fn test_package_mask_source() -> anyhow::Result<()> {
         let fixture = repo_set([RepoBuilder::new("repo")
             .profile_file("package.mask", "dev-lang/rust")
             .profile_file("package.unmask", "app-editors/vim")])?;
 
-        let policy = fixture.package_masks()?;
-        let mask = policy.mask.iter().next().expect("repository mask");
-        let unmask = policy.unmask.iter().next().expect("repository unmask");
+        let source = fixture.package_mask_source()?;
+        let mask = source.mask.iter().next().expect("repository mask");
+        let unmask = source.unmask.iter().next().expect("repository unmask");
 
         assert_eq!(mask.to_string(), "dev-lang/rust");
         assert_eq!(mask.prec, Precedence::Repository);

@@ -223,7 +223,9 @@ mod tests {
 
     fn config() -> anyhow::Result<UseExpandConfig> {
         let make_env = MakeEnv::from_string(
-            "USE_EXPAND=\"LLVM_TARGETS\"\nUSE_EXPAND_UNPREFIXED=\"ARCH\"".into(),
+            "USE_EXPAND=\"LLVM_TARGETS\"
+                USE_EXPAND_UNPREFIXED=\"ARCH\""
+                .into(),
         )?;
         UseExpandConfig::from_make_env(&make_env)
     }
@@ -280,7 +282,9 @@ mod tests {
     #[test]
     fn test_parse_group_context_is_line_local() -> anyhow::Result<()> {
         let entries = PackageUsePolicy::from_string(
-            "dev-lang/rust LLVM_TARGETS: AMDGPU\napp-arch/xz-utils direct_flag".into(),
+            "dev-lang/rust LLVM_TARGETS: AMDGPU
+                app-arch/xz-utils direct_flag"
+                .into(),
             Precedence::User,
         )?;
 

@@ -128,7 +128,9 @@ mod tests {
             .map(|value| format!("profile-formats = {value}\n"))
             .unwrap_or_default();
         let conf = Ini::load_from_str(&format!(
-            "name = local\nmasters = kde gentoo\n{profile_formats}"
+            "name = local
+            masters = kde gentoo
+            {profile_formats}"
         ))
         .unwrap();
         Layout::from_ini(&conf).unwrap()

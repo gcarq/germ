@@ -1,22 +1,27 @@
+use std::path::PathBuf;
+
 use crate::SysConf;
-use crate::conf::masks::useflag::UseMasks;
-use crate::conf::masks::{PackageMasks, UserPackageMasks};
+use crate::files::entry::Precedence;
 use crate::files::pkgfile::{PackageAcceptKeywords, PackageUsePolicy};
-use crate::files::{UseEntries, entry::Precedence};
-use crate::keyword::KeywordPolicy;
+use crate::files::{PackageEntries, UseEntries};
 use crate::makenv::MakeEnv;
+use crate::policy::keyword::KeywordPolicy;
+use crate::policy::pkgmask::PortageSource as PackageMaskSource;
+use crate::policy::useflag::{
+    LocalRecords as UseLocalRecords, ProfileRecords as UseProfileRecords, UseMasks,
+};
 use crate::profile::Profile;
 use crate::repository::RepoSet;
 use crate::utils::Inherit;
 use anyhow::{Context, anyhow};
 use log::debug;
 
-/// Holds the portage configuration that usually resides in `/etc/portage`.
+/// Responsible for loading and validation an existing portage configuration,
+/// usually located at `/etc/portage`.
 pub struct PortageConf {
-    pub make_env: MakeEnv,
-    pub keyword_policy: KeywordPolicy,
-    pub package_masks: PackageMasks,
-    pub use_masks: UseMasks,
+    path: PathBuf,
+    profile: Profile,
+    makenv: MakeEnv,
 }
 
 impl PortageConf {
@@ -32,9 +37,8 @@ impl PortageConf {
             .resolve_profile(&profile_path)
             .with_context(|| anyhow!("unable to build profile from {}", profile_path.display()))?;
 
-        let make_env = Self::init_make_env(&profile, sysconf)?;
-
-        let arch = make_env
+        let makenv = Self::init_make_env(&profile, sysconf)?;
+        let arch = makenv
             .get("ARCH")
             .with_context(|| "missing ARCH variable")?
             .to_string()
@@ -42,46 +46,90 @@ impl PortageConf {
         repo_set.validate_arch(&arch)?;
         repo_set.validate_profile(&profile, &arch)?;
 
-        let package_accept_keywords = PackageAcceptKeywords::default()
-            .inherit(&profile.package_accept_keywords)?
-            .inherit(&PackageAcceptKeywords::from_path(
-                &path.join("package.accept_keywords"),
-                Precedence::User,
-                true,
-            )?)?;
-        let keyword_policy = KeywordPolicy::new(&make_env, package_accept_keywords)?;
-
-        let package_masks = PackageMasks::new(
-            repo_set.package_masks()?,
-            &profile,
-            UserPackageMasks::from_path(&path)?,
-        )?;
-
-        let use_masks = UseMasks::new(
-            &profile,
-            PackageUsePolicy::from_path(&path.join("package.use"), Precedence::User, true)?,
-            UseEntries::from_path(
-                &path.join("profile").join("use.mask"),
-                Precedence::User,
-                true,
-            )?,
-            PackageUsePolicy::from_path(
-                &path.join("profile").join("package.use.mask"),
-                Precedence::User,
-                true,
-            )?,
-        )?;
-
-        Ok(PortageConf {
-            make_env,
-            keyword_policy,
-            package_masks,
-            use_masks,
+        Ok(Self {
+            path,
+            profile,
+            makenv,
         })
     }
 
-    /// Initializes and returns the make environment by processing make.globals,
-    /// make.defaults from profile and make.conf (in this order).
+    /// Returns the resolved [`MakeEnv`].
+    pub const fn makenv(&self) -> &MakeEnv {
+        &self.makenv
+    }
+
+    /// Returns the [`KeywordPolicy`] from profile and user config.
+    pub fn keyword_policy(&self) -> anyhow::Result<KeywordPolicy> {
+        let accept_keywords = self.makenv.get("ACCEPT_KEYWORDS").map(ToString::to_string);
+        let local = PackageAcceptKeywords::from_path(
+            &self.path.join("package.accept_keywords"),
+            Precedence::User,
+            true,
+        )?;
+        KeywordPolicy::new(
+            accept_keywords.as_deref(),
+            local.inherit(&self.profile.package_accept_keywords)?,
+        )
+    }
+
+    /// Returns a [`PackageMaskSource`] from profile and user config.
+    pub fn package_mask_source(&self) -> anyhow::Result<PackageMaskSource> {
+        Ok(PackageMaskSource {
+            profile_mask: self.profile.package_mask.clone(),
+            profile_unmask: self.profile.package_unmask.clone(),
+            local_mask: PackageEntries::from_path(
+                &self.path.join("package.mask"),
+                Precedence::User,
+                true,
+            )?,
+            local_unmask: PackageEntries::from_path(
+                &self.path.join("package.unmask"),
+                Precedence::User,
+                true,
+            )?,
+        })
+    }
+
+    /// Returns [`UseMasks`] from profile and user config.
+    pub fn use_masks(&self) -> anyhow::Result<UseMasks> {
+        UseMasks::new(
+            UseProfileRecords {
+                make_defaults: self.profile.make_defaults.clone(),
+                package_use: self.profile.package_use.clone(),
+                package_use_mask: self.profile.package_use_mask.clone(),
+                package_use_force: self.profile.package_use_force.clone(),
+                package_use_stable_mask: self.profile.package_use_stable_mask.clone(),
+                package_use_stable_force: self.profile.package_use_stable_force.clone(),
+                use_mask: self.profile.use_mask.clone(),
+                use_force: self.profile.use_force.clone(),
+                use_stable_mask: self.profile.use_stable_mask.clone(),
+                use_stable_force: self.profile.use_stable_force.clone(),
+            },
+            UseLocalRecords {
+                package_use: PackageUsePolicy::from_path(
+                    &self.path.join("package.use"),
+                    Precedence::User,
+                    true,
+                )?,
+                use_mask: UseEntries::from_path(
+                    &self.path.join("profile").join("use.mask"),
+                    Precedence::User,
+                    true,
+                )?,
+                package_use_mask: PackageUsePolicy::from_path(
+                    &self.path.join("profile").join("package.use.mask"),
+                    Precedence::User,
+                    true,
+                )?,
+            },
+        )
+    }
+
+    /// Initializes the make env and takes care of inheritance.
+    /// The order of processing is:
+    ///   * make.globals
+    ///   * make_defaults from active profile
+    ///   * make.conf
     fn init_make_env(profile: &Profile, sysconf: &SysConf) -> anyhow::Result<MakeEnv> {
         let globals_path = sysconf.default_portage_conf().join("make.globals");
         let make_globals = MakeEnv::from_path(&globals_path, true, false)
@@ -89,10 +137,82 @@ impl PortageConf {
         let make_conf = MakeEnv::from_path(&sysconf.portage_conf().join("make.conf"), true, false)
             .with_context(|| "unable to process make.conf")?;
 
-        let env = MakeEnv::default()
+        MakeEnv::default()
             .inherit(&make_globals)?
             .inherit(&profile.make_defaults)?
-            .inherit(&make_conf)?;
-        Ok(env)
+            .inherit(&make_conf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    use super::*;
+
+    use crate::repository::test_support::RepoBuilder;
+
+    fn fixture() -> anyhow::Result<(tempfile::TempDir, SysConf, RepoSet)> {
+        let root = tempfile::tempdir()?;
+        let repository = root.path().join("repository");
+        RepoBuilder::new("repo")
+            .profile("default/linux")
+            .write_to(&repository)?;
+
+        let sysconf = SysConf::new(root.path().to_path_buf());
+        let portage = sysconf.portage_conf();
+        fs::create_dir_all(&portage)?;
+        fs::write(
+            portage.join("repos.conf"),
+            format!("[repo]\nlocation = {}\n", repository.display()),
+        )?;
+        fs::write(portage.join("make.conf"), "")?;
+        symlink(
+            repository.join("profiles/default/linux"),
+            portage.join("make.profile"),
+        )?;
+        let globals = sysconf.default_portage_conf().join("make.globals");
+        fs::create_dir_all(globals.parent().expect("make.globals parent"))?;
+        fs::write(globals, "ARCH=amd64\n")?;
+
+        let repo_set = RepoSet::new(sysconf.clone().into())?;
+        Ok((root, sysconf, repo_set))
+    }
+
+    #[test]
+    fn test_portage_conf_make_env() -> anyhow::Result<()> {
+        let (_root, sysconf, repo_set) = fixture()?;
+        let conf = PortageConf::new(&repo_set, &sysconf)?;
+
+        assert_eq!(
+            conf.makenv().get("ARCH").map(ToString::to_string),
+            Some("amd64".into())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_portage_conf_use_masks() -> anyhow::Result<()> {
+        let (_root, sysconf, repo_set) = fixture()?;
+        let conf = PortageConf::new(&repo_set, &sysconf)?;
+
+        assert!(conf.use_masks().is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_portage_conf_skips_keyword_policy() -> anyhow::Result<()> {
+        let (root, sysconf, repo_set) = fixture()?;
+        fs::write(
+            sysconf.portage_conf().join("package.accept_keywords"),
+            "invalid atom",
+        )?;
+        let conf = PortageConf::new(&repo_set, &sysconf)?;
+
+        assert!(conf.use_masks().is_ok());
+        assert!(conf.keyword_policy().is_err());
+        drop(root);
+        Ok(())
     }
 }
