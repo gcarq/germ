@@ -2,7 +2,7 @@ mod keywords;
 mod useflags;
 
 pub use keywords::{KeywordRule, PackageAcceptKeywords};
-pub use useflags::{PackageUsePolicy, UseFlags};
+pub use useflags::{PackageUseRecords, UseFlags};
 
 use anyhow::Context;
 use std::path::Path;

@@ -5,13 +5,13 @@ use crate::keyword::{Keyword, KeywordSelector};
 use crate::package::PackageView;
 
 /// Immutable runtime policy that determines whether a package is accepted based on its keywords.
-pub struct KeywordPolicy {
+pub struct EffectiveKeywords {
     accept_keywords: Vec<KeywordSelector>,
     rules: Vec<(Atom, KeywordAction)>,
 }
 
-impl KeywordPolicy {
-    /// Builds [`KeywordPolicy`] from keyword records.
+impl EffectiveKeywords {
+    /// Builds [`EffectiveKeywords`] from keyword records.
     pub fn new(
         accept_keywords: Option<&str>,
         package_accept_keywords: PackageAcceptKeywords,
@@ -36,32 +36,71 @@ impl KeywordPolicy {
         })
     }
 
-    /// Returns whether any metadata keyword for [`PackageView`] is accepted.
-    pub fn evaluate<P: PackageView>(&self, package: &P) -> bool {
-        if package.metadata().keywords.is_empty() {
-            return self.evaluate_keyword(package, None);
+    /// Evaluates whether the given [`PackageView`] is accepted for the effective keywords.
+    pub fn evaluate<P: PackageView>(&self, pkg: &P) -> KeywordEvalResult {
+        if !self.keywords_accepted(pkg, &pkg.metadata().keywords) {
+            return KeywordEvalResult::new(false, false);
         }
 
-        package
+        // PMS 5.2.11: Stable restrictions “stable keyword in use” are applied exactly if
+        //             replacing all stable keywords in `KEYWORDS` by the corresponding
+        //             tilde prefixed keywords would result in the package installation
+        //             being prevented due to the KEYWORDS setting.
+        let testing_only = pkg
             .metadata()
             .keywords
             .iter()
-            .any(|keyword| self.evaluate_keyword(package, Some(keyword)))
+            .map(|keyword| match keyword {
+                Keyword::Stable(arch) => Keyword::Testing(arch.clone()),
+                keyword => keyword.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        KeywordEvalResult::new(true, !self.keywords_accepted(pkg, &testing_only))
     }
 
-    fn evaluate_keyword<P: PackageView>(&self, package: &P, keyword: Option<&Keyword>) -> bool {
+    /// Returns `true` if the given [`PackageView`] accepts the given `keywords`.
+    fn keywords_accepted<P: PackageView>(&self, pkg: &P, keywords: &[Keyword]) -> bool {
+        if keywords.is_empty() {
+            return self.evaluate_keyword(pkg, None);
+        }
+
+        keywords
+            .iter()
+            .any(|keyword| self.evaluate_keyword(pkg, Some(keyword)))
+    }
+
+    /// Evaluates whether the given `keyword` is accepted for the given [`PackageView`].
+    fn evaluate_keyword<P: PackageView>(&self, pkg: &P, keyword: Option<&Keyword>) -> bool {
         let mut accepted = self
             .accept_keywords
             .iter()
             .any(|selector| selector.matches(keyword));
 
         for (atom, action) in &self.rules {
-            if package.matches_atom(atom) {
+            if pkg.matches_atom(atom) {
                 action.apply(keyword, &mut accepted);
             }
         }
 
         accepted
+    }
+}
+
+/// Holds the result of evaluating a [`PackageView`]
+/// against the effective keywords policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeywordEvalResult {
+    pub accepted: bool,
+    pub stable_in_use: bool,
+}
+
+impl KeywordEvalResult {
+    pub const fn new(accepted: bool, stable_in_use: bool) -> Self {
+        Self {
+            accepted,
+            stable_in_use,
+        }
     }
 }
 
@@ -105,8 +144,8 @@ mod tests {
     use crate::utils::Inherit;
     use crate::vdb::package::InstalledPackage;
 
-    fn policy(accept_keywords: &str, package_keywords: &str) -> anyhow::Result<KeywordPolicy> {
-        KeywordPolicy::new(
+    fn policy(accept_keywords: &str, package_keywords: &str) -> anyhow::Result<EffectiveKeywords> {
+        EffectiveKeywords::new(
             Some(accept_keywords),
             PackageAcceptKeywords::from_string(package_keywords.into(), Precedence::User)?,
         )
@@ -130,44 +169,77 @@ mod tests {
     #[test]
     fn test_policy_global_keywords() -> anyhow::Result<()> {
         let policy = policy("amd64 ~arm64", "")?;
-        assert!(policy.evaluate(&package(&["amd64"])));
-        assert!(policy.evaluate(&package(&["~arm64"])));
-        assert!(!policy.evaluate(&package(&["~amd64"])));
+        assert_eq!(
+            policy.evaluate(&package(&["amd64"])),
+            KeywordEvalResult::new(true, true)
+        );
+        assert_eq!(
+            policy.evaluate(&package(&["~arm64"])),
+            KeywordEvalResult::new(true, false)
+        );
+        assert_eq!(
+            policy.evaluate(&package(&["~amd64"])),
+            KeywordEvalResult::new(false, false)
+        );
         Ok(())
     }
 
     #[test]
     fn test_policy_global_keyword_invalid() {
-        assert!(KeywordPolicy::new(Some("-amd64"), PackageAcceptKeywords::default()).is_err());
+        assert!(EffectiveKeywords::new(Some("-amd64"), PackageAcceptKeywords::default()).is_err());
     }
 
     #[test]
     fn test_policy_global_wildcards() -> anyhow::Result<()> {
         let stable = policy("*", "")?;
-        assert!(stable.evaluate(&package(&["amd64"])));
-        assert!(!stable.evaluate(&package(&["~amd64"])));
+        assert_eq!(
+            stable.evaluate(&package(&["amd64"])),
+            KeywordEvalResult::new(true, true)
+        );
+        assert_eq!(
+            stable.evaluate(&package(&["~amd64"])),
+            KeywordEvalResult::new(false, false)
+        );
 
         let testing = policy("~*", "")?;
-        assert!(testing.evaluate(&package(&["~amd64"])));
-        assert!(!testing.evaluate(&package(&["amd64"])));
+        assert_eq!(
+            testing.evaluate(&package(&["~amd64"])),
+            KeywordEvalResult::new(true, false)
+        );
+        assert_eq!(
+            testing.evaluate(&package(&["amd64"])),
+            KeywordEvalResult::new(false, false)
+        );
 
         let any = policy("**", "")?;
-        assert!(any.evaluate(&package(&[])));
-        assert!(any.evaluate(&package(&["-amd64"])));
+        assert_eq!(
+            any.evaluate(&package(&[])),
+            KeywordEvalResult::new(true, false)
+        );
+        assert_eq!(
+            any.evaluate(&package(&["-amd64"])),
+            KeywordEvalResult::new(true, false)
+        );
         Ok(())
     }
 
     #[test]
     fn test_policy_selector_reject() -> anyhow::Result<()> {
         let policy = policy("amd64", "dev-lang/rust -amd64")?;
-        assert!(!policy.evaluate(&package(&["amd64"])));
+        assert_eq!(
+            policy.evaluate(&package(&["amd64"])),
+            KeywordEvalResult::new(false, false)
+        );
         Ok(())
     }
 
     #[test]
     fn test_policy_reset_accept() -> anyhow::Result<()> {
         let policy = policy("amd64", "dev-lang/rust -* ~amd64")?;
-        assert!(policy.evaluate(&package(&["~amd64"])));
+        assert_eq!(
+            policy.evaluate(&package(&["~amd64"])),
+            KeywordEvalResult::new(true, false)
+        );
         Ok(())
     }
 
@@ -178,14 +250,20 @@ mod tests {
             "*/* -~amd64
             dev-lang/rust ~amd64",
         )?;
-        assert!(keywords.evaluate(&package(&["~amd64"])));
+        assert_eq!(
+            keywords.evaluate(&package(&["~amd64"])),
+            KeywordEvalResult::new(true, false)
+        );
 
         let keywords = policy(
             "",
             "dev-lang/rust ~amd64
             */* -~amd64",
         )?;
-        assert!(!keywords.evaluate(&package(&["~amd64"])));
+        assert_eq!(
+            keywords.evaluate(&package(&["~amd64"])),
+            KeywordEvalResult::new(false, false)
+        );
         Ok(())
     }
 
@@ -197,18 +275,30 @@ mod tests {
         )?;
         let user = PackageAcceptKeywords::from_string("*/* -amd64".into(), Precedence::User)?;
         let package_accept_keywords = user.inherit(&profile)?;
-        let policy = KeywordPolicy::new(None, package_accept_keywords)?;
+        let policy = EffectiveKeywords::new(None, package_accept_keywords)?;
 
-        assert!(!policy.evaluate(&package(&["amd64"])));
+        assert_eq!(
+            policy.evaluate(&package(&["amd64"])),
+            KeywordEvalResult::new(false, false)
+        );
         Ok(())
     }
 
     #[test]
     fn test_policy_any() -> anyhow::Result<()> {
         let policy = policy("", "dev-lang/rust **")?;
-        assert!(policy.evaluate(&package(&[])));
-        assert!(policy.evaluate(&package(&["-amd64"])));
-        assert!(policy.evaluate(&package(&["-*"])));
+        assert_eq!(
+            policy.evaluate(&package(&[])),
+            KeywordEvalResult::new(true, false)
+        );
+        assert_eq!(
+            policy.evaluate(&package(&["-amd64"])),
+            KeywordEvalResult::new(true, false)
+        );
+        assert_eq!(
+            policy.evaluate(&package(&["-*"])),
+            KeywordEvalResult::new(true, false)
+        );
         Ok(())
     }
 
@@ -224,7 +314,32 @@ mod tests {
             },
             use_flags: Vec::new(),
         };
-        assert!(policy.evaluate(&package));
+        assert_eq!(
+            policy.evaluate(&package),
+            KeywordEvalResult::new(true, true)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_policy_stable_keywords() -> anyhow::Result<()> {
+        let keywords = policy("amd64 ~amd64", "")?;
+        assert_eq!(
+            keywords.evaluate(&package(&["amd64"])),
+            KeywordEvalResult::new(true, false)
+        );
+
+        let keywords = policy("amd64 ~arm64", "")?;
+        assert_eq!(
+            keywords.evaluate(&package(&["amd64", "arm64"])),
+            KeywordEvalResult::new(true, false)
+        );
+
+        let keywords = policy("amd64", "dev-lang/rust ~amd64")?;
+        assert_eq!(
+            keywords.evaluate(&package(&["amd64"])),
+            KeywordEvalResult::new(true, false)
+        );
         Ok(())
     }
 }

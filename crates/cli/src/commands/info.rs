@@ -3,14 +3,13 @@ use colored::Colorize;
 use germ_core::SysConf;
 use germ_core::conf::portage::PortageConf;
 use germ_core::deps::atom::Atom;
-use germ_core::policy::useflag::UseMasks;
 use germ_core::repository::RepoSet;
 use germ_core::vdb::{Vdb, package::InstalledPackage};
 use std::sync::Arc;
 
 /// Prints system- and package information for all packages matching the given `Atom`.
 pub fn info(atom: Option<&Atom>, sysconf: Arc<SysConf>) -> Result<()> {
-    let repo_set = RepoSet::new(sysconf.clone()).with_context(|| "unable to build repo set")?;
+    let repo_set = RepoSet::new(sysconf.clone()).context("unable to build repo set")?;
     let conf = PortageConf::new(&repo_set, &sysconf)?;
 
     println!("Repositories:");
@@ -30,7 +29,7 @@ pub fn info(atom: Option<&Atom>, sysconf: Arc<SysConf>) -> Result<()> {
     }
 
     let Some(atom) = atom else { return Ok(()) };
-    let use_masks = conf.use_masks()?;
+
     let mut vdb = Vdb::from_path("/var/db/pkg").context("unable to read VDB")?;
     let packages = vdb
         .find_by_atom(atom)
@@ -41,7 +40,7 @@ pub fn info(atom: Option<&Atom>, sysconf: Arc<SysConf>) -> Result<()> {
     );
     for pkg in packages {
         println!("{}", pkg.to_string().green().bold());
-        print_use_flags(pkg, &use_masks);
+        print_use_flags(pkg);
         println!();
     }
 
@@ -49,7 +48,7 @@ pub fn info(atom: Option<&Atom>, sysconf: Arc<SysConf>) -> Result<()> {
 }
 
 /// Prints USE flag usage for the given `package`.
-fn print_use_flags(package: &InstalledPackage, use_masks: &UseMasks) {
+fn print_use_flags(package: &InstalledPackage) {
     let mut enabled = Vec::new();
     let mut disabled = Vec::new();
 
@@ -66,17 +65,11 @@ fn print_use_flags(package: &InstalledPackage, use_masks: &UseMasks) {
 
     let enabled = enabled
         .iter()
-        .map(|flag| match use_masks.is_forced_for_pkg(package, flag) {
-            true => format!("({})", flag.to_string().red().bold()),
-            false => format!("{}", flag.to_string().red().bold()),
-        });
+        .map(|flag| format!("{}", flag.to_string().red().bold()));
 
     let disabled = disabled
         .iter()
-        .map(|flag| match use_masks.is_masked_for_pkg(package, flag) {
-            true => format!("({})", format!("-{flag}").blue().bold()),
-            false => format!("{}", format!("-{flag}").blue().bold()),
-        });
+        .map(|flag| format!("{}", format!("-{flag}").blue().bold()));
 
     println!(
         "USE=\"{}\"",

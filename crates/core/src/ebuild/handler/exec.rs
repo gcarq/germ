@@ -65,11 +65,11 @@ impl EbuildExecution {
     pub fn new(ipc: IpcHandler, child: Child) -> Result<Self, PhaseExecutionError> {
         let pid = child
             .id()
-            .with_context(|| "spawned process has no PID")
+            .context("spawned process has no PID")
             .map_err(PhaseExecutionError::Lifecycle)?;
         let process_group = Pid::from_raw(
             i32::try_from(pid)
-                .with_context(|| "ebuild PID does not fit in i32")
+                .context("ebuild PID does not fit in i32")
                 .map_err(PhaseExecutionError::Lifecycle)?,
         );
         Ok(Self {
@@ -147,7 +147,7 @@ impl EbuildExecution {
     async fn natural_exit_or_escalate(&mut self) -> Result<(), PhaseExecutionError> {
         let status = match tokio::time::timeout(NATURAL_EXIT_PERIOD, self.child.wait()).await {
             Ok(status) => status
-                .with_context(|| "unable to wait for process")
+                .context("unable to wait for process")
                 .map_err(PhaseExecutionError::Lifecycle)?,
             Err(_) => return self.escalate().await,
         };
@@ -187,7 +187,7 @@ impl EbuildExecution {
             self.exit_status = self
                 .child
                 .try_wait()
-                .with_context(|| "unable to inspect process")
+                .context("unable to inspect process")
                 .map_err(PhaseExecutionError::Lifecycle)?;
         }
         let group_empty = !process_group_exists(self.process_group)?;
@@ -265,7 +265,7 @@ fn process_group_exists(pgroup: Pid) -> Result<bool, PhaseExecutionError> {
         Ok(()) | Err(Errno::EPERM) => Ok(true),
         Err(Errno::ESRCH) => Ok(false),
         Err(err) => Err(err)
-            .with_context(|| "unable to inspect process group")
+            .context("unable to inspect process group")
             .map_err(PhaseExecutionError::Lifecycle),
     }
 }

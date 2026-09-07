@@ -180,7 +180,7 @@ impl Atom {
         };
 
         Self::from_regex_capture(&captures)
-            .with_context(|| anyhow!("unable to parse atom '{atom}'"))
+            .with_context(|| format!("unable to parse atom '{atom}'"))
     }
 
     /// Returns the qualified name for this atom in the format

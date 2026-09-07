@@ -62,6 +62,6 @@ pub async fn execute(args: &Args, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
 /// Sync either all or the provided `repo`.
 fn sync(repo: Option<&str>, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     Ok(RepoSet::new(sysconf)
-        .with_context(|| "unable to build repo set")?
+        .context("unable to build repo set")?
         .maybe_sync(repo)?)
 }

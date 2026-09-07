@@ -54,13 +54,13 @@ impl Layout {
     /// required properties are missing.
     pub fn from_path(location: &Path) -> Result<Self, LayoutError> {
         let conf = Ini::load_from_file(location)?;
-        Ok(Self::from_ini(&conf).with_context(|| anyhow!("cannot load {}", location.display()))?)
+        Ok(Self::from_ini(&conf).with_context(|| format!("cannot load {}", location.display()))?)
     }
 
     fn from_ini(conf: &Ini) -> Result<Self, LayoutError> {
         let properties = conf
             .section(None::<String>)
-            .with_context(|| "no global properties defined")?;
+            .context("no global properties defined")?;
 
         let name = properties.get("name").map(str::parse).transpose()?;
         let masters = properties

@@ -32,14 +32,14 @@ impl SyncHandler for GitSyncHandler {
             .get("clone-depth")
             .map(|s| s.parse::<usize>())
             .transpose()
-            .with_context(|| "invalid clone-depth value")?
+            .context("invalid clone-depth value")?
             .unwrap_or(1);
 
         let sync_depth = properties
             .get("sync-depth")
             .map(|s| s.parse::<usize>())
             .transpose()
-            .with_context(|| "invalid sync-depth value")?
+            .context("invalid sync-depth value")?
             .unwrap_or(1);
 
         Ok(Self {
@@ -90,13 +90,13 @@ impl SyncHandler for GitSyncHandler {
             // manually, in order to prevent automatic git gc calls from
             // eventually failing (see bug 599008).
             self.prune_shallow_repository(&env)
-                .with_context(|| anyhow!("git gc failed at {}", self.config.location.display()))?;
+                .with_context(|| format!("git gc failed at {}", self.config.location.display()))?;
         }
 
         self.fetch_remote("origin", &command_opts, &env)?;
         let remote_branch = self
             .resolve_remote_branch(&env)
-            .with_context(|| "unable to resolve remote branch to reset to")?;
+            .context("unable to resolve remote branch to reset to")?;
         self.reset_hard(&remote_branch, &env)?;
         Ok(())
     }
@@ -186,7 +186,7 @@ impl GitSyncHandler {
             .arg(sync_uri)
             .current_dir(&self.config.location)
             .envs(env);
-        Self::execute(add).with_context(|| "failed to set or add origin remote")?;
+        Self::execute(add).context("failed to set or add origin remote")?;
         debug!("Set origin remote to {sync_uri}");
         Ok(())
     }
@@ -210,11 +210,9 @@ impl GitSyncHandler {
     fn resolve_remote_branch(&self, env: &HashMap<String, String>) -> anyhow::Result<String> {
         match self.rev_parse_abbrev_ref("@{upstream}", env) {
             Ok(branch) => Ok(branch),
-            Err(upstream_err) => self
+            Err(err) => self
                 .rev_parse_abbrev_ref("origin/HEAD", env)
-                .with_context(|| {
-                    format!("unable to resolve upstream ({upstream_err}) or origin/HEAD")
-                }),
+                .with_context(|| format!("unable to resolve upstream ({err}) or origin/HEAD")),
         }
     }
 
@@ -233,7 +231,7 @@ impl GitSyncHandler {
             .envs(env);
         let output = Self::execute(command)?;
         let branch = String::from_utf8(output.stdout)
-            .with_context(|| "invalid UTF-8 in git rev-parse output")?
+            .context("invalid UTF-8 in git rev-parse output")?
             .trim()
             .to_owned();
         match branch.is_empty() {

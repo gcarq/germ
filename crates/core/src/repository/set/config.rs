@@ -23,7 +23,7 @@ impl RepoSetConfig {
     /// except files starting with `.` or ending with `~`.
     pub fn load(location: &Path) -> anyhow::Result<Self> {
         debug!("Loading repos.conf from '{}' ...", location.display());
-        let conf = Self::parse_conf(location).with_context(|| "unable to parse repos.conf")?;
+        let conf = Self::parse_conf(location).context("unable to parse repos.conf")?;
 
         let mut repo_confs = conf
             .into_iter()
@@ -49,7 +49,7 @@ impl RepoSetConfig {
     /// Helper function to merge and parse `repos.conf` from the given `location`.
     fn parse_conf(location: &Path) -> anyhow::Result<Ini> {
         let conf = if location.metadata()?.is_file() {
-            fs::read_to_string(location).with_context(|| "failed to load repos.conf")?
+            fs::read_to_string(location).context("failed to load repos.conf")?
         } else {
             utils::list_files(location)?
                 .into_iter()
@@ -60,7 +60,7 @@ impl RepoSetConfig {
                 .collect::<anyhow::Result<Vec<_>>>()?
                 .join("\n")
         };
-        Ini::load_from_str(&conf).with_context(|| "failed to parse repos.conf")
+        Ini::load_from_str(&conf).context("failed to parse repos.conf")
     }
 }
 

@@ -133,11 +133,7 @@ impl VersionSuffix {
 
         let number = match number.is_empty() {
             true => None,
-            false => Some(
-                number
-                    .parse()
-                    .with_context(|| anyhow!("unable to parse version suffix"))?,
-            ),
+            false => Some(number.parse().context("unable to parse version suffix")?),
         };
 
         let suffix = match suffix {

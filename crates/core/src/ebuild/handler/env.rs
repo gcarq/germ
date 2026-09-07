@@ -178,7 +178,7 @@ impl EbuildEnv {
     pub fn new(ebuild: &Ebuild, phase: &EbuildPhase, make_env: &MakeEnv) -> anyhow::Result<Self> {
         let repo_paths =
             shlex::try_join(ebuild.repo.eclasses.repo_paths().filter_map(|p| p.to_str()))
-                .with_context(|| "unable to escape repo paths")?;
+                .context("unable to escape repo paths")?;
 
         let bash_version = ebuild.eapi.supported_bash_version().to_owned();
 

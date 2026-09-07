@@ -12,7 +12,7 @@ use crate::deps::atom::Atom;
 use crate::files::entry::SysAtom;
 use crate::useflag::UseFlag;
 use crate::utils;
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, bail};
 use linefile::LineEntries;
 use std::fs;
 use std::path::Path;
@@ -35,7 +35,7 @@ pub fn content_from_path(path: &Path, recursive: bool, optional: bool) -> anyhow
     };
     if metadata.is_file() {
         return fs::read_to_string(path)
-            .with_context(|| anyhow!("error while processing file {}", path.display()));
+            .with_context(|| format!("error while processing file {}", path.display()));
     }
 
     if !recursive {
@@ -46,7 +46,7 @@ pub fn content_from_path(path: &Path, recursive: bool, optional: bool) -> anyhow
         .into_iter()
         .map(|path| {
             fs::read_to_string(&path)
-                .with_context(|| anyhow!("unable to read file '{}'", path.display()))
+                .with_context(|| format!("unable to read file '{}'", path.display()))
         })
         .collect::<anyhow::Result<Vec<_>>>()?
         .join("\n");

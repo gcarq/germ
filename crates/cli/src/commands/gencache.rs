@@ -14,7 +14,7 @@ pub async fn gencache(
         info!("Forcing cache recreation...");
     }
 
-    let mut repo_set = RepoSet::new(sysconf).with_context(|| "unable to build repo set")?;
+    let mut repo_set = RepoSet::new(sysconf).context("unable to build repo set")?;
     for repo in repo_set.select_mut(repo_name) {
         let name = repo.name.clone();
         if force {

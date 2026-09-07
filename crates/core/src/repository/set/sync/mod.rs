@@ -73,7 +73,7 @@ pub fn build_sync_handler(
         .get("sync-type")
         .map(|sync_type| SyncType::new(sync_type))
         .transpose()
-        .with_context(|| "invalid sync-type value")?;
+        .context("invalid sync-type value")?;
 
     let handler = match sync_type {
         Some(SyncType::Git) => GitSyncHandler::new(properties)?,

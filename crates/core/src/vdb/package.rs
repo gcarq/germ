@@ -21,17 +21,16 @@ impl InstalledPackage {
     /// `path` is the path to the packages vdb directory where additional metadata can be queried.
     pub fn new(cpv: CPV, path: &Path) -> anyhow::Result<Self> {
         let repo = fs::read_to_string(path.join("repository"))
-            .with_context(|| "unable to read repo")?
+            .context("unable to read repo")?
             .trim()
             .parse()?;
         let use_flags = fs::read_to_string(path.join("USE"))
-            .with_context(|| "unable to read USE flags")?
+            .context("unable to read USE flags")?
             .split_whitespace()
             .map(UseFlag::from_str)
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        let metadata =
-            PackageMetadata::from_vdb_path(path).with_context(|| "unable to read metadata")?;
+        let metadata = PackageMetadata::from_vdb_path(path).context("unable to read metadata")?;
         Ok(Self {
             cpv,
             repo,

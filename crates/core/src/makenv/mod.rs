@@ -70,7 +70,7 @@ impl MakeEnv {
                 if key
                     .as_bytes()
                     .first()
-                    .with_context(|| "variable name cannot be empty")?
+                    .context("variable name cannot be empty")?
                     .is_ascii_alphabetic()
                 {
                     Ok((key.into_boxed_str(), EnvValue::new(value.as_str())))

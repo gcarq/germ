@@ -1,19 +1,22 @@
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use crate::SysConf;
 use crate::files::entry::Precedence;
-use crate::files::pkgfile::{PackageAcceptKeywords, PackageUsePolicy};
+use crate::files::pkgfile::{PackageAcceptKeywords, PackageUseRecords};
 use crate::files::{PackageEntries, UseEntries};
 use crate::makenv::MakeEnv;
-use crate::policy::keyword::KeywordPolicy;
+use crate::policy::keyword::EffectiveKeywords;
 use crate::policy::pkgmask::PortageSource as PackageMaskSource;
 use crate::policy::useflag::{
-    LocalRecords as UseLocalRecords, ProfileRecords as UseProfileRecords, UseMasks,
+    LocalRecords as UseLocalRecords, ProfileRecords as UseProfileRecords, UsePolicy,
 };
 use crate::profile::Profile;
 use crate::repository::RepoSet;
+use crate::types::FxHashSet;
+use crate::useflag::UseFlag;
 use crate::utils::Inherit;
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use log::debug;
 
 /// Responsible for loading and validation an existing portage configuration,
@@ -35,12 +38,12 @@ impl PortageConf {
         );
         let profile = repo_set
             .resolve_profile(&profile_path)
-            .with_context(|| anyhow!("unable to build profile from {}", profile_path.display()))?;
+            .with_context(|| format!("unable to build profile from {}", profile_path.display()))?;
 
         let makenv = Self::init_make_env(&profile, sysconf)?;
         let arch = makenv
             .get("ARCH")
-            .with_context(|| "missing ARCH variable")?
+            .context("missing ARCH variable")?
             .to_string()
             .parse()?;
         repo_set.validate_arch(&arch)?;
@@ -58,15 +61,15 @@ impl PortageConf {
         &self.makenv
     }
 
-    /// Returns the [`KeywordPolicy`] from profile and user config.
-    pub fn keyword_policy(&self) -> anyhow::Result<KeywordPolicy> {
+    /// Returns the [`EffectiveKeywords`] from profile and user config.
+    pub fn effective_keywords(&self) -> anyhow::Result<EffectiveKeywords> {
         let accept_keywords = self.makenv.get("ACCEPT_KEYWORDS").map(ToString::to_string);
         let local = PackageAcceptKeywords::from_path(
             &self.path.join("package.accept_keywords"),
             Precedence::User,
             true,
         )?;
-        KeywordPolicy::new(
+        EffectiveKeywords::new(
             accept_keywords.as_deref(),
             local.inherit(&self.profile.package_accept_keywords)?,
         )
@@ -90,9 +93,10 @@ impl PortageConf {
         })
     }
 
-    /// Returns [`UseMasks`] from profile and user config.
-    pub fn use_masks(&self) -> anyhow::Result<UseMasks> {
-        UseMasks::new(
+    /// Returns [`UsePolicy`] from profile and user config.
+    pub fn use_policy(&self) -> anyhow::Result<UsePolicy> {
+        UsePolicy::new(
+            self.iuse_implicit()?,
             UseProfileRecords {
                 make_defaults: self.profile.make_defaults.clone(),
                 package_use: self.profile.package_use.clone(),
@@ -106,7 +110,7 @@ impl PortageConf {
                 use_stable_force: self.profile.use_stable_force.clone(),
             },
             UseLocalRecords {
-                package_use: PackageUsePolicy::from_path(
+                package_use: PackageUseRecords::from_path(
                     &self.path.join("package.use"),
                     Precedence::User,
                     true,
@@ -116,7 +120,7 @@ impl PortageConf {
                     Precedence::User,
                     true,
                 )?,
-                package_use_mask: PackageUsePolicy::from_path(
+                package_use_mask: PackageUseRecords::from_path(
                     &self.path.join("profile").join("package.use.mask"),
                     Precedence::User,
                     true,
@@ -126,6 +130,7 @@ impl PortageConf {
     }
 
     /// Initializes the make env and takes care of inheritance.
+    ///
     /// The order of processing is:
     ///   * make.globals
     ///   * make_defaults from active profile
@@ -133,14 +138,27 @@ impl PortageConf {
     fn init_make_env(profile: &Profile, sysconf: &SysConf) -> anyhow::Result<MakeEnv> {
         let globals_path = sysconf.default_portage_conf().join("make.globals");
         let make_globals = MakeEnv::from_path(&globals_path, true, false)
-            .with_context(|| "unable to process make.globals")?;
+            .context("unable to process make.globals")?;
         let make_conf = MakeEnv::from_path(&sysconf.portage_conf().join("make.conf"), true, false)
-            .with_context(|| "unable to process make.conf")?;
+            .context("unable to process make.conf")?;
 
         MakeEnv::default()
             .inherit(&make_globals)?
             .inherit(&profile.make_defaults)?
             .inherit(&make_conf)
+    }
+
+    /// Returns the set `IUSE_IMPLICIT` from [`MakeEnv`].
+    fn iuse_implicit(&self) -> anyhow::Result<FxHashSet<UseFlag>> {
+        match self.profile.make_defaults.get("IUSE_IMPLICIT") {
+            Some(value) => value
+                .to_string()
+                .split_whitespace()
+                .map(UseFlag::from_str)
+                .collect::<Result<_, _>>()
+                .context("unable to parse IUSE_IMPLICIT"),
+            None => Ok(FxHashSet::default()),
+        }
     }
 }
 
@@ -158,6 +176,10 @@ mod tests {
         let repository = root.path().join("repository");
         RepoBuilder::new("repo")
             .profile("default/linux")
+            .profile_file(
+                "default/linux/make.defaults",
+                "IUSE_IMPLICIT=profile_flag\n",
+            )
             .write_to(&repository)?;
 
         let sysconf = SysConf::new(root.path().to_path_buf());
@@ -193,11 +215,18 @@ mod tests {
     }
 
     #[test]
-    fn test_portage_conf_use_masks() -> anyhow::Result<()> {
+    fn test_portage_conf_use_policy() -> anyhow::Result<()> {
         let (_root, sysconf, repo_set) = fixture()?;
+        fs::write(
+            sysconf.portage_conf().join("make.conf"),
+            "IUSE_IMPLICIT=local_flag\n",
+        )?;
         let conf = PortageConf::new(&repo_set, &sysconf)?;
 
-        assert!(conf.use_masks().is_ok());
+        assert_eq!(
+            conf.iuse_implicit()?,
+            FxHashSet::from_iter([UseFlag::new("profile_flag")?])
+        );
         Ok(())
     }
 
@@ -210,8 +239,8 @@ mod tests {
         )?;
         let conf = PortageConf::new(&repo_set, &sysconf)?;
 
-        assert!(conf.use_masks().is_ok());
-        assert!(conf.keyword_policy().is_err());
+        assert!(conf.use_policy().is_ok());
+        assert!(conf.effective_keywords().is_err());
         drop(root);
         Ok(())
     }

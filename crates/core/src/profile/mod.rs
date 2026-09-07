@@ -3,7 +3,7 @@ mod make;
 mod parent;
 
 use crate::eapi::Eapi;
-use crate::files::pkgfile::{PackageAcceptKeywords, PackageUsePolicy};
+use crate::files::pkgfile::{PackageAcceptKeywords, PackageUseRecords};
 use crate::files::{PackageEntries, SysPackageEntries, UseEntries, entry::Precedence};
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
@@ -11,7 +11,7 @@ use crate::profile::parent::ParentEntry;
 use crate::repository::RepoSet;
 use crate::repository::Repository;
 use crate::utils::Inherit;
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, bail};
 use log::warn;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ impl<'repo> ProfileSource<'repo> {
     fn from_path(path: &Path, repo_set: &'repo RepoSet) -> anyhow::Result<Self> {
         let path = path
             .canonicalize()
-            .with_context(|| anyhow!("unable to resolve profile {}", path.display()))?;
+            .with_context(|| format!("unable to resolve profile {}", path.display()))?;
 
         for repository in repo_set.values() {
             let profiles_root = repository.location.join("profiles").canonicalize()?;
@@ -72,14 +72,14 @@ pub struct Profile {
     pub package_unmask: PackageEntries,
 
     // Override the default USE flags specified by make.defaults on a per-package basis
-    pub package_use: PackageUsePolicy,
+    pub package_use: PackageUseRecords,
     // USE flags that must never be enabled on a per-package or per-version basis
-    pub package_use_mask: PackageUsePolicy,
+    pub package_use_mask: PackageUseRecords,
     // USE flags that must always be enabled on a per-package or per-version basis
-    pub package_use_force: PackageUsePolicy,
+    pub package_use_force: PackageUseRecords,
     // Same as above but for merged packages due to a stable keyword
-    pub package_use_stable_mask: PackageUsePolicy,
-    pub package_use_stable_force: PackageUsePolicy,
+    pub package_use_stable_mask: PackageUseRecords,
+    pub package_use_stable_force: PackageUseRecords,
 
     // USE flags that must never be enabled in this profile
     pub use_mask: UseEntries,
@@ -101,7 +101,7 @@ impl Profile {
 
         let mut parents = Vec::new();
         Self::build_parents(&source, repo_set, &mut parents)
-            .with_context(|| anyhow!("unable to resolve parents for {source}"))?;
+            .with_context(|| format!("unable to resolve parents for {source}"))?;
 
         // Load the profile and fold its `make.defaults` before inheriting the parents.
         // This is needed to properly handle `USE_EXPAND` and `USE_EXPAND_UNPREFIXED`.
@@ -139,7 +139,7 @@ impl Profile {
                 order,
                 supports_file_dirs,
             )?,
-            package_use: PackageUsePolicy::from_path(
+            package_use: PackageUseRecords::from_path(
                 &path.join("package.use"),
                 order,
                 supports_file_dirs,
@@ -156,22 +156,22 @@ impl Profile {
                 order,
                 supports_file_dirs,
             )?,
-            package_use_mask: PackageUsePolicy::from_path(
+            package_use_mask: PackageUseRecords::from_path(
                 &path.join("package.use.mask"),
                 order,
                 supports_file_dirs,
             )?,
-            package_use_force: PackageUsePolicy::from_path(
+            package_use_force: PackageUseRecords::from_path(
                 &path.join("package.use.force"),
                 order,
                 supports_file_dirs,
             )?,
-            package_use_stable_mask: PackageUsePolicy::from_path(
+            package_use_stable_mask: PackageUseRecords::from_path(
                 &path.join("package.use.stable.mask"),
                 order,
                 supports_file_dirs,
             )?,
-            package_use_stable_force: PackageUsePolicy::from_path(
+            package_use_stable_force: PackageUseRecords::from_path(
                 &path.join("package.use.stable.force"),
                 order,
                 supports_file_dirs,
@@ -222,13 +222,13 @@ impl Profile {
     ) -> anyhow::Result<()> {
         for parent in ParentEntry::from_parent_file(&source.path.join("parent"))? {
             let source = parent.resolve(source, repo_set).with_context(|| {
-                anyhow!("invalid parent reference '{parent}' in profile {source}")
+                format!("invalid parent reference '{parent}' in profile {source}")
             })?;
             Self::build_parents(&source, repo_set, profiles)?;
 
             let order = Precedence::Profile(profiles.len());
             let profile = Self::load(&source, order)
-                .with_context(|| anyhow!("unable to build profile from {source}"))?;
+                .with_context(|| format!("unable to build profile from {source}"))?;
             profiles.push(profile);
         }
         Ok(())
@@ -380,8 +380,12 @@ mod tests {
                 Entry::from_str("qux", Precedence::Profile(2))?,
             ]
         );
-        let package_use_mask = profile.package_use_mask.expand(&groups)?;
-        let glibc = package_use_mask.get(&"sys-libs/glibc".parse()?).unwrap();
+        let package_use_mask = profile.package_use_mask.resolve(&groups)?;
+        let glibc_atom = "sys-libs/glibc".parse()?;
+        let glibc = package_use_mask
+            .iter()
+            .find_map(|(atom, flags)| (atom == &glibc_atom).then_some(flags))
+            .unwrap();
         assert_eq!(
             glibc.get(&"cet".parse()?),
             Some(&Entry::from_str("cet", Precedence::Profile(0))?)
@@ -391,7 +395,11 @@ mod tests {
             Some(&Entry::from_str("-stack-realign", Precedence::Profile(1))?)
         );
 
-        let rust = package_use_mask.get(&"dev-lang/rust".parse()?).unwrap();
+        let rust_atom = "dev-lang/rust".parse()?;
+        let rust = package_use_mask
+            .iter()
+            .find_map(|(atom, flags)| (atom == &rust_atom).then_some(flags))
+            .unwrap();
         assert_eq!(
             rust.get(&"llvm_targets_AMDGPU".parse()?),
             Some(&Entry::from_str(

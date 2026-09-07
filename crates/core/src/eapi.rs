@@ -31,7 +31,7 @@ impl Eapi {
             return Ok(Eapi::default());
         }
         Ok(fs::read_to_string(path)
-            .with_context(|| anyhow!("unable to read eapi file {}", path.display()))?
+            .with_context(|| format!("unable to read eapi file {}", path.display()))?
             .lines()
             .next()
             .ok_or_else(|| anyhow!("empty eapi file {}", path.display()))?

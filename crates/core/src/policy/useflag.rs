@@ -1,154 +1,223 @@
 use crate::deps::atom::Atom;
 use crate::files::UseEntries;
 use crate::files::entry::Entry;
-use crate::files::pkgfile::{PackageUsePolicy, UseFlags};
+use crate::files::pkgfile::{PackageUseRecords, UseFlags};
 use crate::makenv::MakeEnv;
 use crate::package::PackageView;
 use crate::types::{FxHashMap, FxHashSet};
-use crate::useflag::{UseExpandConfig, UseFlag};
+use crate::useflag::{IUseEntry, UseExpandConfig, UseFlag};
 use crate::utils::Inherit;
 use anyhow::Context;
 
-/// Simple DTO used to build [`UseMasks`] from profile USE entries.
+/// Simple DTO used to build [`UsePolicy`] from profile USE entries.
 #[derive(Default)]
 pub struct ProfileRecords {
     pub make_defaults: MakeEnv,
-    pub package_use: PackageUsePolicy,
-    pub package_use_mask: PackageUsePolicy,
-    pub package_use_force: PackageUsePolicy,
-    pub package_use_stable_mask: PackageUsePolicy,
-    pub package_use_stable_force: PackageUsePolicy,
+    pub package_use: PackageUseRecords,
+    pub package_use_mask: PackageUseRecords,
+    pub package_use_force: PackageUseRecords,
+    pub package_use_stable_mask: PackageUseRecords,
+    pub package_use_stable_force: PackageUseRecords,
     pub use_mask: UseEntries,
     pub use_force: UseEntries,
     pub use_stable_mask: UseEntries,
     pub use_stable_force: UseEntries,
 }
 
-/// Simple DTO used to build [`UseMasks`] from user configured USE entries.
+/// Simple DTO used to build [`UsePolicy`] from user configured USE entries.
 #[derive(Default)]
 pub struct LocalRecords {
-    pub package_use: PackageUsePolicy,
+    pub package_use: PackageUseRecords,
     pub use_mask: UseEntries,
-    pub package_use_mask: PackageUsePolicy,
+    pub package_use_mask: PackageUseRecords,
 }
 
-/// Immutable runtime policy that determines whether a USE flag is masked or forced.
-pub struct UseMasks {
+/// Immutable runtime policy used to calculate effective
+/// USE flags and evaluate `REQUIRED_USE`.
+#[expect(dead_code)]
+pub struct UsePolicy {
+    iuse_implicit: FxHashSet<UseFlag>,
+
     use_mask: FxHashSet<UseFlag>,
     use_force: FxHashSet<UseFlag>,
+
     use_stable_mask: FxHashSet<UseFlag>,
     use_stable_force: FxHashSet<UseFlag>,
-    #[allow(unused)]
-    package_use: FxHashMap<Atom, UseFlags>,
-    package_use_mask: FxHashMap<Atom, UseFlags>,
-    package_use_force: FxHashMap<Atom, UseFlags>,
-    package_use_stable_mask: FxHashMap<Atom, UseFlags>,
-    package_use_stable_force: FxHashMap<Atom, UseFlags>,
+
+    package_use: PackageUse,
+    package_use_mask: PackageUse,
+    package_use_force: PackageUse,
+
+    package_use_stable_mask: PackageUse,
+    package_use_stable_force: PackageUse,
 }
 
-impl UseMasks {
-    /// Builds [`UseMasks`] from profile and local records.
-    pub fn new(profile: ProfileRecords, local: LocalRecords) -> anyhow::Result<Self> {
+impl UsePolicy {
+    /// Builds [`UsePolicy`] from profile and local records.
+    pub fn new(
+        iuse_implicit: FxHashSet<UseFlag>,
+        profile: ProfileRecords,
+        local: LocalRecords,
+    ) -> anyhow::Result<Self> {
         let expand_conf = UseExpandConfig::from_make_env(&profile.make_defaults)
-            .with_context(|| "failed to build the package USE expansion namespace")?;
+            .context("failed to build the USE expand config")?;
 
         Ok(Self {
             use_mask: local
                 .use_mask
                 .inherit(&profile.use_mask)?
-                .into_iter()
-                .map(Entry::into_inner)
+                .into_inner()
                 .collect(),
-            use_force: profile
-                .use_force
-                .into_iter()
-                .map(Entry::into_inner)
-                .collect(),
-            use_stable_mask: profile
-                .use_stable_mask
-                .into_iter()
-                .map(Entry::into_inner)
-                .collect(),
-            use_stable_force: profile
-                .use_stable_force
-                .into_iter()
-                .map(Entry::into_inner)
-                .collect(),
-            package_use: local
-                .package_use
-                .inherit(&profile.package_use)?
-                .expand(&expand_conf)
-                .with_context(|| "failed to resolve package.use")?,
-            package_use_mask: local
-                .package_use_mask
-                .inherit(&profile.package_use_mask)?
-                .expand(&expand_conf)
-                .with_context(|| "failed to resolve package.use.mask")?,
-            package_use_force: profile
-                .package_use_force
-                .expand(&expand_conf)
-                .with_context(|| "failed to resolve package.use.force")?,
-            package_use_stable_mask: profile
-                .package_use_stable_mask
-                .expand(&expand_conf)
-                .with_context(|| "failed to resolve package.use.stable.mask")?,
-            package_use_stable_force: profile
-                .package_use_stable_force
-                .expand(&expand_conf)
-                .with_context(|| "failed to resolve package.use.stable.force")?,
+            use_force: profile.use_force.into_inner().collect(),
+            use_stable_mask: profile.use_stable_mask.into_inner().collect(),
+            use_stable_force: profile.use_stable_force.into_inner().collect(),
+            package_use: PackageUse::new(
+                local.package_use.inherit(&profile.package_use)?,
+                &expand_conf,
+            )
+            .context("failed to resolve package.use")?,
+            package_use_mask: PackageUse::new(
+                local.package_use_mask.inherit(&profile.package_use_mask)?,
+                &expand_conf,
+            )
+            .context("failed to resolve package.use.mask")?,
+            package_use_force: PackageUse::new(profile.package_use_force, &expand_conf)
+                .context("failed to resolve package.use.force")?,
+            package_use_stable_mask: PackageUse::new(profile.package_use_stable_mask, &expand_conf)
+                .context("failed to resolve package.use.stable.mask")?,
+            package_use_stable_force: PackageUse::new(
+                profile.package_use_stable_force,
+                &expand_conf,
+            )
+            .context("failed to resolve package.use.stable.force")?,
+            iuse_implicit,
         })
     }
 
-    /// Checks whether `flag` is masked.
-    pub fn is_masked(&self, flag: &UseFlag) -> bool {
-        self.use_mask.contains(flag) || self.use_stable_mask.contains(flag)
-    }
-
-    /// Checks whether `flag` is masked for `pkg`.
-    pub fn is_masked_for_pkg<P: PackageView>(&self, pkg: &P, flag: &UseFlag) -> bool {
-        if self.is_masked(flag) {
-            return true;
-        }
-
-        let mask = Self::find_package_use_match(pkg, flag, &self.package_use_mask);
-        let stable_mask = Self::find_package_use_match(pkg, flag, &self.package_use_stable_mask);
-        match (mask, stable_mask) {
-            (Some(mask), Some(stable_mask)) => mask.max(stable_mask).op.as_bool(),
-            (Some(mask), None) => mask.op.as_bool(),
-            (None, Some(stable_mask)) => stable_mask.op.as_bool(),
-            (None, None) => false,
-        }
-    }
-
-    /// Checks whether `flag` is forced.
-    pub fn is_forced(&self, flag: &UseFlag) -> bool {
-        self.use_force.contains(flag) || self.use_stable_force.contains(flag)
-    }
-
-    /// Checks whether `flag` is forced for `pkg`.
-    pub fn is_forced_for_pkg<P: PackageView>(&self, pkg: &P, flag: &UseFlag) -> bool {
-        if self.is_forced(flag) {
-            return true;
-        }
-
-        let force = Self::find_package_use_match(pkg, flag, &self.package_use_force);
-        let stable_force = Self::find_package_use_match(pkg, flag, &self.package_use_stable_force);
-        match (force, stable_force) {
-            (Some(force), Some(stable_force)) => force.max(stable_force).op.as_bool(),
-            (Some(force), None) => force.op.as_bool(),
-            (None, Some(stable_force)) => stable_force.op.as_bool(),
-            (None, None) => false,
-        }
-    }
-
-    fn find_package_use_match<'a, P: PackageView>(
+    /// Returns `true` if all required USE flags are satisfied for the given [`PackageView`].
+    pub fn required_use_satisfied<P: PackageView>(
+        &self,
         pkg: &P,
-        flag: &UseFlag,
-        map: &'a FxHashMap<Atom, UseFlags>,
-    ) -> Option<&'a Entry<UseFlag>> {
-        map.iter()
-            .filter_map(|(atom, flags)| pkg.matches_atom(atom).then(|| flags.get(flag)).flatten())
-            .max()
+        stable_in_use: bool,
+    ) -> anyhow::Result<bool> {
+        let _use_state = self.effective_for(pkg, stable_in_use);
+        // TODO: implement me
+        Ok(true)
+    }
+
+    /// Returns the effective USE state for the given [`PackageView`].
+    fn effective_for<'a, P: PackageView>(
+        &'a self,
+        pkg: &'a P,
+        stable_in_use: bool,
+    ) -> EffectiveUse<'a> {
+        let available = pkg
+            .metadata()
+            .iuse
+            .iter()
+            .map(IUseEntry::flag)
+            .chain(self.iuse_implicit.iter())
+            .collect::<FxHashSet<_>>();
+
+        let requested = self.package_use.enabled_for(pkg).collect::<FxHashSet<_>>();
+        let masked = self.masked_for_pkg(pkg, stable_in_use);
+        let forced = self.forced_for_pkg(pkg, stable_in_use);
+
+        let enabled = available
+            .iter()
+            .filter(|flag| !masked.contains(*flag))
+            .filter(|flag| forced.contains(*flag) || requested.contains(*flag))
+            .copied()
+            .collect();
+
+        EffectiveUse { available, enabled }
+    }
+
+    /// Returns all USE flags that are masked for the given [`PackageView`].
+    fn masked_for_pkg<P: PackageView>(&self, pkg: &P, stable_in_use: bool) -> FxHashSet<&UseFlag> {
+        let iter = self.package_use_mask.enabled_for(pkg);
+        match stable_in_use {
+            true => iter
+                .chain(self.package_use_stable_mask.enabled_for(pkg))
+                .collect(),
+            false => iter.collect(),
+        }
+    }
+
+    /// Returns all USE flags that are forced for the given [`PackageView`].
+    fn forced_for_pkg<P: PackageView>(&self, pkg: &P, stable_in_use: bool) -> FxHashSet<&UseFlag> {
+        let iter = self.package_use_force.enabled_for(pkg);
+        match stable_in_use {
+            true => iter
+                .chain(self.package_use_stable_force.enabled_for(pkg))
+                .collect(),
+            false => iter.collect(),
+        }
+    }
+}
+
+/// Runtime policy to determine the effective USE flags for a package.
+struct PackageUse(Vec<(Atom, UseFlags)>);
+
+impl PackageUse {
+    fn new(records: PackageUseRecords, config: &UseExpandConfig) -> anyhow::Result<Self> {
+        Ok(Self(records.resolve(config)?))
+    }
+
+    /// Returns an iterator over all USE flags that apply to the given `pkg`.
+    ///
+    /// The yielded tuple contains the [`UseFlag`] and the enabled state.
+    fn flags_for<'a, P: PackageView>(
+        &'a self,
+        pkg: &P,
+    ) -> impl Iterator<Item = (&'a UseFlag, bool)> {
+        let mut flags: FxHashMap<&UseFlag, &Entry<UseFlag>> = FxHashMap::default();
+
+        for (atom, cur_flags) in &self.0 {
+            if !pkg.matches_atom(atom) {
+                continue;
+            }
+
+            for entry in cur_flags.iter() {
+                match flags.get(entry.inner()) {
+                    Some(existing) if existing.prec > entry.prec => continue,
+                    _ => flags.insert(entry.inner(), entry),
+                };
+            }
+        }
+        flags
+            .into_iter()
+            .map(|(flag, entry)| (flag, entry.op.as_bool()))
+    }
+
+    /// Returns an iterator over all enabled USE flags that apply to the given `pkg`.
+    fn enabled_for<'a, P: PackageView>(&'a self, pkg: &P) -> impl Iterator<Item = &'a UseFlag> {
+        self.flags_for(pkg)
+            .filter(|(_, enabled)| *enabled)
+            .map(|(flag, _)| flag)
+    }
+}
+
+/// Final USE state of one package.
+#[expect(dead_code)]
+struct EffectiveUse<'a> {
+    /// All flags that can exist for the package.
+    /// This corresponds to `IUSE_EFFECTIVE`.
+    available: FxHashSet<&'a UseFlag>,
+    /// Available flags that are enabled.
+    enabled: FxHashSet<&'a UseFlag>,
+}
+
+impl<'a> EffectiveUse<'a> {
+    /// Returns the effective state of the given `flag`.
+    /// - `Some(true)` if the flag is enabled.
+    /// - `Some(false)` if the flag is disabled.
+    /// - `None` if the flag is not available.
+    #[expect(dead_code)]
+    pub fn state(&self, flag: &UseFlag) -> Option<bool> {
+        self.available
+            .contains(flag)
+            .then(|| self.enabled.contains(flag))
     }
 }
 
@@ -161,45 +230,27 @@ mod tests {
     use crate::test_support::cpv;
 
     #[test]
-    fn test_package_use_policies() -> anyhow::Result<()> {
-        let masks = UseMasks::new(
-            ProfileRecords {
-                make_defaults: MakeEnv::from_string(
-                    "USE_EXPAND=\"LLVM_TARGETS\"
-                        USE_EXPAND_UNPREFIXED=\"ARCH\""
-                        .into(),
-                )?,
-                package_use_force: PackageUsePolicy::from_string(
-                    "dev-lang/rust rustfmt LLVM_TARGETS: AMDGPU".into(),
-                    Precedence::Profile(0),
-                )?,
-                package_use_stable_mask: PackageUsePolicy::from_string(
-                    "dev-lang/rust LLVM_TARGETS: X86".into(),
-                    Precedence::Profile(0),
-                )?,
-                package_use_stable_force: PackageUsePolicy::from_string(
-                    "dev-lang/rust ARCH: amd64".into(),
-                    Precedence::Profile(0),
-                )?,
-                ..Default::default()
-            },
-            LocalRecords {
-                package_use_mask: PackageUsePolicy::from_string(
-                    "dev-lang/rust wasm".into(),
-                    Precedence::User,
-                )?,
-                ..Default::default()
-            },
+    fn test_package_use_flags_for() -> anyhow::Result<()> {
+        let package_use = PackageUse::new(
+            PackageUseRecords::from_string(
+                "*/* foo -bar
+                    dev-lang/rust -foo baz"
+                    .into(),
+                Precedence::User,
+            )?,
+            &UseExpandConfig::default(),
         )?;
+        let package = Package::new(
+            cpv("dev-lang", "rust", "1.0"),
+            "gentoo".parse()?,
+            PackageMetadata::default(),
+        );
+        let flags = package_use.flags_for(&package).collect::<FxHashMap<_, _>>();
 
-        let cpv = cpv("dev-lang", "rust", "1.97.1");
-        let repo = "gentoo".parse().unwrap();
-        let package = Package::new(cpv, repo, PackageMetadata::default());
-        assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("wasm")?));
-        assert!(masks.is_masked_for_pkg(&package, &UseFlag::new("llvm_targets_X86")?));
-        assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("rustfmt")?));
-        assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("llvm_targets_AMDGPU")?));
-        assert!(masks.is_forced_for_pkg(&package, &UseFlag::new("amd64")?));
+        assert_eq!(flags.get(&UseFlag::new("foo")?), Some(&false));
+        assert_eq!(flags.get(&UseFlag::new("bar")?), Some(&false));
+        assert_eq!(flags.get(&UseFlag::new("baz")?), Some(&true));
+        assert_eq!(flags.get(&UseFlag::new("qux")?), None);
         Ok(())
     }
 }

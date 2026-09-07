@@ -7,7 +7,6 @@ use std::path::Path;
 
 /// Holds entries from a line-based file.
 ///
-/// EAPI > 6 supports directories, in that case all files in that directory are merged together.
 /// Lines beginning with a hyphen clear the content of previous lines that are equal to the
 /// remainder of that line.
 /// TODO: consider saving relevant file path and line numbers for better error messages.
@@ -15,6 +14,9 @@ use std::path::Path;
 pub struct LineEntries<T: EntryValue>(Vec<Entry<T>>);
 
 impl<T: EntryValue> LineEntries<T> {
+    /// Creates a new [`LineEntries`] from the given `path`.
+    ///
+    /// if `recursive` is set, `path` is treated as directory and all files in that directory are merged together.
     pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
         let content = content_from_path(path, recursive, true)?;
         Self::from_string(content, order)
@@ -35,12 +37,14 @@ impl<T: EntryValue> LineEntries<T> {
         Ok(Self(entries))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Entry<T>> {
-        self.0.iter()
-    }
-
+    /// Consumes self and returns an iterator of [`Entry<T>`].
     pub fn into_iter(self) -> impl Iterator<Item = Entry<T>> {
         self.0.into_iter()
+    }
+
+    /// Consumes self and returns an iterator of inner `T`.
+    pub fn into_inner(self) -> impl Iterator<Item = T> {
+        self.into_iter().map(Entry::into_inner)
     }
 }
 

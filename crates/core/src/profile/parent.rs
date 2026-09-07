@@ -29,14 +29,14 @@ impl ParentEntry {
         }
 
         let content = fs::read_to_string(path)
-            .with_context(|| anyhow!("unable to read parent file {}", path.display()))?;
+            .with_context(|| format!("unable to read parent file {}", path.display()))?;
         content
             .lines()
             .map(str::trim)
             .filter(|line| !is_blank_or_comment(line))
             .map(Self::try_from)
             .collect::<anyhow::Result<_>>()
-            .with_context(|| anyhow!("unable to parse parent file {}", path.display()))
+            .with_context(|| format!("unable to parse parent file {}", path.display()))
     }
 
     /// Resolves a parent [`ProfileSource`] with the canonical path and repository for the given `referring_profile`.
@@ -58,7 +58,7 @@ impl ParentEntry {
                     .join(profile_path)
                     .canonicalize()
                     .with_context(|| {
-                        anyhow!("unable to resolve parent path '{}'", profile_path.display())
+                        format!("unable to resolve parent path '{}'", profile_path.display())
                     })?;
                 let canonical_root = owning_repo.location.join("profiles").canonicalize()?;
                 if !path.starts_with(&canonical_root) {
@@ -110,7 +110,7 @@ impl ParentEntry {
             bail!("parent path '{}' must be relative", profile_path.display());
         }
         let canonical_root = profiles_root.canonicalize().with_context(|| {
-            anyhow!(
+            format!(
                 "unable to resolve repository profiles root {}",
                 profiles_root.display()
             )
@@ -118,7 +118,7 @@ impl ParentEntry {
         let target = profiles_root.join(profile_path);
         let canonical_target = target
             .canonicalize()
-            .with_context(|| anyhow!("unable to resolve parent profile {}", target.display()))?;
+            .with_context(|| format!("unable to resolve parent profile {}", target.display()))?;
         if !canonical_target.starts_with(&canonical_root) {
             bail!(
                 "parent profile {} escapes repository profiles root {}",

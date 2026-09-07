@@ -431,8 +431,8 @@ mod tests {
             .profile_file("package.unmask", "app-editors/vim")])?;
 
         let source = fixture.package_mask_source()?;
-        let mask = source.mask.iter().next().expect("repository mask");
-        let unmask = source.unmask.iter().next().expect("repository unmask");
+        let mask = source.mask.into_iter().next().expect("repository mask");
+        let unmask = source.unmask.into_iter().next().expect("repository unmask");
 
         assert_eq!(mask.to_string(), "dev-lang/rust");
         assert_eq!(mask.prec, Precedence::Repository);
