@@ -1,10 +1,7 @@
-use std::cmp::Ordering;
-
 use crate::deps::atom::Atom;
 use crate::files::PackageEntries;
-use crate::files::entry::Entry;
+use crate::files::entry::{Entry, Operation, Precedence};
 use crate::package::PackageView;
-use crate::types::FxHashMap;
 use crate::utils::Inherit;
 use log::debug;
 
@@ -26,8 +23,23 @@ pub struct PortageSource {
 
 /// Immutable runtime policy that determines whether a package is masked.
 pub struct PackageMasks {
-    mask: FxHashMap<Box<str>, Vec<Entry<Atom>>>,
-    unmask: FxHashMap<Box<str>, Vec<Entry<Atom>>>,
+    mask: Vec<MaskEntry>,
+    unmask: Vec<MaskEntry>,
+}
+
+struct MaskEntry {
+    atom: Atom,
+    prec: Precedence,
+}
+
+impl From<Entry<Atom>> for MaskEntry {
+    fn from(entry: Entry<Atom>) -> Self {
+        let prec = entry.prec;
+        Self {
+            atom: entry.into_inner(),
+            prec,
+        }
+    }
 }
 
 impl PackageMasks {
@@ -56,32 +68,29 @@ impl PackageMasks {
     pub fn is_masked<P: PackageView>(&self, package: &P) -> bool {
         match Self::find_match(package, &self.mask) {
             Some(mask) => match Self::find_match(package, &self.unmask) {
-                Some(unmask) => match mask.prec.cmp(&unmask.prec) {
-                    Ordering::Less | Ordering::Equal => !unmask.op.as_bool(),
-                    Ordering::Greater => mask.op.as_bool(),
-                },
+                Some(unmask) => mask.prec > unmask.prec,
                 None => true,
             },
             None => false,
         }
     }
 
-    fn find_match<'a, P: PackageView>(
-        package: &P,
-        entries: &'a FxHashMap<Box<str>, Vec<Entry<Atom>>>,
-    ) -> Option<&'a Entry<Atom>> {
-        let atoms = entries.get(&*package.qualified_name())?;
-        atoms.iter().filter(|atom| package.matches_atom(atom)).max()
+    /// Finds the "highest" [`MaskEntry`] that matches  `package`.
+    fn find_match<'a, P: PackageView>(pkg: &P, entries: &'a [MaskEntry]) -> Option<&'a MaskEntry> {
+        entries
+            .iter()
+            .filter(|entry| pkg.matches_atom(&entry.atom))
+            .max_by_key(|entry| entry.prec)
     }
 
-    fn map_from_entries(entries: PackageEntries) -> FxHashMap<Box<str>, Vec<Entry<Atom>>> {
-        let mut map = FxHashMap::default();
-        for atom in entries.into_iter() {
-            map.entry(atom.qualified_name().into())
-                .or_insert_with(|| Vec::with_capacity(1))
-                .push(atom);
-        }
-        map
+    /// Converts `entries` into a vector of [`MaskEntry`].
+    ///
+    /// Only entries with [`Operation::Set`] are included in the resulting vector.
+    fn map_from_entries(entries: PackageEntries) -> Vec<MaskEntry> {
+        entries
+            .into_iter()
+            .filter_map(|entry| matches!(entry.op, Operation::Set).then(|| entry.into()))
+            .collect()
     }
 }
 
