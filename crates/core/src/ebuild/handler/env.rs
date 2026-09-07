@@ -167,7 +167,7 @@ const ENV_INTERNALS: [&str; 51] = [
 
 /// Holds all environment variables for an ebuild process.
 ///
-/// All variable names listed in `ENV_UNSET` and `make_env["ENV_UNSET"]` will be removed.
+/// All variable names listed in `ENV_UNSET` and `makenv["ENV_UNSET"]` will be removed.
 pub struct EbuildEnv(FxHashMap<String, String>);
 
 impl EbuildEnv {
@@ -175,14 +175,14 @@ impl EbuildEnv {
     ///
     /// TODO: ensure `LC_CTYPE` and `LC_COLLATE` are equivalent to POSIX locale
     /// TODO: add more variables as needed
-    pub fn new(ebuild: &Ebuild, phase: &EbuildPhase, make_env: &MakeEnv) -> anyhow::Result<Self> {
+    pub fn new(ebuild: &Ebuild, phase: &EbuildPhase, makenv: &MakeEnv) -> anyhow::Result<Self> {
         let repo_paths =
             shlex::try_join(ebuild.repo.eclasses.repo_paths().filter_map(|p| p.to_str()))
                 .context("unable to escape repo paths")?;
 
         let bash_version = ebuild.eapi.supported_bash_version().to_owned();
 
-        let mut env = make_env
+        let mut env = makenv
             .iter()
             .filter_map(|(name, value)| {
                 Self::filter_var(name).then_some((name.to_string(), value.to_string()))
@@ -214,7 +214,7 @@ impl EbuildEnv {
             ])
             .collect::<FxHashMap<String, String>>();
 
-        if let Some(env_unset) = make_env.get("ENV_UNSET") {
+        if let Some(env_unset) = makenv.get("ENV_UNSET") {
             for name in env_unset.inner() {
                 env.remove(name.as_ref());
             }

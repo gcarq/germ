@@ -74,6 +74,11 @@ impl EnvValue {
         self.0
     }
 
+    /// Merges the given iterator of values using incremental semantics.
+    ///
+    /// Incremental semantics means that `-*` clears all previous values
+    /// while `-foo` clears previous values that match `foo`,
+    /// however `-foo` is not retained in the final result.
     fn merge_values<'a>(iter: impl Iterator<Item = &'a Box<str>>) -> Vec<Box<str>> {
         let mut values: Vec<Box<str>> = Vec::new();
         for value in iter {

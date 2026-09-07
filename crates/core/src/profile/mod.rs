@@ -368,7 +368,7 @@ mod tests {
             profile.make_defaults.get("CAMERAS").unwrap().to_string(),
             "ptp2 nikon"
         );
-        let groups = UseExpandConfig::from_make_env(&profile.make_defaults)?;
+        let groups = UseExpandConfig::from_makenv(&profile.make_defaults)?;
         assert_package_accept_keywords(&profile)?;
 
         assert_eq!(

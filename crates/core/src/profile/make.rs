@@ -2,8 +2,7 @@ use std::iter;
 
 use super::Profile;
 use crate::makenv::{IncrementalVars, MakeEnv};
-
-const USE_EXPAND_VARS: [&str; 2] = ["USE_EXPAND", "USE_EXPAND_UNPREFIXED"];
+use crate::useflag::UseExpandConfig;
 
 /// Folds profile `make.defaults` layers into a [`MakeEnv`] and returns it.
 pub fn fold_defaults(parents: &[Profile], profile: &Profile) -> anyhow::Result<MakeEnv> {
@@ -13,22 +12,9 @@ pub fn fold_defaults(parents: &[Profile], profile: &Profile) -> anyhow::Result<M
         .chain(iter::once(&profile.make_defaults))
         .collect();
 
-    let provisional = fold_layers(&layers, &IncrementalVars::default())?;
-    let vars = IncrementalVars::from(
-        USE_EXPAND_VARS
-            .into_iter()
-            .filter_map(|var| provisional.get(var).map(ToString::to_string)),
-    );
-    fold_layers(&layers, &vars)
-}
-
-/// Folds the given `layers` into a single [`MakeEnv`] and returns it.
-fn fold_layers(layers: &[&MakeEnv], vars: &IncrementalVars) -> anyhow::Result<MakeEnv> {
-    layers.iter().try_fold(MakeEnv::default(), |folded, layer| {
-        let mut child = (*layer).clone();
-        child.inherit_vars(&folded, vars)?;
-        Ok(child)
-    })
+    let provisional = MakeEnv::fold(&layers, &IncrementalVars::default())?;
+    let expand = UseExpandConfig::from_makenv(&provisional)?;
+    MakeEnv::fold(&layers, &IncrementalVars::from(expand.names()))
 }
 
 #[cfg(test)]
@@ -143,6 +129,11 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(env.get("CAMERAS").unwrap().to_string(), "nikon");
+    }
+
+    #[test]
+    fn test_fold_profile_expand_overlap() {
+        assert!(fold_profile_contents(&["USE_EXPAND=FOO USE_EXPAND_UNPREFIXED=FOO"]).is_err());
     }
 
     #[test]

@@ -36,11 +36,11 @@ pub(crate) struct IncrementalVars {
 
 impl IncrementalVars {
     /// Builds a classification from dynamic incremental variable values.
-    pub(crate) fn from(values: impl IntoIterator<Item = String>) -> Self {
+    pub(crate) fn from<'a>(values: impl IntoIterator<Item = &'a str>) -> Self {
         let mut vars = FxHashSet::default();
         for value in values {
             let mut normalized = EnvValue::default();
-            normalized.inherit(&EnvValue::new(value.as_str()));
+            normalized.inherit(&EnvValue::new(value));
             vars.extend(normalized.into_inner());
         }
         Self { vars }
@@ -58,8 +58,7 @@ pub struct MakeEnv(FxHashMap<Box<str>, EnvValue>);
 
 impl MakeEnv {
     pub fn from_path(path: &Path, recursive: bool, optional: bool) -> anyhow::Result<Self> {
-        let content = content_from_path(path, recursive, optional)?;
-        Self::from_string(content)
+        Self::from_string(content_from_path(path, recursive, optional)?)
     }
 
     /// Builds a [`MakeEnv`] from the given content of a make.conf or make.defaults file.
@@ -90,6 +89,15 @@ impl MakeEnv {
     /// Consumes self and returns the inner map.
     pub fn into_inner(self) -> FxHashMap<Box<str>, EnvValue> {
         self.0
+    }
+
+    /// Folds the given `layers` in order, passed `vars` are treated incremental.
+    pub(crate) fn fold(layers: &[&MakeEnv], vars: &IncrementalVars) -> anyhow::Result<MakeEnv> {
+        layers.iter().try_fold(MakeEnv::default(), |folded, layer| {
+            let mut child = (*layer).clone();
+            child.inherit_vars(&folded, vars)?;
+            Ok(child)
+        })
     }
 
     /// Inherits a parent environment using supplied incremental variables.
@@ -146,7 +154,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_make_env_from_string_ok() {
+    fn test_makenv_from_string_ok() {
         let content = r#"
 # This is a comment
 USE="cet"
@@ -161,22 +169,22 @@ USE="${USE} -bar"
 
 enable_year2038="no"
         "#;
-        let make_env = MakeEnv::from_string(content.into()).unwrap();
-        assert_eq!(make_env.get("USE").unwrap().to_string(), "cet -foo -bar");
+        let makenv = MakeEnv::from_string(content.into()).unwrap();
+        assert_eq!(makenv.get("USE").unwrap().to_string(), "cet -foo -bar");
         assert_eq!(
-            make_env.get("BOOTSTRAP_USE").unwrap().to_string(),
+            makenv.get("BOOTSTRAP_USE").unwrap().to_string(),
             "${BOOTSTRAP_USE} cet"
         );
-        assert_eq!(make_env.get("enable_year2038").unwrap().to_string(), "no");
+        assert_eq!(makenv.get("enable_year2038").unwrap().to_string(), "no");
     }
 
     #[test]
-    fn test_make_env_from_string_err() {
+    fn test_makenv_from_string_err() {
         assert!(MakeEnv::from_string("/VAR1=test".into()).is_err());
     }
 
     #[test]
-    fn test_make_env_inherit_from() {
+    fn test_makenv_inherit_from() {
         let parent_content = r#"
         USE="cet -iconv"
         INPUT_DEVICES="libinput"

@@ -57,9 +57,9 @@ pub struct EbuildPhaseHandler<'r> {
 
 impl<'r> EbuildPhaseHandler<'r> {
     /// Create a new ebuild phase handler for the given `ebuild` and `phase`.
-    pub fn new(ebuild: &'r Ebuild, phase: EbuildPhase, make_env: &MakeEnv) -> anyhow::Result<Self> {
+    pub fn new(ebuild: &'r Ebuild, phase: EbuildPhase, makenv: &MakeEnv) -> anyhow::Result<Self> {
         Ok(Self {
-            env: EbuildEnv::new(ebuild, &phase, make_env)?,
+            env: EbuildEnv::new(ebuild, &phase, makenv)?,
             ebuild,
             phase,
         })

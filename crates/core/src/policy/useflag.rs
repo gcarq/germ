@@ -2,7 +2,7 @@ use crate::deps::atom::Atom;
 use crate::files::UseEntries;
 use crate::files::entry::Entry;
 use crate::files::pkgfile::{PackageUseRecords, UseFlags};
-use crate::makenv::MakeEnv;
+use crate::makenv::{EnvValue, MakeEnv};
 use crate::package::PackageView;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::{IUseEntry, UseExpandConfig, UseFlag};
@@ -36,6 +36,7 @@ pub struct LocalRecords {
 /// USE flags and evaluate `REQUIRED_USE`.
 #[expect(dead_code)]
 pub struct UsePolicy {
+    base_use: UseRules,
     iuse_implicit: FxHashSet<UseFlag>,
 
     use_mask: FxHashSet<UseFlag>,
@@ -54,15 +55,20 @@ pub struct UsePolicy {
 
 impl UsePolicy {
     /// Builds [`UsePolicy`] from profile and local records.
+    ///
+    /// `makenv` is expected to be the effective [`MakeEnv`] after inheriting all parents.
     pub fn new(
+        makenv: &MakeEnv,
         iuse_implicit: FxHashSet<UseFlag>,
         profile: ProfileRecords,
         local: LocalRecords,
     ) -> anyhow::Result<Self> {
-        let expand_conf = UseExpandConfig::from_make_env(&profile.make_defaults)
-            .context("failed to build the USE expand config")?;
+        let base_use = UseRules::from_makenv(makenv).context("failed to compile global USE")?;
+        let expand_conf = UseExpandConfig::from_makenv(&profile.make_defaults)
+            .context("failed to build the package USE expand config")?;
 
         Ok(Self {
+            base_use,
             use_mask: local
                 .use_mask
                 .inherit(&profile.use_mask)?
@@ -119,14 +125,16 @@ impl UsePolicy {
             .chain(self.iuse_implicit.iter())
             .collect::<FxHashSet<_>>();
 
-        let requested = self.package_use.enabled_for(pkg).collect::<FxHashSet<_>>();
+        // TODO: this is a bit of a hack, get rid of the allocation
+        let mut desired = self.base_use.clone();
+        desired.extend(self.package_use.flags_for(pkg));
         let masked = self.masked_for_pkg(pkg, stable_in_use);
         let forced = self.forced_for_pkg(pkg, stable_in_use);
 
         let enabled = available
             .iter()
             .filter(|flag| !masked.contains(*flag))
-            .filter(|flag| forced.contains(*flag) || requested.contains(*flag))
+            .filter(|flag| forced.contains(*flag) || desired.enabled(flag))
             .copied()
             .collect();
 
@@ -152,6 +160,51 @@ impl UsePolicy {
                 .chain(self.package_use_stable_force.enabled_for(pkg))
                 .collect(),
             false => iter.collect(),
+        }
+    }
+}
+
+/// Runtime USE policy assignments.
+///
+/// It is a simple mapping of [`UseFlag`] to `bool` indicating
+/// whether the flag is enabled or disabled.
+#[derive(Clone, Default)]
+struct UseRules(FxHashMap<UseFlag, bool>);
+
+impl UseRules {
+    /// Builds [`UseRules`] from `USE`, `USE_EXPAND`, etc. resolved from `makenv`.
+    fn from_makenv(makenv: &MakeEnv) -> anyhow::Result<Self> {
+        let expand = UseExpandConfig::from_makenv(makenv)
+            .context("invalid global USE expansion configuration")?;
+        let mut rules = Self::default();
+
+        for value in makenv.get("USE").into_iter().flat_map(EnvValue::inner) {
+            let flag = UseFlag::new(value.clone()).context("invalid USE value")?;
+            rules.set(flag, true);
+        }
+        for flag in expand.materialize(makenv)? {
+            rules.set(flag, true);
+        }
+        Ok(rules)
+    }
+
+    /// Inserts the given `flag` with the `enabled` state.
+    fn set(&mut self, flag: UseFlag, enabled: bool) {
+        self.0.insert(flag, enabled);
+    }
+
+    /// Inserts all given `rules` into the rules.
+    fn extend<'a>(&mut self, rules: impl IntoIterator<Item = (&'a UseFlag, bool)>) {
+        for (flag, enabled) in rules {
+            self.set(flag.clone(), enabled);
+        }
+    }
+
+    /// Returns `true` if the given `flag` is enabled.
+    fn enabled(&self, flag: &UseFlag) -> bool {
+        match self.0.get(flag) {
+            Some(&enabled) => enabled,
+            None => false,
         }
     }
 }
@@ -199,7 +252,7 @@ impl PackageUse {
 }
 
 /// Final USE state of one package.
-#[expect(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 struct EffectiveUse<'a> {
     /// All flags that can exist for the package.
     /// This corresponds to `IUSE_EFFECTIVE`.
@@ -213,8 +266,8 @@ impl<'a> EffectiveUse<'a> {
     /// - `Some(true)` if the flag is enabled.
     /// - `Some(false)` if the flag is disabled.
     /// - `None` if the flag is not available.
-    #[expect(dead_code)]
-    pub fn state(&self, flag: &UseFlag) -> Option<bool> {
+    #[cfg_attr(not(test), expect(dead_code))]
+    fn state(&self, flag: &UseFlag) -> Option<bool> {
         self.available
             .contains(flag)
             .then(|| self.enabled.contains(flag))
@@ -229,28 +282,86 @@ mod tests {
     use crate::package::metadata::PackageMetadata;
     use crate::test_support::cpv;
 
-    #[test]
-    fn test_package_use_flags_for() -> anyhow::Result<()> {
-        let package_use = PackageUse::new(
-            PackageUseRecords::from_string(
-                "*/* foo -bar
-                    dev-lang/rust -foo baz"
-                    .into(),
-                Precedence::User,
-            )?,
-            &UseExpandConfig::default(),
+    fn use_state(
+        makenv: &str,
+        package_use: &str,
+        iuse: &str,
+        flag: &str,
+    ) -> anyhow::Result<Option<bool>> {
+        let makenv = MakeEnv::from_string(makenv.into())?;
+        let local = LocalRecords {
+            package_use: PackageUseRecords::from_string(package_use.into(), Precedence::User)?,
+            ..Default::default()
+        };
+        let policy = UsePolicy::new(
+            &makenv,
+            FxHashSet::default(),
+            ProfileRecords::default(),
+            local,
         )?;
         let package = Package::new(
             cpv("dev-lang", "rust", "1.0"),
             "gentoo".parse()?,
-            PackageMetadata::default(),
+            PackageMetadata {
+                iuse: iuse
+                    .split_whitespace()
+                    .map(str::parse)
+                    .collect::<anyhow::Result<_>>()?,
+                ..Default::default()
+            },
         );
-        let flags = package_use.flags_for(&package).collect::<FxHashMap<_, _>>();
+        Ok(policy
+            .effective_for(&package, false)
+            .state(&UseFlag::new(flag)?))
+    }
 
-        assert_eq!(flags.get(&UseFlag::new("foo")?), Some(&false));
-        assert_eq!(flags.get(&UseFlag::new("bar")?), Some(&false));
-        assert_eq!(flags.get(&UseFlag::new("baz")?), Some(&true));
-        assert_eq!(flags.get(&UseFlag::new("qux")?), None);
+    #[test]
+    fn test_effective_use_global() -> anyhow::Result<()> {
+        assert_eq!(use_state("USE=foo", "", "foo", "foo")?, Some(true));
         Ok(())
+    }
+
+    #[test]
+    fn test_effective_use_expand() {
+        let state = use_state(
+            "USE_EXPAND=VIDEO_CARDS
+            VIDEO_CARDS=amdgpu",
+            "",
+            "video_cards_amdgpu",
+            "video_cards_amdgpu",
+        )
+        .unwrap();
+        assert_eq!(state, Some(true));
+    }
+
+    #[test]
+    fn test_effective_use_expand_unprefixed() {
+        let state = use_state(
+            "USE_EXPAND_UNPREFIXED=ARCH
+            ARCH=amd64",
+            "",
+            "amd64",
+            "amd64",
+        )
+        .unwrap();
+        assert_eq!(state, Some(true));
+    }
+
+    #[test]
+    fn test_effective_use_package_disable() {
+        let state = use_state("USE=foo", "*/* -foo", "foo", "foo").unwrap();
+        assert_eq!(state, Some(false));
+    }
+
+    #[test]
+    fn test_effective_use_package_override() {
+        let state = use_state("", "*/* foo", "foo", "foo").unwrap();
+        assert_eq!(state, Some(true));
+    }
+
+    #[test]
+    fn test_effective_use_unavailable() {
+        let state = use_state("USE=foo", "", "", "foo").unwrap();
+        assert_eq!(state, None);
     }
 }

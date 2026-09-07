@@ -223,12 +223,12 @@ mod tests {
     }
 
     fn config() -> anyhow::Result<UseExpandConfig> {
-        let make_env = MakeEnv::from_string(
+        let makenv = MakeEnv::from_string(
             "USE_EXPAND=\"LLVM_TARGETS\"
                 USE_EXPAND_UNPREFIXED=\"ARCH\""
                 .into(),
         )?;
-        UseExpandConfig::from_make_env(&make_env)
+        UseExpandConfig::from_makenv(&makenv)
     }
 
     fn flags_for<'a>(rules: &'a [(Atom, UseFlags)], atom: &str) -> anyhow::Result<&'a UseFlags> {
@@ -380,7 +380,6 @@ mod tests {
         let trailing =
             PackageUseRecords::from_string("dev-lang/rust UNKNOWN:".into(), Precedence::User)?;
         assert!(trailing.resolve(&config()?).is_ok());
-
         Ok(())
     }
 
@@ -408,12 +407,12 @@ mod tests {
 
     #[test]
     fn test_resolve_rejects_overlapping_groups() -> anyhow::Result<()> {
-        let make_env = MakeEnv::from_string(
+        let makenv = MakeEnv::from_string(
             "USE_EXPAND=\"ARCH\"
                 USE_EXPAND_UNPREFIXED=\"ARCH\""
                 .into(),
         )?;
-        assert!(UseExpandConfig::from_make_env(&make_env).is_err());
+        assert!(UseExpandConfig::from_makenv(&makenv).is_err());
         Ok(())
     }
 

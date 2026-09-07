@@ -2,7 +2,7 @@ use crate::files::entry::{Entry, Operation};
 use crate::makenv::{EnvValue, MakeEnv};
 use crate::types::FxHashMap;
 use crate::useflag::UseFlag;
-use anyhow::bail;
+use anyhow::{Context, bail};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum UseExpandKind {
@@ -18,11 +18,11 @@ pub struct UseExpandConfig {
 
 impl UseExpandConfig {
     /// Builds the expansion config from the effective [`MakeEnv`].
-    pub fn from_make_env(make_env: &MakeEnv) -> anyhow::Result<Self> {
+    pub fn from_makenv(makenv: &MakeEnv) -> anyhow::Result<Self> {
         let mut config = Self::default();
-        config.add_groups(make_env.get("USE_EXPAND"), UseExpandKind::Prefixed)?;
+        config.add_groups(makenv.get("USE_EXPAND"), UseExpandKind::Prefixed)?;
         config.add_groups(
-            make_env.get("USE_EXPAND_UNPREFIXED"),
+            makenv.get("USE_EXPAND_UNPREFIXED"),
             UseExpandKind::Unprefixed,
         )?;
         Ok(config)
@@ -51,6 +51,34 @@ impl UseExpandConfig {
         }
     }
 
+    /// Returns the USE expand group names.
+    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
+        self.groups.keys().map(AsRef::as_ref)
+    }
+
+    /// Materializes all groups into expanded USE flags.
+    pub(crate) fn materialize(&self, makenv: &MakeEnv) -> anyhow::Result<Vec<UseFlag>> {
+        let mut flags = Vec::new();
+        for (group, kind) in &self.groups {
+            let Some(values) = makenv.get(group.as_ref()) else {
+                continue;
+            };
+
+            let prefix =
+                matches!(kind, UseExpandKind::Prefixed).then(|| group.to_ascii_lowercase());
+
+            for value in values.inner() {
+                let flag = match &prefix {
+                    Some(prefix) => UseFlag::new(format!("{prefix}_{value}")),
+                    None => UseFlag::new(value.clone()),
+                }
+                .with_context(|| format!("invalid USE expand value for {group}"))?;
+                flags.push(flag);
+            }
+        }
+        Ok(flags)
+    }
+
     /// Adds the use expand groups from the given [`EnvValue`] to the config.
     fn add_groups(&mut self, values: Option<&EnvValue>, kind: UseExpandKind) -> anyhow::Result<()> {
         let Some(values) = values else {
@@ -76,13 +104,13 @@ mod tests {
     use crate::files::entry::Precedence;
 
     #[test]
-    fn test_from_make_env() -> anyhow::Result<()> {
-        let make_env = MakeEnv::from_string(
+    fn test_from_makenv() -> anyhow::Result<()> {
+        let makenv = MakeEnv::from_string(
             "USE_EXPAND=\"LLVM_TARGETS\"
                 USE_EXPAND_UNPREFIXED=\"ARCH\""
                 .into(),
         )?;
-        let config = UseExpandConfig::from_make_env(&make_env)?;
+        let config = UseExpandConfig::from_makenv(&makenv)?;
 
         assert_eq!(
             config.groups.get("LLVM_TARGETS"),
@@ -94,12 +122,12 @@ mod tests {
 
     #[test]
     fn test_expand_entry() -> anyhow::Result<()> {
-        let make_env = MakeEnv::from_string(
+        let makenv = MakeEnv::from_string(
             "USE_EXPAND=\"LLVM_TARGETS\"
                 USE_EXPAND_UNPREFIXED=\"ARCH\""
                 .into(),
         )?;
-        let config = UseExpandConfig::from_make_env(&make_env)?;
+        let config = UseExpandConfig::from_makenv(&makenv)?;
 
         let expanded = config.expand_entry(
             "LLVM_TARGETS",
@@ -114,13 +142,13 @@ mod tests {
 
     #[test]
     fn test_rejects_overlapping_groups() -> anyhow::Result<()> {
-        let make_env = MakeEnv::from_string(
+        let makenv = MakeEnv::from_string(
             "USE_EXPAND=\"LLVM_TARGETS\"
                 USE_EXPAND_UNPREFIXED=\"LLVM_TARGETS\""
                 .into(),
         )?;
 
-        assert!(UseExpandConfig::from_make_env(&make_env).is_err());
+        assert!(UseExpandConfig::from_makenv(&makenv).is_err());
         Ok(())
     }
 }

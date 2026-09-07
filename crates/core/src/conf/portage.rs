@@ -5,7 +5,7 @@ use crate::SysConf;
 use crate::files::entry::Precedence;
 use crate::files::pkgfile::{PackageAcceptKeywords, PackageUseRecords};
 use crate::files::{PackageEntries, UseEntries};
-use crate::makenv::MakeEnv;
+use crate::makenv::{IncrementalVars, MakeEnv};
 use crate::policy::keyword::EffectiveKeywords;
 use crate::policy::pkgmask::PortageSource as PackageMaskSource;
 use crate::policy::useflag::{
@@ -14,7 +14,7 @@ use crate::policy::useflag::{
 use crate::profile::Profile;
 use crate::repository::RepoSet;
 use crate::types::FxHashSet;
-use crate::useflag::UseFlag;
+use crate::useflag::{UseExpandConfig, UseFlag};
 use crate::utils::Inherit;
 use anyhow::Context;
 use log::debug;
@@ -40,7 +40,7 @@ impl PortageConf {
             .resolve_profile(&profile_path)
             .with_context(|| format!("unable to build profile from {}", profile_path.display()))?;
 
-        let makenv = Self::init_make_env(&profile, sysconf)?;
+        let makenv = Self::init_makenv(&profile, sysconf)?;
         let arch = makenv
             .get("ARCH")
             .context("missing ARCH variable")?
@@ -96,6 +96,7 @@ impl PortageConf {
     /// Returns [`UsePolicy`] from profile and user config.
     pub fn use_policy(&self) -> anyhow::Result<UsePolicy> {
         UsePolicy::new(
+            self.makenv(),
             self.iuse_implicit()?,
             UseProfileRecords {
                 make_defaults: self.profile.make_defaults.clone(),
@@ -135,17 +136,19 @@ impl PortageConf {
     ///   * make.globals
     ///   * make_defaults from active profile
     ///   * make.conf
-    fn init_make_env(profile: &Profile, sysconf: &SysConf) -> anyhow::Result<MakeEnv> {
+    fn init_makenv(profile: &Profile, sysconf: &SysConf) -> anyhow::Result<MakeEnv> {
         let globals_path = sysconf.default_portage_conf().join("make.globals");
         let make_globals = MakeEnv::from_path(&globals_path, true, false)
             .context("unable to process make.globals")?;
         let make_conf = MakeEnv::from_path(&sysconf.portage_conf().join("make.conf"), true, false)
             .context("unable to process make.conf")?;
 
-        MakeEnv::default()
-            .inherit(&make_globals)?
-            .inherit(&profile.make_defaults)?
-            .inherit(&make_conf)
+        let layers = [&make_globals, &profile.make_defaults, &make_conf];
+        let provisional = MakeEnv::fold(&layers, &IncrementalVars::default())?;
+        let expand =
+            UseExpandConfig::from_makenv(&provisional).context("invalid USE expand config")?;
+        let vars = IncrementalVars::from(expand.names());
+        MakeEnv::fold(&layers, &vars)
     }
 
     /// Returns the set `IUSE_IMPLICIT` from [`MakeEnv`].
@@ -164,64 +167,72 @@ impl PortageConf {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::os::unix::fs::symlink;
-
+    use super::super::test_support::PortageConfFixture;
     use super::*;
 
-    use crate::repository::test_support::RepoBuilder;
-
-    fn fixture() -> anyhow::Result<(tempfile::TempDir, SysConf, RepoSet)> {
-        let root = tempfile::tempdir()?;
-        let repository = root.path().join("repository");
-        RepoBuilder::new("repo")
-            .profile("default/linux")
-            .profile_file(
-                "default/linux/make.defaults",
-                "IUSE_IMPLICIT=profile_flag\n",
-            )
-            .write_to(&repository)?;
-
-        let sysconf = SysConf::new(root.path().to_path_buf());
-        let portage = sysconf.portage_conf();
-        fs::create_dir_all(&portage)?;
-        fs::write(
-            portage.join("repos.conf"),
-            format!("[repo]\nlocation = {}\n", repository.display()),
+    fn configure_expand(fixture: &PortageConfFixture) -> anyhow::Result<()> {
+        fixture.set_profile_make_defaults(
+            "IUSE_IMPLICIT=profile_flag
+            USE_EXPAND=VIDEO_CARDS
+            VIDEO_CARDS=nouveau
+            ",
         )?;
-        fs::write(portage.join("make.conf"), "")?;
-        symlink(
-            repository.join("profiles/default/linux"),
-            portage.join("make.profile"),
-        )?;
-        let globals = sysconf.default_portage_conf().join("make.globals");
-        fs::create_dir_all(globals.parent().expect("make.globals parent"))?;
-        fs::write(globals, "ARCH=amd64\n")?;
-
-        let repo_set = RepoSet::new(sysconf.clone().into())?;
-        Ok((root, sysconf, repo_set))
+        fixture.set_make_globals(
+            "ARCH=amd64
+            USE_EXPAND=VIDEO_CARDS
+            VIDEO_CARDS=amdgpu
+            ",
+        )
     }
 
     #[test]
-    fn test_portage_conf_make_env() -> anyhow::Result<()> {
-        let (_root, sysconf, repo_set) = fixture()?;
-        let conf = PortageConf::new(&repo_set, &sysconf)?;
+    fn test_portage_conf_expand_member_inherit() -> anyhow::Result<()> {
+        let fixture = PortageConfFixture::new()?;
+        configure_expand(&fixture)?;
+        fixture.set_make_conf("VIDEO_CARDS=\"-amdgpu radeonsi\"\n")?;
+        let conf = fixture.build()?;
 
         assert_eq!(
-            conf.makenv().get("ARCH").map(ToString::to_string),
-            Some("amd64".into())
+            conf.makenv().get("VIDEO_CARDS").map(ToString::to_string),
+            Some("nouveau radeonsi".into())
         );
         Ok(())
     }
 
     #[test]
-    fn test_portage_conf_use_policy() -> anyhow::Result<()> {
-        let (_root, sysconf, repo_set) = fixture()?;
-        fs::write(
-            sysconf.portage_conf().join("make.conf"),
-            "IUSE_IMPLICIT=local_flag\n",
+    fn test_portage_conf_expand_groups() -> anyhow::Result<()> {
+        let fixture = PortageConfFixture::new()?;
+        configure_expand(&fixture)?;
+        fixture.set_make_conf(
+            "USE_EXPAND=\"-VIDEO_CARDS INPUT_DEVICES\"
+            INPUT_DEVICES=libinput
+            ",
         )?;
-        let conf = PortageConf::new(&repo_set, &sysconf)?;
+        let conf = fixture.build()?;
+        let expand = UseExpandConfig::from_makenv(conf.makenv())?;
+
+        assert_eq!(
+            expand.materialize(conf.makenv())?,
+            vec![UseFlag::new("input_devices_libinput")?]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_portage_conf_expand_overlap() -> anyhow::Result<()> {
+        let fixture = PortageConfFixture::new()?;
+        configure_expand(&fixture)?;
+        fixture.set_make_conf("USE_EXPAND_UNPREFIXED=VIDEO_CARDS\n")?;
+
+        assert!(fixture.build().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_iuse_implicit_ignores_make_conf() -> anyhow::Result<()> {
+        let fixture = PortageConfFixture::new()?;
+        fixture.set_make_conf("IUSE_IMPLICIT=local_flag\n")?;
+        let conf = fixture.build()?;
 
         assert_eq!(
             conf.iuse_implicit()?,
@@ -232,16 +243,12 @@ mod tests {
 
     #[test]
     fn test_portage_conf_skips_keyword_policy() -> anyhow::Result<()> {
-        let (root, sysconf, repo_set) = fixture()?;
-        fs::write(
-            sysconf.portage_conf().join("package.accept_keywords"),
-            "invalid atom",
-        )?;
-        let conf = PortageConf::new(&repo_set, &sysconf)?;
+        let fixture = PortageConfFixture::new()?;
+        fixture.set_portage_file("package.accept_keywords", "invalid atom")?;
+        let conf = fixture.build()?;
 
         assert!(conf.use_policy().is_ok());
         assert!(conf.effective_keywords().is_err());
-        drop(root);
         Ok(())
     }
 }
