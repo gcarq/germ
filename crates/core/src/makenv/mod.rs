@@ -1,10 +1,12 @@
+mod stack;
 mod value;
 
 use crate::files::content_from_path;
 use crate::types::{FxHashMap, FxHashSet};
-use crate::utils;
-use crate::utils::Inherit;
+use crate::useflag::UseExpandConfig;
+use crate::utils::{self, Inherit};
 use anyhow::{Context, bail};
+pub use stack::MakeEnvStack;
 use std::ops::Deref;
 use std::path::Path;
 pub use value::EnvValue;
@@ -30,29 +32,34 @@ const INCREMENTAL_VARS: [&str; 14] = [
 
 /// Holds all variable names that must be considered incremental.
 #[derive(Default)]
-pub(crate) struct IncrementalVars {
-    vars: FxHashSet<Box<str>>,
-}
+struct IncrementalVars(FxHashSet<Box<str>>);
 
 impl IncrementalVars {
-    /// Builds a classification from dynamic incremental variable values.
-    pub(crate) fn from<'a>(values: impl IntoIterator<Item = &'a str>) -> Self {
+    /// Collects incremental vars from effective USE expansion groups in `layers`.
+    pub fn from_makenv_layers(layers: &[&MakeEnv]) -> anyhow::Result<Self> {
+        let provisional = MakeEnv::fold(layers, &Self::default())?;
+        let expand = UseExpandConfig::from_makenv(&provisional)?;
+        Ok(Self::from(expand.names()))
+    }
+
+    /// Collects the given incremental variable `names`.
+    pub fn from<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
         let mut vars = FxHashSet::default();
-        for value in values {
-            let mut normalized = EnvValue::default();
-            normalized.inherit(&EnvValue::new(value));
-            vars.extend(normalized.into_inner());
+        for name in names {
+            let mut value = EnvValue::new(name);
+            value.normalize();
+            vars.extend(value);
         }
-        Self { vars }
+        Self(vars)
     }
 
     /// Returns `true` if the given `name` is an incremental variable.
     fn contains(&self, name: &str) -> bool {
-        INCREMENTAL_VARS.contains(&name) || self.vars.contains(name)
+        INCREMENTAL_VARS.contains(&name) || self.0.contains(name)
     }
 }
 
-/// Holds all environment variables defined in a make.conf or make.defaults file.
+/// Holds env vars from either one or multiple folded make files.
 #[derive(Default, Clone)]
 pub struct MakeEnv(FxHashMap<Box<str>, EnvValue>);
 
@@ -91,8 +98,14 @@ impl MakeEnv {
         self.0
     }
 
+    /// Folds ordered layers using their effective USE expansion namespace.
+    pub(crate) fn fold_with_use_expand(layers: &[&Self]) -> anyhow::Result<Self> {
+        let vars = IncrementalVars::from_makenv_layers(layers)?;
+        Self::fold(layers, &vars)
+    }
+
     /// Folds the given `layers` in order, passed `vars` are treated incremental.
-    pub(crate) fn fold(layers: &[&MakeEnv], vars: &IncrementalVars) -> anyhow::Result<MakeEnv> {
+    fn fold(layers: &[&Self], vars: &IncrementalVars) -> anyhow::Result<Self> {
         layers.iter().try_fold(MakeEnv::default(), |folded, layer| {
             let mut child = (*layer).clone();
             child.inherit_vars(&folded, vars)?;
@@ -100,15 +113,17 @@ impl MakeEnv {
         })
     }
 
-    /// Inherits a parent environment using supplied incremental variables.
-    pub(super) fn inherit_vars(
-        &mut self,
-        parent: &MakeEnv,
-        vars: &IncrementalVars,
-    ) -> anyhow::Result<()> {
+    /// Expands local variable references using values from `parent`.
+    fn expand_from(&mut self, parent: &MakeEnv) -> anyhow::Result<()> {
         for value in self.0.values_mut() {
             *value = value.expand_with(|var| parent.get(var))?;
         }
+        Ok(())
+    }
+
+    /// Inherits a parent environment using supplied incremental variables.
+    fn inherit_vars(&mut self, parent: &MakeEnv, vars: &IncrementalVars) -> anyhow::Result<()> {
+        self.expand_from(parent)?;
 
         for (key, parent_value) in parent.iter() {
             match self.0.get_mut(key) {
@@ -184,6 +199,19 @@ enable_year2038="no"
     }
 
     #[test]
+    fn test_makenv_expand_from() -> anyhow::Result<()> {
+        let parent = MakeEnv::from_string("USE=foo".into())?;
+        let mut child = MakeEnv::from_string("USE=\"${USE} -foo\"".into())?;
+        child.expand_from(&parent)?;
+
+        assert_eq!(
+            child.get("USE").map(ToString::to_string),
+            Some("foo -foo".into())
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_makenv_inherit_from() {
         let parent_content = r#"
         USE="cet -iconv"
@@ -199,5 +227,59 @@ enable_year2038="no"
         assert_eq!(child.get("USE").unwrap().to_string(), "seccomp branding");
         assert_eq!(child.get("INPUT_DEVICES").unwrap().to_string(), "libinput");
         assert_eq!(child.get("GRUB_PLATFORM").unwrap().to_string(), "efi-64");
+    }
+
+    fn fold_contents(contents: &[&str]) -> anyhow::Result<MakeEnv> {
+        let envs = contents
+            .iter()
+            .map(|content| MakeEnv::from_string((*content).to_owned()))
+            .collect::<anyhow::Result<Vec<_>>>()
+            .unwrap();
+        let layers = envs.iter().collect::<Vec<_>>();
+        MakeEnv::fold_with_use_expand(&layers)
+    }
+
+    #[test]
+    fn test_fold_with_use_expand_members() {
+        let env = fold_contents(&[
+            "USE_EXPAND='CAMERAS ROOT'
+            USE_EXPAND_UNPREFIXED=ARCH
+            CAMERAS=canon
+            ROOT='-* root'
+            ARCH='amd64 x86'",
+            "CAMERAS='-canon ptp2'
+            ROOT=desktop
+            ARCH='-x86 arm64'",
+        ])
+        .unwrap();
+        assert_eq!(env.get("CAMERAS").unwrap().to_string(), "ptp2");
+        assert_eq!(env.get("ROOT").unwrap().to_string(), "root desktop");
+        assert_eq!(env.get("ARCH").unwrap().to_string(), "amd64 arm64");
+    }
+
+    #[test]
+    fn test_fold_with_use_expand_readdition() {
+        let env = fold_contents(&[
+            "USE_EXPAND=CAMERAS CAMERAS=canon",
+            "USE_EXPAND=-CAMERAS CAMERAS='-canon nikon'",
+            "USE_EXPAND=CAMERAS CAMERAS=ptp2",
+        ])
+        .unwrap();
+        assert_eq!(env.get("CAMERAS").unwrap().to_string(), "nikon ptp2");
+    }
+
+    #[test]
+    fn test_fold_with_use_expand_reference() {
+        let env = fold_contents(&[
+            "MEMBER_NAMES=CAMERAS CAMERAS=canon",
+            "USE_EXPAND='${MEMBER_NAMES}' CAMERAS='-canon nikon'",
+        ])
+        .unwrap();
+        assert_eq!(env.get("CAMERAS").unwrap().to_string(), "nikon");
+    }
+
+    #[test]
+    fn test_fold_with_use_expand_overlap() {
+        assert!(fold_contents(&["USE_EXPAND=FOO USE_EXPAND_UNPREFIXED=FOO"]).is_err());
     }
 }

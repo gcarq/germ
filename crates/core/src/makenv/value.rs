@@ -37,7 +37,7 @@ impl EnvValue {
     }
 
     /// Expands and returns a string by substituting variables from the given `lookup` function.
-    pub(super) fn expand_with<'ctx, F>(&self, lookup: F) -> anyhow::Result<Self>
+    pub fn expand_with<'ctx, F>(&self, lookup: F) -> anyhow::Result<Self>
     where
         F: Fn(&str) -> Option<&'ctx EnvValue>,
     {
@@ -65,13 +65,19 @@ impl EnvValue {
         Ok(Self::new(new_value.as_str()))
     }
 
-    pub fn inner(&self) -> &[Box<str>] {
-        &self.0
+    /// Returns an iter over the inner values.
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(AsRef::as_ref)
     }
 
-    /// Consumes self and returns the inner value.
-    pub fn into_inner(self) -> Vec<Box<str>> {
-        self.0
+    /// Normalize using incremental semantics.
+    pub fn normalize(&mut self) {
+        self.0 = Self::merge_values(self.iter());
+    }
+
+    /// Inherits the given `parent` with incremental semantics.
+    pub fn inherit(&mut self, parent: &Self) {
+        self.0 = Self::merge_values(parent.iter().chain(self.iter()));
     }
 
     /// Merges the given iterator of values using incremental semantics.
@@ -79,28 +85,28 @@ impl EnvValue {
     /// Incremental semantics means that `-*` clears all previous values
     /// while `-foo` clears previous values that match `foo`,
     /// however `-foo` is not retained in the final result.
-    fn merge_values<'a>(iter: impl Iterator<Item = &'a Box<str>>) -> Vec<Box<str>> {
+    fn merge_values<'a>(iter: impl Iterator<Item = &'a str>) -> Vec<Box<str>> {
         let mut values: Vec<Box<str>> = Vec::new();
         for value in iter {
-            if value.as_ref() == "-*" {
+            if value == "-*" {
                 values.clear();
             } else if let Some(negated) = value.strip_prefix('-') {
                 values.retain(|cur| cur.as_ref() != negated);
-            } else if !values.contains(value) {
-                values.push(value.clone());
+            } else if values.iter().find(|cur| cur.as_ref() == value).is_none() {
+                values.push(value.into());
             }
         }
         values
     }
+}
 
-    /// Normalize using incremental semantics.
-    pub fn normalize(&mut self) {
-        self.0 = Self::merge_values(self.inner().iter());
-    }
+impl IntoIterator for EnvValue {
+    type Item = Box<str>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
 
-    /// Inherits the given `parent` with incremental semantics.
-    pub fn inherit(&mut self, parent: &Self) {
-        self.0 = Self::merge_values(parent.inner().iter().chain(self.inner()));
+    /// Consumes self and returns an iter over the inner values.
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 

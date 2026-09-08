@@ -1,15 +1,14 @@
 mod keywords;
 mod useflags;
 
-pub use keywords::{KeywordRule, PackageAcceptKeywords};
-pub use useflags::{PackageUseRecords, UseFlags};
+pub(crate) use keywords::{KeywordRule, PackageAcceptKeywords};
+pub(crate) use useflags::{PackageUseRecords, UseFlags};
 
 use anyhow::Context;
 use std::path::Path;
 
 use crate::deps::atom::Atom;
-use crate::files::content_from_path;
-use crate::files::entry::Precedence;
+use crate::files::{content_from_path, entry::Precedence};
 use crate::utils::{Inherit, strip_line_comment};
 use indexmap::IndexMap;
 

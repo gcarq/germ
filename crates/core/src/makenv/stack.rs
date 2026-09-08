@@ -1,0 +1,218 @@
+use anyhow::Context;
+
+use super::{EnvValue, IncrementalVars, MakeEnv};
+use crate::keyword::KeywordSelector;
+use crate::repository::Arch;
+use crate::types::{FxHashMap, FxHashSet};
+use crate::useflag::{UseExpandConfig, UseFlag};
+
+/// Holds all make envs. They are split into global, profile,
+/// and user layers, which are folded into a final make env.
+pub struct MakeEnvStack {
+    #[expect(dead_code)]
+    global: MakeEnv,
+    profile: MakeEnv,
+    user: MakeEnv,
+    // The final resolved make env after folding all layers.
+    // TODO: this feels like a hack, but works for now,
+    //       in an optimal case, `user` should be the "final" make env.
+    makenv: MakeEnv,
+}
+
+impl MakeEnvStack {
+    /// Expands global, profile, and user make config layers.
+    pub fn new(global: MakeEnv, profile: MakeEnv, user: MakeEnv) -> anyhow::Result<Self> {
+        let vars = IncrementalVars::from_makenv_layers(&[&global, &profile, &user])?;
+        let inherited = MakeEnv::fold(&[&global, &profile], &vars)?;
+        let mut user = user;
+        user.expand_from(&inherited)?;
+        let makenv = MakeEnv::fold(&[&global, &profile, &user], &vars)?;
+
+        Ok(Self {
+            global,
+            profile,
+            user,
+            makenv,
+        })
+    }
+
+    /// Returns the desired USE state from the resolved make env.
+    pub fn global_use(&self) -> anyhow::Result<FxHashMap<UseFlag, bool>> {
+        let expand_conf =
+            UseExpandConfig::from_makenv(&self.makenv).context("unable to expand USE")?;
+        let mut state = FxHashMap::default();
+
+        apply_use_state(&mut state, self.makenv.get("USE")).context("invalid USE")?;
+        apply_use_state(&mut state, self.user.get("USE")).context("invalid USE")?;
+
+        for (flag, enabled) in expand_conf.materialize(&self.makenv)? {
+            state.insert(flag, enabled);
+        }
+
+        let user_disabled = expand_conf
+            .materialize(&self.user)?
+            .into_iter()
+            .filter(|(_, enabled)| !enabled);
+        state.extend(user_disabled);
+
+        Ok(state)
+    }
+
+    /// Returns the resolved `ARCH`.
+    pub fn arch(&self) -> anyhow::Result<Arch> {
+        self.makenv
+            .get("ARCH")
+            .context("ARCH is not set")?
+            .to_string()
+            .parse()
+    }
+
+    /// Returns `IUSE_IMPLICIT` from profile defaults.
+    pub fn iuse_implicit(&self) -> anyhow::Result<FxHashSet<UseFlag>> {
+        match self.profile.get("IUSE_IMPLICIT") {
+            Some(value) => value
+                .iter()
+                .map(str::parse)
+                .collect::<Result<_, _>>()
+                .context("invalid IUSE_IMPLICIT"),
+            None => Ok(FxHashSet::default()),
+        }
+    }
+
+    /// Returns the resolved `ACCEPT_KEYWORDS`.
+    pub fn accept_keywords(&self) -> anyhow::Result<Vec<KeywordSelector>> {
+        match self.makenv.get("ACCEPT_KEYWORDS") {
+            Some(value) => value.iter().map(str::parse).collect(),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Returns the "final" resolved make env.
+    pub const fn makenv(&self) -> &MakeEnv {
+        &self.makenv
+    }
+}
+
+/// Applies incremental USE state from a make variable.
+fn apply_use_state(
+    state: &mut FxHashMap<UseFlag, bool>,
+    flags: Option<&EnvValue>,
+) -> anyhow::Result<()> {
+    let Some(flags) = flags else {
+        return Ok(());
+    };
+
+    for flag in flags.iter() {
+        if flag == "-*" {
+            state.clear();
+            continue;
+        }
+        let (name, enabled) = match flag.strip_prefix('-') {
+            Some(value) => (value, false),
+            None => (flag, true),
+        };
+        state.insert(UseFlag::new(name)?, enabled);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_global_use() -> anyhow::Result<()> {
+        let stack = MakeEnvStack::new(
+            MakeEnv::from_string("USE=foo".into())?,
+            MakeEnv::from_string("USE=\"bar -foo\"".into())?,
+            MakeEnv::default(),
+        )?;
+        assert_eq!(
+            stack.global_use()?,
+            FxHashMap::from_iter([(UseFlag::new("bar")?, true)])
+        );
+
+        let stack = MakeEnvStack::new(
+            MakeEnv::from_string("USE=foo".into())?,
+            MakeEnv::default(),
+            MakeEnv::from_string("USE=-foo".into())?,
+        )?;
+        assert_eq!(
+            stack.global_use()?,
+            FxHashMap::from_iter([(UseFlag::new("foo")?, false)])
+        );
+
+        let stack = MakeEnvStack::new(
+            MakeEnv::from_string("USE=\"foo bar\"".into())?,
+            MakeEnv::default(),
+            MakeEnv::from_string("USE=\"-* baz\"".into())?,
+        )?;
+        assert_eq!(
+            stack.global_use()?,
+            FxHashMap::from_iter([(UseFlag::new("baz")?, true)])
+        );
+
+        let stack = MakeEnvStack::new(
+            MakeEnv::default(),
+            MakeEnv::default(),
+            MakeEnv::from_string("USE=+invalid".into())?,
+        )?;
+        assert!(stack.global_use().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_global_use_expansion() -> anyhow::Result<()> {
+        let stack = MakeEnvStack::new(
+            MakeEnv::from_string(
+                "USE_EXPAND=VIDEO_CARDS
+                 VIDEO_CARDS=amdgpu"
+                    .into(),
+            )?,
+            MakeEnv::from_string("VIDEO_CARDS=nouveau".into())?,
+            MakeEnv::from_string("VIDEO_CARDS=\"-amdgpu radeonsi\"".into())?,
+        )?;
+        assert_eq!(
+            stack.global_use()?,
+            FxHashMap::from_iter([
+                (UseFlag::new("video_cards_amdgpu")?, false),
+                (UseFlag::new("video_cards_nouveau")?, true),
+                (UseFlag::new("video_cards_radeonsi")?, true),
+            ])
+        );
+
+        let stack = MakeEnvStack::new(
+            MakeEnv::from_string(
+                "USE_EXPAND=VIDEO_CARDS
+                VIDEO_CARDS=amdgpu"
+                    .into(),
+            )?,
+            MakeEnv::default(),
+            MakeEnv::from_string(
+                "USE_EXPAND=\"-VIDEO_CARDS INPUT_DEVICES\"
+                    INPUT_DEVICES=libinput"
+                    .into(),
+            )?,
+        )?;
+        assert_eq!(
+            stack.global_use()?,
+            FxHashMap::from_iter([(UseFlag::new("input_devices_libinput")?, true)])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_iuse_implicit_profile() -> anyhow::Result<()> {
+        let stack = MakeEnvStack::new(
+            MakeEnv::default(),
+            MakeEnv::from_string("IUSE_IMPLICIT=profile_flag".into())?,
+            MakeEnv::from_string("IUSE_IMPLICIT=local_flag".into())?,
+        )?;
+
+        assert_eq!(
+            stack.iuse_implicit()?,
+            FxHashSet::from_iter([UseFlag::new("profile_flag")?])
+        );
+        Ok(())
+    }
+}

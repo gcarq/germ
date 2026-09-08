@@ -215,8 +215,8 @@ impl EbuildEnv {
             .collect::<FxHashMap<String, String>>();
 
         if let Some(env_unset) = makenv.get("ENV_UNSET") {
-            for name in env_unset.inner() {
-                env.remove(name.as_ref());
+            for name in env_unset.iter() {
+                env.remove(name);
             }
         }
         Ok(Self(env))

@@ -1,5 +1,4 @@
 mod deprecation;
-mod make;
 mod parent;
 
 use crate::eapi::Eapi;
@@ -8,13 +7,13 @@ use crate::files::{PackageEntries, SysPackageEntries, UseEntries, entry::Precede
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
 use crate::profile::parent::ParentEntry;
-use crate::repository::RepoSet;
-use crate::repository::Repository;
+use crate::repository::{RepoSet, Repository};
+use crate::useflag::UseExpandConfig;
 use crate::utils::Inherit;
 use anyhow::{Context, bail};
 use log::warn;
-use std::fmt;
 use std::path::{Path, PathBuf};
+use std::{fmt, iter};
 
 /// Identifies a profile by its canonical path and owning repository.
 struct ProfileSource<'repo> {
@@ -57,37 +56,21 @@ impl fmt::Display for ProfileSource<'_> {
 pub struct Profile {
     pub location: PathBuf,
     deprecated: Option<DeprecationInfo>,
-
     pub make_defaults: MakeEnv,
 
-    // Defines a system set for this profile
+    /// Defines a system set for this profile
     packages: SysPackageEntries,
 
-    // Defines the keywords that are accepted for packages in this profile
+    /// Defines keywords that are accepted for packages in this profile
     pub package_accept_keywords: PackageAcceptKeywords,
 
-    // Prevents packages from being installed in this profile
+    /// Masks packages from being visible
     pub package_mask: PackageEntries,
-    // Allows packages to be installed that would otherwise be masked
+    /// Changes visibility of packages that would otherwise be masked
     pub package_unmask: PackageEntries,
 
-    // Override the default USE flags specified by make.defaults on a per-package basis
-    pub package_use: PackageUseRecords,
-    // USE flags that must never be enabled on a per-package or per-version basis
-    pub package_use_mask: PackageUseRecords,
-    // USE flags that must always be enabled on a per-package or per-version basis
-    pub package_use_force: PackageUseRecords,
-    // Same as above but for merged packages due to a stable keyword
-    pub package_use_stable_mask: PackageUseRecords,
-    pub package_use_stable_force: PackageUseRecords,
-
-    // USE flags that must never be enabled in this profile
-    pub use_mask: UseEntries,
-    // USE flags that must always be enabled in this profile
-    pub use_force: UseEntries,
-    // Same as above but for merged packages due to a stable keyword
-    pub use_stable_mask: UseEntries,
-    pub use_stable_force: UseEntries,
+    /// Parsed and inherited profile USE records for the resolved profile.
+    pub use_records: ProfileUseRecords,
 }
 
 impl Profile {
@@ -103,10 +86,18 @@ impl Profile {
         Self::build_parents(&source, repo_set, &mut parents)
             .with_context(|| format!("unable to resolve parents for {source}"))?;
 
-        // Load the profile and fold its `make.defaults` before inheriting the parents.
-        // This is needed to properly handle `USE_EXPAND` and `USE_EXPAND_UNPREFIXED`.
+        // Fold make.defaults layers before inheriting other profile files so active
+        // USE_EXPAND member variables use incremental semantics.
         let mut profile = Self::load(&source, Precedence::Profile(parents.len()))?;
-        profile.make_defaults = make::fold_defaults(&parents, &profile)?;
+        let layers = parents
+            .iter()
+            .map(|p| &p.make_defaults)
+            .chain(iter::once(&profile.make_defaults))
+            .collect::<Vec<_>>();
+        profile.make_defaults = MakeEnv::fold_with_use_expand(&layers)?;
+        profile
+            .use_records
+            .set_expand_config(&profile.make_defaults)?;
 
         let parents = Self::resolve_parents(parents)?;
         profile.inherit(&parents)
@@ -117,7 +108,7 @@ impl Profile {
     fn load(source: &ProfileSource<'_>, order: Precedence) -> anyhow::Result<Self> {
         let path = &source.path;
         let eapi = Eapi::from_eapi_file(&path.join("eapi"))?;
-        let supports_file_dirs = eapi.supports_profile_file_dirs()
+        let recursive = eapi.supports_profile_file_dirs()
             || source.owning_repo.layout.supports_profile_file_dirs();
 
         let profile = Self {
@@ -127,55 +118,15 @@ impl Profile {
             package_accept_keywords: PackageAcceptKeywords::from_path(
                 &path.join("package.accept_keywords"),
                 order,
-                supports_file_dirs,
+                recursive,
             )?,
-            package_mask: PackageEntries::from_path(
-                &path.join("package.mask"),
-                order,
-                supports_file_dirs,
-            )?,
+            package_mask: PackageEntries::from_path(&path.join("package.mask"), order, recursive)?,
             package_unmask: PackageEntries::from_path(
                 &path.join("package.unmask"),
                 order,
-                supports_file_dirs,
+                recursive,
             )?,
-            package_use: PackageUseRecords::from_path(
-                &path.join("package.use"),
-                order,
-                supports_file_dirs,
-            )?,
-            use_mask: UseEntries::from_path(&path.join("use.mask"), order, supports_file_dirs)?,
-            use_force: UseEntries::from_path(&path.join("use.force"), order, supports_file_dirs)?,
-            use_stable_mask: UseEntries::from_path(
-                &path.join("use.stable.mask"),
-                order,
-                supports_file_dirs,
-            )?,
-            use_stable_force: UseEntries::from_path(
-                &path.join("use.stable.force"),
-                order,
-                supports_file_dirs,
-            )?,
-            package_use_mask: PackageUseRecords::from_path(
-                &path.join("package.use.mask"),
-                order,
-                supports_file_dirs,
-            )?,
-            package_use_force: PackageUseRecords::from_path(
-                &path.join("package.use.force"),
-                order,
-                supports_file_dirs,
-            )?,
-            package_use_stable_mask: PackageUseRecords::from_path(
-                &path.join("package.use.stable.mask"),
-                order,
-                supports_file_dirs,
-            )?,
-            package_use_stable_force: PackageUseRecords::from_path(
-                &path.join("package.use.stable.force"),
-                order,
-                supports_file_dirs,
-            )?,
+            use_records: ProfileUseRecords::load(path, order, recursive)?,
             location: path.clone(),
         };
         if let Some(deprecation) = &profile.deprecated {
@@ -196,20 +147,7 @@ impl Profile {
             .inherit_from(&parent.package_accept_keywords)?;
         self.package_mask.inherit_from(&parent.package_mask)?;
         self.package_unmask.inherit_from(&parent.package_unmask)?;
-        self.package_use.inherit_from(&parent.package_use)?;
-        self.use_mask.inherit_from(&parent.use_mask)?;
-        self.use_force.inherit_from(&parent.use_force)?;
-        self.use_stable_mask.inherit_from(&parent.use_stable_mask)?;
-        self.use_stable_force
-            .inherit_from(&parent.use_stable_force)?;
-        self.package_use_mask
-            .inherit_from(&parent.package_use_mask)?;
-        self.package_use_force
-            .inherit_from(&parent.package_use_force)?;
-        self.package_use_stable_mask
-            .inherit_from(&parent.package_use_stable_mask)?;
-        self.package_use_stable_force
-            .inherit_from(&parent.package_use_stable_force)?;
+        self.use_records.inherit_from(&parent.use_records)?;
         Ok(self)
     }
 
@@ -253,12 +191,90 @@ impl fmt::Display for Profile {
     }
 }
 
+/// Parsed and inherited profile USE records for the resolved profile.
+#[derive(Clone, Default)]
+pub struct ProfileUseRecords {
+    pub package_use: PackageUseRecords,
+    pub package_use_mask: PackageUseRecords,
+    pub package_use_force: PackageUseRecords,
+    pub package_use_stable_mask: PackageUseRecords,
+    pub package_use_stable_force: PackageUseRecords,
+    pub use_mask: UseEntries,
+    pub use_force: UseEntries,
+    pub use_stable_mask: UseEntries,
+    pub use_stable_force: UseEntries,
+    pub expand_config: UseExpandConfig,
+}
+
+impl ProfileUseRecords {
+    fn load(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
+        Ok(Self {
+            package_use: PackageUseRecords::from_path(&path.join("package.use"), order, recursive)?,
+            use_mask: UseEntries::from_path(&path.join("use.mask"), order, recursive)?,
+            use_force: UseEntries::from_path(&path.join("use.force"), order, recursive)?,
+            use_stable_mask: UseEntries::from_path(
+                &path.join("use.stable.mask"),
+                order,
+                recursive,
+            )?,
+            use_stable_force: UseEntries::from_path(
+                &path.join("use.stable.force"),
+                order,
+                recursive,
+            )?,
+            package_use_mask: PackageUseRecords::from_path(
+                &path.join("package.use.mask"),
+                order,
+                recursive,
+            )?,
+            package_use_force: PackageUseRecords::from_path(
+                &path.join("package.use.force"),
+                order,
+                recursive,
+            )?,
+            package_use_stable_mask: PackageUseRecords::from_path(
+                &path.join("package.use.stable.mask"),
+                order,
+                recursive,
+            )?,
+            package_use_stable_force: PackageUseRecords::from_path(
+                &path.join("package.use.stable.force"),
+                order,
+                recursive,
+            )?,
+            expand_config: UseExpandConfig::default(),
+        })
+    }
+
+    fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
+        self.package_use.inherit_from(&parent.package_use)?;
+        self.use_mask.inherit_from(&parent.use_mask)?;
+        self.use_force.inherit_from(&parent.use_force)?;
+        self.use_stable_mask.inherit_from(&parent.use_stable_mask)?;
+        self.use_stable_force
+            .inherit_from(&parent.use_stable_force)?;
+        self.package_use_mask
+            .inherit_from(&parent.package_use_mask)?;
+        self.package_use_force
+            .inherit_from(&parent.package_use_force)?;
+        self.package_use_stable_mask
+            .inherit_from(&parent.package_use_stable_mask)?;
+        self.package_use_stable_force
+            .inherit_from(&parent.package_use_stable_force)?;
+        Ok(())
+    }
+
+    fn set_expand_config(&mut self, make_defaults: &MakeEnv) -> anyhow::Result<()> {
+        self.expand_config = UseExpandConfig::from_makenv(make_defaults)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::files::entry::Entry;
     use crate::files::pkgfile::KeywordRule;
-    use crate::useflag::UseExpandConfig;
 
     use crate::repository::test_support::{RepoBuilder, repo_set};
     use std::fs;
@@ -368,11 +384,10 @@ mod tests {
             profile.make_defaults.get("CAMERAS").unwrap().to_string(),
             "ptp2 nikon"
         );
-        let groups = UseExpandConfig::from_makenv(&profile.make_defaults)?;
         assert_package_accept_keywords(&profile)?;
 
         assert_eq!(
-            profile.use_mask.into_iter().collect::<Vec<_>>(),
+            profile.use_records.use_mask.into_iter().collect::<Vec<_>>(),
             vec![
                 Entry::from_str("foo", Precedence::Profile(0))?,
                 Entry::from_str("baz", Precedence::Profile(1))?,
@@ -380,7 +395,10 @@ mod tests {
                 Entry::from_str("qux", Precedence::Profile(2))?,
             ]
         );
-        let package_use_mask = profile.package_use_mask.resolve(&groups)?;
+        let package_use_mask = profile
+            .use_records
+            .package_use_mask
+            .expand(&profile.use_records.expand_config)?;
         let glibc_atom = "sys-libs/glibc".parse()?;
         let glibc = package_use_mask
             .iter()

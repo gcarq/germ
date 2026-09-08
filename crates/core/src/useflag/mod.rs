@@ -6,4 +6,4 @@ mod iuse;
 pub use dep::{UseDep, UseDepDefault, UseDepKind};
 pub(crate) use expand::UseExpandConfig;
 pub use flag::UseFlag;
-pub use iuse::{IUseDefault, IUseEntry};
+pub use iuse::{IUseEntry, IUseState};

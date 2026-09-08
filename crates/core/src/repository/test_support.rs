@@ -69,6 +69,10 @@ pub struct RepoBuilder {
 
 impl RepoBuilder {
     /// Creates a new [`RepositoryBuilder`] definition with the given `repo_name`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the passed `repo_name` is invalid.
     pub fn new(repo_name: impl Into<String>) -> Self {
         Self {
             repo_name: repo_name.into().parse().expect("invalid repository name"),

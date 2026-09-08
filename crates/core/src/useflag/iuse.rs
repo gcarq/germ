@@ -3,26 +3,38 @@ use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-/// Represents the optional default annotation on an IUSE entry.
+/// Represents the optional default state on an IUSE entry.
 #[derive(
     Archive, Serialize, Deserialize, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug,
 )]
-pub enum IUseDefault {
+pub enum IUseState {
     Enabled,
     Disabled,
+}
+
+impl IUseState {
+    /// Returns the default USE state.
+    pub const fn as_bool(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
 }
 
 /// Represents a package IUSE entry, see PMS 7.3 for more information.
 #[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct IUseEntry {
     flag: UseFlag,
-    default: Option<IUseDefault>,
+    default: Option<IUseState>,
 }
 
 impl IUseEntry {
     /// Returns the bare USE flag in this IUSE entry.
     pub const fn flag(&self) -> &UseFlag {
         &self.flag
+    }
+
+    /// Returns the optional default USE state.
+    pub const fn state(&self) -> Option<IUseState> {
+        self.default
     }
 }
 
@@ -31,8 +43,8 @@ impl FromStr for IUseEntry {
 
     fn from_str(input: &str) -> anyhow::Result<Self> {
         let (default, flag) = match input.chars().next() {
-            Some('+') => (Some(IUseDefault::Enabled), &input[1..]),
-            Some('-') => (Some(IUseDefault::Disabled), &input[1..]),
+            Some('+') => (Some(IUseState::Enabled), &input[1..]),
+            Some('-') => (Some(IUseState::Disabled), &input[1..]),
             _ => (None, input),
         };
 
@@ -47,8 +59,8 @@ impl fmt::Display for IUseEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(default) = self.default {
             f.write_str(match default {
-                IUseDefault::Enabled => "+",
-                IUseDefault::Disabled => "-",
+                IUseState::Enabled => "+",
+                IUseState::Disabled => "-",
             })?;
         }
         self.flag.fmt(f)
@@ -63,8 +75,8 @@ mod tests {
     fn test_iuse_entry_parse() {
         let test_cases = [
             ("foo", None),
-            ("+foo", Some(IUseDefault::Enabled)),
-            ("-foo", Some(IUseDefault::Disabled)),
+            ("+foo", Some(IUseState::Enabled)),
+            ("-foo", Some(IUseState::Disabled)),
         ];
 
         for (input, default) in test_cases {

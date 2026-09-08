@@ -1,28 +1,12 @@
 use crate::deps::atom::Atom;
-use crate::files::UseEntries;
-use crate::files::entry::Entry;
 use crate::files::pkgfile::{PackageUseRecords, UseFlags};
-use crate::makenv::{EnvValue, MakeEnv};
+use crate::files::{UseEntries, entry::Entry};
 use crate::package::PackageView;
+use crate::profile::ProfileUseRecords;
 use crate::types::{FxHashMap, FxHashSet};
-use crate::useflag::{IUseEntry, UseExpandConfig, UseFlag};
+use crate::useflag::{IUseEntry, IUseState, UseExpandConfig, UseFlag};
 use crate::utils::Inherit;
 use anyhow::Context;
-
-/// Simple DTO used to build [`UsePolicy`] from profile USE entries.
-#[derive(Default)]
-pub struct ProfileRecords {
-    pub make_defaults: MakeEnv,
-    pub package_use: PackageUseRecords,
-    pub package_use_mask: PackageUseRecords,
-    pub package_use_force: PackageUseRecords,
-    pub package_use_stable_mask: PackageUseRecords,
-    pub package_use_stable_force: PackageUseRecords,
-    pub use_mask: UseEntries,
-    pub use_force: UseEntries,
-    pub use_stable_mask: UseEntries,
-    pub use_stable_force: UseEntries,
-}
 
 /// Simple DTO used to build [`UsePolicy`] from user configured USE entries.
 #[derive(Default)]
@@ -54,21 +38,15 @@ pub struct UsePolicy {
 }
 
 impl UsePolicy {
-    /// Builds [`UsePolicy`] from profile and local records.
-    ///
-    /// `makenv` is expected to be the effective [`MakeEnv`] after inheriting all parents.
+    /// Builds [`UsePolicy`] from global, profile, and local records.
     pub fn new(
-        makenv: &MakeEnv,
+        global_use: FxHashMap<UseFlag, bool>,
         iuse_implicit: FxHashSet<UseFlag>,
-        profile: ProfileRecords,
+        profile: ProfileUseRecords,
         local: LocalRecords,
     ) -> anyhow::Result<Self> {
-        let base_use = UseRules::from_makenv(makenv).context("failed to compile global USE")?;
-        let expand_conf = UseExpandConfig::from_makenv(&profile.make_defaults)
-            .context("failed to build the package USE expand config")?;
-
         Ok(Self {
-            base_use,
+            base_use: UseRules(global_use),
             use_mask: local
                 .use_mask
                 .inherit(&profile.use_mask)?
@@ -79,21 +57,24 @@ impl UsePolicy {
             use_stable_force: profile.use_stable_force.into_inner().collect(),
             package_use: PackageUse::new(
                 local.package_use.inherit(&profile.package_use)?,
-                &expand_conf,
+                &profile.expand_config,
             )
             .context("failed to resolve package.use")?,
             package_use_mask: PackageUse::new(
                 local.package_use_mask.inherit(&profile.package_use_mask)?,
-                &expand_conf,
+                &profile.expand_config,
             )
             .context("failed to resolve package.use.mask")?,
-            package_use_force: PackageUse::new(profile.package_use_force, &expand_conf)
+            package_use_force: PackageUse::new(profile.package_use_force, &profile.expand_config)
                 .context("failed to resolve package.use.force")?,
-            package_use_stable_mask: PackageUse::new(profile.package_use_stable_mask, &expand_conf)
-                .context("failed to resolve package.use.stable.mask")?,
+            package_use_stable_mask: PackageUse::new(
+                profile.package_use_stable_mask,
+                &profile.expand_config,
+            )
+            .context("failed to resolve package.use.stable.mask")?,
             package_use_stable_force: PackageUse::new(
                 profile.package_use_stable_force,
-                &expand_conf,
+                &profile.expand_config,
             )
             .context("failed to resolve package.use.stable.force")?,
             iuse_implicit,
@@ -125,20 +106,41 @@ impl UsePolicy {
             .chain(self.iuse_implicit.iter())
             .collect::<FxHashSet<_>>();
 
-        // TODO: this is a bit of a hack, get rid of the allocation
-        let mut desired = self.base_use.clone();
-        desired.extend(self.package_use.flags_for(pkg));
+        let package_use = self.package_use.entries_for(pkg);
         let masked = self.masked_for_pkg(pkg, stable_in_use);
         let forced = self.forced_for_pkg(pkg, stable_in_use);
 
         let enabled = available
             .iter()
             .filter(|flag| !masked.contains(*flag))
-            .filter(|flag| forced.contains(*flag) || desired.enabled(flag))
+            .filter(|flag| {
+                forced.contains(*flag)
+                    || self.desired_state(pkg, &package_use, flag).unwrap_or(false)
+            })
             .copied()
             .collect();
 
         EffectiveUse { available, enabled }
+    }
+
+    /// Returns the desired state of `flag` for `pkg`.
+    fn desired_state<P: PackageView>(
+        &self,
+        pkg: &P,
+        package_use: &FxHashMap<&UseFlag, &Entry<UseFlag>>,
+        flag: &UseFlag,
+    ) -> Option<bool> {
+        package_use
+            .get(flag)
+            .map(|entry| entry.op.as_bool())
+            .or_else(|| self.base_use.state(flag))
+            .or_else(|| {
+                pkg.metadata()
+                    .iuse
+                    .iter()
+                    .find(|entry| entry.flag() == flag)
+                    .and_then(|entry| entry.state().map(IUseState::as_bool))
+            })
     }
 
     /// Returns all USE flags that are masked for the given [`PackageView`].
@@ -172,40 +174,9 @@ impl UsePolicy {
 struct UseRules(FxHashMap<UseFlag, bool>);
 
 impl UseRules {
-    /// Builds [`UseRules`] from `USE`, `USE_EXPAND`, etc. resolved from `makenv`.
-    fn from_makenv(makenv: &MakeEnv) -> anyhow::Result<Self> {
-        let expand = UseExpandConfig::from_makenv(makenv)
-            .context("invalid global USE expansion configuration")?;
-        let mut rules = Self::default();
-
-        for value in makenv.get("USE").into_iter().flat_map(EnvValue::inner) {
-            let flag = UseFlag::new(value.clone()).context("invalid USE value")?;
-            rules.set(flag, true);
-        }
-        for flag in expand.materialize(makenv)? {
-            rules.set(flag, true);
-        }
-        Ok(rules)
-    }
-
-    /// Inserts the given `flag` with the `enabled` state.
-    fn set(&mut self, flag: UseFlag, enabled: bool) {
-        self.0.insert(flag, enabled);
-    }
-
-    /// Inserts all given `rules` into the rules.
-    fn extend<'a>(&mut self, rules: impl IntoIterator<Item = (&'a UseFlag, bool)>) {
-        for (flag, enabled) in rules {
-            self.set(flag.clone(), enabled);
-        }
-    }
-
-    /// Returns `true` if the given `flag` is enabled.
-    fn enabled(&self, flag: &UseFlag) -> bool {
-        match self.0.get(flag) {
-            Some(&enabled) => enabled,
-            None => false,
-        }
+    /// Returns the assignment for the given `flag`.
+    fn state(&self, flag: &UseFlag) -> Option<bool> {
+        self.0.get(flag).copied()
     }
 }
 
@@ -214,16 +185,14 @@ struct PackageUse(Vec<(Atom, UseFlags)>);
 
 impl PackageUse {
     fn new(records: PackageUseRecords, config: &UseExpandConfig) -> anyhow::Result<Self> {
-        Ok(Self(records.resolve(config)?))
+        Ok(Self(records.expand(config)?))
     }
 
-    /// Returns an iterator over all USE flags that apply to the given `pkg`.
-    ///
-    /// The yielded tuple contains the [`UseFlag`] and the enabled state.
-    fn flags_for<'a, P: PackageView>(
+    /// Returns package USE entries that apply to the given `pkg`.
+    fn entries_for<'a, P: PackageView>(
         &'a self,
         pkg: &P,
-    ) -> impl Iterator<Item = (&'a UseFlag, bool)> {
+    ) -> FxHashMap<&'a UseFlag, &'a Entry<UseFlag>> {
         let mut flags: FxHashMap<&UseFlag, &Entry<UseFlag>> = FxHashMap::default();
 
         for (atom, cur_flags) in &self.0 {
@@ -239,15 +208,14 @@ impl PackageUse {
             }
         }
         flags
-            .into_iter()
-            .map(|(flag, entry)| (flag, entry.op.as_bool()))
     }
 
-    /// Returns an iterator over all enabled USE flags that apply to the given `pkg`.
+    /// Returns all enabled USE flags that apply to the given `pkg`.
     fn enabled_for<'a, P: PackageView>(&'a self, pkg: &P) -> impl Iterator<Item = &'a UseFlag> {
-        self.flags_for(pkg)
-            .filter(|(_, enabled)| *enabled)
-            .map(|(flag, _)| flag)
+        self.entries_for(pkg)
+            .into_values()
+            .filter(|entry| entry.op.as_bool())
+            .map(Entry::inner)
     }
 }
 
@@ -278,25 +246,30 @@ impl<'a> EffectiveUse<'a> {
 mod tests {
     use super::*;
     use crate::files::entry::Precedence;
+    use crate::makenv::{MakeEnv, MakeEnvStack};
+
     use crate::package::Package;
     use crate::package::metadata::PackageMetadata;
     use crate::test_support::cpv;
 
     fn use_state(
         makenv: &str,
+        make_conf: &str,
         package_use: &str,
         iuse: &str,
         flag: &str,
     ) -> anyhow::Result<Option<bool>> {
-        let makenv = MakeEnv::from_string(makenv.into())?;
+        let global = MakeEnv::from_string(makenv.into())?;
+        let user = MakeEnv::from_string(make_conf.into())?;
+        let makenv_stack = MakeEnvStack::new(global, MakeEnv::default(), user)?;
         let local = LocalRecords {
             package_use: PackageUseRecords::from_string(package_use.into(), Precedence::User)?,
             ..Default::default()
         };
         let policy = UsePolicy::new(
-            &makenv,
+            makenv_stack.global_use()?,
             FxHashSet::default(),
-            ProfileRecords::default(),
+            ProfileUseRecords::default(),
             local,
         )?;
         let package = Package::new(
@@ -316,52 +289,21 @@ mod tests {
     }
 
     #[test]
-    fn test_effective_use_global() -> anyhow::Result<()> {
-        assert_eq!(use_state("USE=foo", "", "foo", "foo")?, Some(true));
-        Ok(())
-    }
+    fn test_effective_use() {
+        // makenv, make_conf, package_use, iuse, flag, expected
+        let cases = [
+            ("USE=foo", "", "*/* -foo", "+foo", "foo", Some(false)),
+            ("", "USE=-foo", "*/* foo", "foo", "foo", Some(true)),
+            ("USE=foo", "", "", "", "foo", None),
+            ("", "", "", "+foo", "foo", Some(true)),
+            ("", "USE=-foo", "", "+foo", "foo", Some(false)),
+        ];
 
-    #[test]
-    fn test_effective_use_expand() {
-        let state = use_state(
-            "USE_EXPAND=VIDEO_CARDS
-            VIDEO_CARDS=amdgpu",
-            "",
-            "video_cards_amdgpu",
-            "video_cards_amdgpu",
-        )
-        .unwrap();
-        assert_eq!(state, Some(true));
-    }
-
-    #[test]
-    fn test_effective_use_expand_unprefixed() {
-        let state = use_state(
-            "USE_EXPAND_UNPREFIXED=ARCH
-            ARCH=amd64",
-            "",
-            "amd64",
-            "amd64",
-        )
-        .unwrap();
-        assert_eq!(state, Some(true));
-    }
-
-    #[test]
-    fn test_effective_use_package_disable() {
-        let state = use_state("USE=foo", "*/* -foo", "foo", "foo").unwrap();
-        assert_eq!(state, Some(false));
-    }
-
-    #[test]
-    fn test_effective_use_package_override() {
-        let state = use_state("", "*/* foo", "foo", "foo").unwrap();
-        assert_eq!(state, Some(true));
-    }
-
-    #[test]
-    fn test_effective_use_unavailable() {
-        let state = use_state("USE=foo", "", "", "foo").unwrap();
-        assert_eq!(state, None);
+        for case in cases {
+            assert_eq!(
+                use_state(case.0, case.1, case.2, case.3, case.4).unwrap(),
+                case.5
+            );
+        }
     }
 }

@@ -23,8 +23,8 @@ impl PackageUseRecords {
         Ok(Self(AtomPolicies::from_string(content, order)?))
     }
 
-    /// Consumes self, resolves expansion groups and returns all USE flags.
-    pub fn resolve(self, groups: &UseExpandConfig) -> anyhow::Result<Vec<(Atom, UseFlags)>> {
+    /// Consumes self, expands all groups and returns all USE flags.
+    pub fn expand(self, groups: &UseExpandConfig) -> anyhow::Result<Vec<(Atom, UseFlags)>> {
         self.0
             .into_iter()
             .map(|(atom, spec)| {
@@ -337,7 +337,7 @@ mod tests {
             "dev-lang/rust LLVM_TARGETS: WebAssembly -AMDGPU ARCH: amd64 -x86".into(),
             Precedence::Profile(2),
         )?;
-        let resolved = entries.resolve(&config()?)?;
+        let resolved = entries.expand(&config()?)?;
         let flags = flags_for(&resolved, "dev-lang/rust")?;
 
         assert_eq!(
@@ -374,12 +374,12 @@ mod tests {
         ];
         for line in cases {
             let entries = PackageUseRecords::from_string(line.into(), Precedence::User)?;
-            assert!(entries.resolve(&config()?).is_err(), "{line}");
+            assert!(entries.expand(&config()?).is_err(), "{line}");
         }
 
         let trailing =
             PackageUseRecords::from_string("dev-lang/rust UNKNOWN:".into(), Precedence::User)?;
-        assert!(trailing.resolve(&config()?).is_ok());
+        assert!(trailing.expand(&config()?).is_ok());
         Ok(())
     }
 
@@ -392,7 +392,7 @@ mod tests {
         let child =
             PackageUseRecords::from_string("dev-lang/rust UNKNOWN: -*".into(), Precedence::User)?
                 .inherit(&parent)?;
-        let resolved = child.resolve(&config()?)?;
+        let resolved = child.expand(&config()?)?;
         let flags = flags_for(&resolved, "dev-lang/rust")?;
 
         assert_eq!(
@@ -428,7 +428,7 @@ mod tests {
         )?
         .inherit(&grand_parent)?;
 
-        let parent_flags = parent.clone().resolve(&config()?)?;
+        let parent_flags = parent.clone().expand(&config()?)?;
         let parent_flags = flags_for(&parent_flags, "dev-lang/rust")?;
         assert_eq!(
             parent_flags.get(&UseFlag::new("lto")?),
@@ -448,7 +448,7 @@ mod tests {
             Precedence::User,
         )?
         .inherit(&parent)?;
-        let flags = child.resolve(&config()?)?;
+        let flags = child.expand(&config()?)?;
         let flags = flags_for(&flags, "dev-lang/rust")?;
         assert_eq!(
             flags.get(&UseFlag::new("lto")?),
@@ -476,7 +476,7 @@ mod tests {
             .into(),
             Precedence::User,
         )?;
-        let resolved = entries.resolve(&config()?)?;
+        let resolved = entries.expand(&config()?)?;
 
         let rust = flags_for(&resolved, "dev-lang/rust")?;
         assert_eq!(
