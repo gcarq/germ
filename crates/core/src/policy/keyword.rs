@@ -18,7 +18,12 @@ impl EffectiveKeywords {
     ) -> Self {
         let mut rules = package_accept_keywords
             .into_rules()
-            .map(|(atom, rule)| (rule.precedence(), atom, KeywordAction::from(rule)))
+            .flat_map(|(atom, rule)| {
+                let prec = rule.precedence();
+                KeywordAction::from_rule(rule, &accept_keywords)
+                    .into_iter()
+                    .map(move |action| (prec, atom.clone(), action))
+            })
             .collect::<Vec<_>>();
         rules.sort_by_key(|(precedence, _, _)| *precedence);
 
@@ -107,24 +112,36 @@ enum KeywordAction {
 }
 
 impl KeywordAction {
+    /// Creates one or more action from the given `rule`.
+    ///
+    /// For [`KeywordRule::AtomOnly`] the selectors are used to generate
+    /// an unstable entry for each stable selector.
+    fn from_rule(rule: KeywordRule, selectors: &[KeywordSelector]) -> Vec<Self> {
+        match rule {
+            KeywordRule::Selector(entry) => match entry.op {
+                Operation::Set => vec![Self::Accept(entry.into_inner())],
+                Operation::Unset => vec![Self::Reject(entry.into_inner())],
+            },
+            KeywordRule::Reset(_) => vec![Self::Reset],
+            KeywordRule::AtomOnly(_) => selectors
+                .iter()
+                .filter_map(|sel| match sel {
+                    KeywordSelector::Stable(arch) => {
+                        Some(Self::Accept(KeywordSelector::Testing(arch.clone())))
+                    }
+                    KeywordSelector::AnyStable => Some(Self::Accept(KeywordSelector::AnyTesting)),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
     fn apply(&self, keyword: Option<&Keyword>, accepted: &mut bool) {
         match self {
             Self::Reset => *accepted = false,
             Self::Accept(selector) if selector.matches(keyword) => *accepted = true,
             Self::Reject(selector) if selector.matches(keyword) => *accepted = false,
             _ => {}
-        }
-    }
-}
-
-impl From<KeywordRule> for KeywordAction {
-    fn from(rule: KeywordRule) -> Self {
-        match rule {
-            KeywordRule::Reset(_) => Self::Reset,
-            KeywordRule::Selector(entry) => match entry.op {
-                Operation::Set => Self::Accept(entry.into_inner()),
-                Operation::Unset => Self::Reject(entry.into_inner()),
-            },
         }
     }
 }
@@ -213,25 +230,40 @@ mod tests {
     }
 
     #[test]
-    fn test_policy_atom_order() {
-        let keywords = policy(
-            "",
-            "*/* -~amd64
-            dev-lang/rust ~amd64",
-        );
-        let pkg = package(["~amd64"]);
-        assert_eq!(keywords.evaluate(&pkg), KeywordEvalResult::new(true, false));
+    fn test_policy_atom_only() {
+        let test_cases = [
+            ("amd64", "~amd64", KeywordEvalResult::new(true, false)),
+            ("amd64", "~arm64", KeywordEvalResult::new(false, false)),
+            ("*", "~arm64", KeywordEvalResult::new(true, false)),
+        ];
 
-        let keywords = policy(
-            "",
-            "dev-lang/rust ~amd64
-            */* -~amd64",
-        );
+        for (accept_keywords, package_keywords, expected) in test_cases {
+            let pkg = package([package_keywords]);
+            let keywords = policy(accept_keywords, "dev-lang/rust");
+            assert_eq!(keywords.evaluate(&pkg), expected);
+        }
+    }
+
+    #[test]
+    fn test_policy_atom_order() {
+        let test_cases = [
+            (
+                "*/* -~amd64
+                dev-lang/rust ~amd64",
+                KeywordEvalResult::new(true, false),
+            ),
+            (
+                "dev-lang/rust ~amd64
+                */* -~amd64",
+                KeywordEvalResult::new(false, false),
+            ),
+        ];
+
         let pkg = package(["~amd64"]);
-        assert_eq!(
-            keywords.evaluate(&pkg),
-            KeywordEvalResult::new(false, false)
-        );
+        for (package_keywords, expected) in test_cases {
+            let keywords = policy("", package_keywords);
+            assert_eq!(keywords.evaluate(&pkg), expected);
+        }
     }
 
     #[test]

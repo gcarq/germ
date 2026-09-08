@@ -69,10 +69,8 @@ impl AtomPolicy for KeywordSpec {
             rules.push(KeywordRule::Selector(entry));
         }
 
-        // Default to testing if no selectors are specified.
-        // TODO: this is incorrect and should have its own variant.
         if rules.is_empty() {
-            rules.push(KeywordRule::Selector(Entry::from_str("~*", precedence)?));
+            rules.push(KeywordRule::AtomOnly(precedence));
         }
 
         Ok(Self(rules))
@@ -111,6 +109,9 @@ impl EntryValue for KeywordSelector {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KeywordRule {
     Selector(Entry<KeywordSelector>),
+    /// An atom-only entry without keyword is equivalent to `testing`
+    /// for all configured arches via `ACCEPT_KEYWORDS`.
+    AtomOnly(Precedence),
     Reset(Precedence),
 }
 
@@ -119,7 +120,7 @@ impl KeywordRule {
     pub const fn precedence(&self) -> Precedence {
         match self {
             Self::Selector(entry) => entry.prec,
-            Self::Reset(precedence) => *precedence,
+            Self::AtomOnly(prec) | Self::Reset(prec) => *prec,
         }
     }
 }
@@ -167,13 +168,8 @@ mod tests {
             PackageAcceptKeywords::from_string("net-analyzer/netcat".into(), Precedence::User)?;
         let rules = entries.into_rules().collect::<Vec<_>>();
 
-        assert_eq!(
-            rules,
-            [(
-                Atom::new("net-analyzer/netcat")?,
-                KeywordRule::Selector(Entry::from_str("~*", Precedence::User)?),
-            ),]
-        );
+        let atom = Atom::new("net-analyzer/netcat")?;
+        assert_eq!(rules, [(atom, KeywordRule::AtomOnly(Precedence::User)),]);
         Ok(())
     }
 
