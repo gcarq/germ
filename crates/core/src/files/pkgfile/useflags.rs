@@ -90,7 +90,10 @@ impl UseSpec {
         for (target, entry) in self.targets {
             let entry = match target {
                 PackageUseTarget::Flag(_) => entry,
-                PackageUseTarget::Expand { group, .. } => groups.expand_entry(&group, entry)?,
+                PackageUseTarget::Expand { group, .. } => {
+                    let flag = groups.resolve_flag(&group, entry.inner())?;
+                    entry.replace_inner(flag)
+                }
             };
             let flag = entry.inner().clone();
             if flags.contains_key(&flag) {

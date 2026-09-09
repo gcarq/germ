@@ -95,6 +95,15 @@ impl<T: EntryValue> Entry<T> {
         Ok(Self { prec, op, inner })
     }
 
+    /// Replaces the inner value while preserving its operation and precedence.
+    pub fn replace_inner<U: EntryValue>(self, inner: U) -> Entry<U> {
+        Entry {
+            prec: self.prec,
+            op: self.op,
+            inner,
+        }
+    }
+
     pub const fn inner(&self) -> &T {
         &self.inner
     }

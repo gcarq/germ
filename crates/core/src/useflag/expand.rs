@@ -1,6 +1,5 @@
-use crate::files::entry::{Entry, Operation};
 use crate::makenv::{EnvValue, MakeEnv};
-use crate::types::FxHashMap;
+use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::UseFlag;
 use anyhow::{Context, bail};
 
@@ -14,6 +13,8 @@ enum UseExpandKind {
 #[derive(Clone, Debug, Default)]
 pub struct UseExpandConfig {
     groups: FxHashMap<Box<str>, UseExpandKind>,
+    /// Implicit groups get injected into `IUSE_IMPLICIT`.
+    implicit_groups: FxHashSet<Box<str>>,
 }
 
 impl UseExpandConfig {
@@ -25,29 +26,20 @@ impl UseExpandConfig {
             makenv.get("USE_EXPAND_UNPREFIXED"),
             UseExpandKind::Unprefixed,
         )?;
+        config.implicit_groups = makenv
+            .get("USE_EXPAND_IMPLICIT")
+            .into_iter()
+            .flat_map(EnvValue::iter)
+            .map(Into::into)
+            .collect();
         Ok(config)
     }
 
-    /// Expands the given use flag `entry` for the given `group`.
-    pub fn expand_entry(
-        &self,
-        group: &str,
-        entry: Entry<UseFlag>,
-    ) -> anyhow::Result<Entry<UseFlag>> {
-        let Some(kind) = self.groups.get(group) else {
-            bail!("unknown USE expansion group '{group}'");
-        };
-
-        match kind {
-            UseExpandKind::Unprefixed => Ok(entry),
-            UseExpandKind::Prefixed => {
-                let flag = entry.inner();
-                let value = match entry.op {
-                    Operation::Set => format!("{}_{flag}", group.to_ascii_lowercase()),
-                    Operation::Unset => format!("-{}_{flag}", group.to_ascii_lowercase()),
-                };
-                Entry::from_str(&value, entry.prec)
-            }
+    /// Resolves a USE group value into its corresponding USE flag.
+    pub fn resolve_flag(&self, group: &str, value: &UseFlag) -> anyhow::Result<UseFlag> {
+        match self.groups.get(group) {
+            Some(kind) => expand_value(*kind, group, value.as_str()),
+            None => bail!("unknown USE expansion group '{group}'"),
         }
     }
 
@@ -63,11 +55,34 @@ impl UseExpandConfig {
             let Some(value) = makenv.get(name) else {
                 continue;
             };
-            let flags = expand_env_value(value, kind, name)
+            let flags = expand_env_value(value, *kind, name)
                 .with_context(|| format!("invalid USE expand value for {name}"))?;
             assignments.extend(flags);
         }
         Ok(assignments)
+    }
+
+    /// Returns USE flags injected into `IUSE_EFFECTIVE` by implicit expansion groups.
+    pub fn implicit_flags(&self, makenv: &MakeEnv) -> anyhow::Result<FxHashSet<UseFlag>> {
+        let mut flags = FxHashSet::default();
+
+        for (name, kind) in &self.groups {
+            if !self.implicit_groups.contains(name) {
+                continue;
+            }
+
+            let vars = format!("USE_EXPAND_VALUES_{name}");
+            let Some(values) = makenv.get(vars.as_str()) else {
+                continue;
+            };
+
+            for value in values.iter() {
+                let flag =
+                    expand_value(*kind, name, value).with_context(|| format!("invalid {vars}"))?;
+                flags.insert(flag);
+            }
+        }
+        Ok(flags)
     }
 
     /// Adds the use expand groups from the given [`EnvValue`] to the config.
@@ -92,11 +107,9 @@ impl UseExpandConfig {
 /// Expands the given [`EnvValue`] into USE flags for the given `kind` and `group`.
 fn expand_env_value(
     value: &EnvValue,
-    kind: &UseExpandKind,
+    kind: UseExpandKind,
     group: &str,
 ) -> anyhow::Result<Vec<(UseFlag, bool)>> {
-    let prefix = matches!(kind, UseExpandKind::Prefixed).then(|| group.to_ascii_lowercase());
-
     let mut flags = Vec::default();
     for val in value.iter() {
         if val == "-*" {
@@ -108,39 +121,22 @@ fn expand_env_value(
             Some(value) => (value, false),
             None => (val, true),
         };
-        let flag = match &prefix {
-            Some(prefix) => UseFlag::new(format!("{prefix}_{name}"))?,
-            None => UseFlag::new(name)?,
-        };
-        flags.push((flag, enabled));
+        flags.push((expand_value(kind, group, name)?, enabled));
     }
     Ok(flags)
+}
+
+/// Expands one USE group value into its corresponding USE flag.
+fn expand_value(kind: UseExpandKind, group: &str, value: &str) -> anyhow::Result<UseFlag> {
+    match kind {
+        UseExpandKind::Prefixed => UseFlag::new(format!("{}_{value}", group.to_ascii_lowercase())),
+        UseExpandKind::Unprefixed => UseFlag::new(value),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::entry::Precedence;
-
-    #[test]
-    fn test_expand_entry() -> anyhow::Result<()> {
-        let makenv = MakeEnv::from_string(
-            "USE_EXPAND=\"LLVM_TARGETS\"
-                USE_EXPAND_UNPREFIXED=\"ARCH\""
-                .into(),
-        )?;
-        let config = UseExpandConfig::from_makenv(&makenv)?;
-
-        let expanded = config.expand_entry(
-            "LLVM_TARGETS",
-            Entry::from_str("-WebAssembly", Precedence::User)?,
-        )?;
-        assert_eq!(expanded.as_str(), "llvm_targets_WebAssembly");
-
-        let expanded = config.expand_entry("ARCH", Entry::from_str("amd64", Precedence::User)?)?;
-        assert_eq!(expanded.as_str(), "amd64");
-        Ok(())
-    }
 
     #[test]
     fn test_materialize() -> anyhow::Result<()> {
@@ -162,6 +158,30 @@ mod tests {
                 (UseFlag::new("video_cards_nouveau")?, true),
                 (UseFlag::new("amd64")?, true),
                 (UseFlag::new("arm64")?, false),
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_implicit_flags() -> anyhow::Result<()> {
+        let makenv = MakeEnv::from_string(
+            "USE_EXPAND=\"ELIBC VIDEO_CARDS\"
+             USE_EXPAND_UNPREFIXED=ARCH
+             USE_EXPAND_IMPLICIT=\"ARCH ELIBC\"
+             USE_EXPAND_VALUES_ARCH=\"amd64 x86\"
+             USE_EXPAND_VALUES_ELIBC=\"glibc\"
+             USE_EXPAND_VALUES_VIDEO_CARDS=amdgpu"
+                .into(),
+        )?;
+        let config = UseExpandConfig::from_makenv(&makenv)?;
+
+        assert_eq!(
+            config.implicit_flags(&makenv)?,
+            FxHashSet::from_iter([
+                UseFlag::new("amd64")?,
+                UseFlag::new("x86")?,
+                UseFlag::new("elibc_glibc")?,
             ])
         );
         Ok(())

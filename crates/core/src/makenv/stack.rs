@@ -67,16 +67,21 @@ impl MakeEnvStack {
             .parse()
     }
 
-    /// Returns `IUSE_IMPLICIT` from profile defaults.
+    /// Returns the calculated `IUSE_EFFECTIVE` from profile defaults.
+    ///
+    /// This is constructed by `IUSE_IMPLICIT` and `USE_EXPAND_IMPLICIT`.
     pub fn iuse_implicit(&self) -> anyhow::Result<FxHashSet<UseFlag>> {
-        match self.profile.get("IUSE_IMPLICIT") {
+        let mut flags = match self.profile.get("IUSE_IMPLICIT") {
             Some(value) => value
                 .iter()
                 .map(str::parse)
-                .collect::<Result<_, _>>()
-                .context("invalid IUSE_IMPLICIT"),
-            None => Ok(FxHashSet::default()),
-        }
+                .collect::<anyhow::Result<_>>()
+                .context("invalid IUSE_IMPLICIT")?,
+            None => FxHashSet::default(),
+        };
+        let expand = UseExpandConfig::from_makenv(&self.profile)?;
+        flags.extend(expand.implicit_flags(&self.profile)?);
+        Ok(flags)
     }
 
     /// Returns the resolved `ACCEPT_KEYWORDS`.
@@ -205,14 +210,18 @@ mod tests {
     fn test_iuse_implicit_profile() -> anyhow::Result<()> {
         let stack = MakeEnvStack::new(
             MakeEnv::default(),
-            MakeEnv::from_string("IUSE_IMPLICIT=profile_flag".into())?,
+            MakeEnv::from_string(
+                "IUSE_IMPLICIT=profile_flag
+                 USE_EXPAND_UNPREFIXED=ARCH
+                 USE_EXPAND_IMPLICIT=ARCH
+                 USE_EXPAND_VALUES_ARCH=\"amd64\""
+                    .into(),
+            )?,
             MakeEnv::from_string("IUSE_IMPLICIT=local_flag".into())?,
         )?;
 
-        assert_eq!(
-            stack.iuse_implicit()?,
-            FxHashSet::from_iter([UseFlag::new("profile_flag")?])
-        );
+        let flags = FxHashSet::from_iter([UseFlag::new("profile_flag")?, UseFlag::new("amd64")?]);
+        assert_eq!(stack.iuse_implicit()?, flags);
         Ok(())
     }
 }
