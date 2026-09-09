@@ -13,10 +13,10 @@ use std::ops::Range;
 pub enum ArenaEntry<T: ExpressionItem> {
     Item(T),
 
-    AllOf(Range<u32>),     // ( a b )
-    AnyOf(Range<u32>),     // || ( a b )
-    OneOf(Range<u32>),     // ^^ ( a b )
-    OnlyOneOf(Range<u32>), // ?? ( a b )
+    AllOf(Range<u32>),        // ( a b )
+    AnyOf(Range<u32>),        // || ( a b )
+    ExactlyOneOf(Range<u32>), // ^^ ( a b )
+    AtMostOneOf(Range<u32>),  // ?? ( a b )
 
     Use {
         flag: UseFlag,
@@ -34,8 +34,8 @@ impl<T: ExpressionItem> ArenaEntry<T> {
             Self::Item(_) => "item",
             Self::AllOf(_) => "all-of",
             Self::AnyOf(_) => "any-of",
-            Self::OneOf(_) => "exactly-one-of",
-            Self::OnlyOneOf(_) => "at-most-one-of",
+            Self::ExactlyOneOf(_) => "exactly-one-of",
+            Self::AtMostOneOf(_) => "at-most-one-of",
             Self::Use { .. } => "USE-conditional",
             Self::Not(_) => "negation",
             Self::Forbidden(_) => "strong-blocker",
@@ -129,8 +129,8 @@ impl<T: ExpressionItem> ExpressionArena<T> {
             ArenaEntry::Item(_) | ArenaEntry::Forbidden(_) => Ok(()),
             ArenaEntry::AllOf(nodes)
             | ArenaEntry::AnyOf(nodes)
-            | ArenaEntry::OneOf(nodes)
-            | ArenaEntry::OnlyOneOf(nodes)
+            | ArenaEntry::ExactlyOneOf(nodes)
+            | ArenaEntry::AtMostOneOf(nodes)
             | ArenaEntry::Use { nodes, .. } => self.validate_range(nodes, kind),
             ArenaEntry::Not(node) => self.validate_negation(*node, kind),
         }
@@ -179,12 +179,12 @@ impl<T: ExpressionItem> ExpressionArena<T> {
                 self.fmt_children(nodes, f)?;
                 f.write_str(" )")
             }
-            ArenaEntry::OneOf(nodes) => {
+            ArenaEntry::ExactlyOneOf(nodes) => {
                 f.write_str("^^ ( ")?;
                 self.fmt_children(nodes, f)?;
                 f.write_str(" )")
             }
-            ArenaEntry::OnlyOneOf(nodes) => {
+            ArenaEntry::AtMostOneOf(nodes) => {
                 f.write_str("?? ( ")?;
                 self.fmt_children(nodes, f)?;
                 f.write_str(" )")

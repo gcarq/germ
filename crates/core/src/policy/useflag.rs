@@ -264,8 +264,8 @@ fn eval_expression<'a>(
         Expression::Item(flag) => state.is_enabled(flag)?,
         Expression::AllOf(nodes) => try_all(nodes, |n| eval_expression(n.expression(), state))?,
         Expression::AnyOf(nodes) => try_any(nodes, |n| eval_expression(n.expression(), state))?,
-        Expression::OneOf(nodes) => eval_up_to_two(nodes, state)? == 1,
-        Expression::OnlyOneOf(nodes) => eval_up_to_two(nodes, state)? < 2,
+        Expression::ExactlyOneOf(nodes) => eval_up_to_two(nodes, state)? == 1,
+        Expression::AtMostOneOf(nodes) => eval_up_to_two(nodes, state)? < 2,
         Expression::Use {
             flag,
             negated,

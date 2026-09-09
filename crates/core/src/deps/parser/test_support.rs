@@ -3,15 +3,15 @@ use std::fmt::Debug;
 use crate::deps::ExpressionItem;
 use crate::deps::expression::{Expression, ExpressionNodes, ExpressionTree};
 use crate::useflag::UseFlag;
-use TestExpression::{AllOf, AnyOf, Forbidden, Item, Not, OneOf, OnlyOneOf, Use};
+use TestExpression::{AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Forbidden, Item, Not, Use};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum TestExpression<T> {
     Item(T),
     AllOf(Vec<Self>),
     AnyOf(Vec<Self>),
-    OneOf(Vec<Self>),
-    OnlyOneOf(Vec<Self>),
+    ExactlyOneOf(Vec<Self>),
+    AtMostOneOf(Vec<Self>),
     Use {
         flag: UseFlag,
         negated: bool,
@@ -42,8 +42,10 @@ fn assert_expression<T: ExpressionItem + Debug + PartialEq>(
         (Expression::Item(actual), Item(expected)) => assert_eq!(actual, expected),
         (Expression::AllOf(actual), AllOf(expected)) => assert_nodes(actual, expected),
         (Expression::AnyOf(actual), AnyOf(expected)) => assert_nodes(actual, expected),
-        (Expression::OneOf(actual), OneOf(expected)) => assert_nodes(actual, expected),
-        (Expression::OnlyOneOf(actual), OnlyOneOf(expected)) => assert_nodes(actual, expected),
+        (Expression::ExactlyOneOf(actual), ExactlyOneOf(expected)) => {
+            assert_nodes(actual, expected);
+        }
+        (Expression::AtMostOneOf(actual), AtMostOneOf(expected)) => assert_nodes(actual, expected),
         (
             Expression::Use {
                 flag: actual_flag,

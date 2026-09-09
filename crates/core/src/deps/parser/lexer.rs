@@ -7,9 +7,9 @@ use std::str::CharIndices;
 pub enum Token<'a> {
     Whitespace,
     Bang,                    // syntax: !
-    OneOf,                   // syntax: ^^
+    ExactlyOneOf,            // syntax: ^^
     AnyOf,                   // syntax: ||
-    OnlyOneOf,               // syntax: ??
+    AtMostOneOf,             // syntax: ??
     UseConditional(&'a str), // syntax: foo? - holds a USE flag
     Ident(&'a str),          // holds an atom or USE flag
     LParen,
@@ -22,9 +22,9 @@ impl<'a> fmt::Display for Token<'a> {
         match self {
             Token::Whitespace => f.write_char(' '),
             Token::Bang => f.write_char('!'),
-            Token::OneOf => f.write_str("^^"),
+            Token::ExactlyOneOf => f.write_str("^^"),
             Token::AnyOf => f.write_str("||"),
-            Token::OnlyOneOf => f.write_str("??"),
+            Token::AtMostOneOf => f.write_str("??"),
             Token::UseConditional(ident) | Token::Ident(ident) => f.write_str(ident),
             Token::LParen => f.write_char('('),
             Token::RParen => f.write_char(')'),
@@ -66,9 +66,9 @@ impl<'a> Lexer<'a> {
             '!' => Token::Bang,
             '(' => Token::LParen,
             ')' => Token::RParen,
-            '^' => self.consume_operator(first, Token::OneOf),
+            '^' => self.consume_operator(first, Token::ExactlyOneOf),
             '|' => self.consume_operator(first, Token::AnyOf),
-            '?' => self.consume_operator(first, Token::OnlyOneOf),
+            '?' => self.consume_operator(first, Token::AtMostOneOf),
             char if Self::is_ident_char(char) => self.consume_ident(start, char),
             char => Token::Illegal(char),
         };
@@ -199,12 +199,12 @@ mod tests {
                 Token::Ident("wayland"),
                 Token::Ident("X"),
                 Token::RParen,
-                Token::OneOf,
+                Token::ExactlyOneOf,
                 Token::LParen,
                 Token::Ident("gnutls"),
                 Token::Ident("openssl"),
                 Token::RParen,
-                Token::OnlyOneOf,
+                Token::AtMostOneOf,
                 Token::LParen,
                 Token::Ident("mysql"),
                 Token::Ident("mariadb"),

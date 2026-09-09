@@ -27,10 +27,10 @@ impl<'a, T: ExpressionItem> Clone for ExpressionTree<'a, T> {
 /// A borrowed expression from [`ExpressionNode`].
 pub enum Expression<'a, T: ExpressionItem> {
     Item(&'a T),
-    AllOf(ExpressionNodes<'a, T>),     // ( a b )
-    AnyOf(ExpressionNodes<'a, T>),     // || ( a b )
-    OneOf(ExpressionNodes<'a, T>),     // ^^ ( a b )
-    OnlyOneOf(ExpressionNodes<'a, T>), // ?? ( a b )
+    AllOf(ExpressionNodes<'a, T>),        // ( a b )
+    AnyOf(ExpressionNodes<'a, T>),        // || ( a b )
+    ExactlyOneOf(ExpressionNodes<'a, T>), // ^^ ( a b )
+    AtMostOneOf(ExpressionNodes<'a, T>),  // ?? ( a b )
     Use {
         flag: &'a UseFlag,
         negated: bool,
@@ -54,9 +54,11 @@ impl<'a, T: ExpressionItem> ExpressionNode<'a, T> {
             ArenaEntry::Item(item) => Expression::Item(item),
             ArenaEntry::AllOf(nodes) => Expression::AllOf(ExpressionNodes::new(self.tree, nodes)),
             ArenaEntry::AnyOf(nodes) => Expression::AnyOf(ExpressionNodes::new(self.tree, nodes)),
-            ArenaEntry::OneOf(nodes) => Expression::OneOf(ExpressionNodes::new(self.tree, nodes)),
-            ArenaEntry::OnlyOneOf(nodes) => {
-                Expression::OnlyOneOf(ExpressionNodes::new(self.tree, nodes))
+            ArenaEntry::ExactlyOneOf(nodes) => {
+                Expression::ExactlyOneOf(ExpressionNodes::new(self.tree, nodes))
+            }
+            ArenaEntry::AtMostOneOf(nodes) => {
+                Expression::AtMostOneOf(ExpressionNodes::new(self.tree, nodes))
             }
             ArenaEntry::Use {
                 flag,

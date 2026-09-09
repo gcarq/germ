@@ -57,17 +57,17 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
         let node = match token {
             Token::Ident(ident) => ArenaEntry::Item(T::parse(ident)?),
             Token::LParen => ArenaEntry::AllOf(self.parse_group()?),
-            Token::OneOf => {
+            Token::ExactlyOneOf => {
                 self.expect_separated(Token::LParen)?;
-                ArenaEntry::OneOf(self.parse_group()?)
+                ArenaEntry::ExactlyOneOf(self.parse_group()?)
             }
             Token::AnyOf => {
                 self.expect_separated(Token::LParen)?;
                 ArenaEntry::AnyOf(self.parse_group()?)
             }
-            Token::OnlyOneOf => {
+            Token::AtMostOneOf => {
                 self.expect_separated(Token::LParen)?;
-                ArenaEntry::OnlyOneOf(self.parse_group()?)
+                ArenaEntry::AtMostOneOf(self.parse_group()?)
             }
             Token::UseConditional(flag) => self.parse_use_conditional(flag, false)?,
             Token::Bang => match self.lexer.next().ok_or_else(|| anyhow!("unexpected EOF"))? {
@@ -168,19 +168,22 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::test_support::TestExpression::{
-        AllOf, AnyOf, Forbidden, Not, OneOf, OnlyOneOf, Use,
+        AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Forbidden, Not, Use,
     };
     use super::test_support::{assert_expr, item};
     use super::*;
     use crate::deps::atom::Atom;
 
     #[test]
-    fn test_parser_group_one_of() {
+    fn test_parser_group_exactly_one_of() {
         let input = "^^ ( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(
             expr.view(),
-            &[OneOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
+            &[ExactlyOneOf(vec![
+                item("sys-libs/db"),
+                item("app-misc/foo"),
+            ])],
         );
         assert_eq!(expr.to_string(), input);
     }
@@ -208,12 +211,12 @@ mod tests {
     }
 
     #[test]
-    fn test_parser_group_only_one_of() {
+    fn test_parser_group_at_most_one_of() {
         let input = "?? ( sys-libs/db app-misc/foo )";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(
             expr.view(),
-            &[OnlyOneOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
+            &[AtMostOneOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
         );
         assert_eq!(expr.to_string(), input);
     }

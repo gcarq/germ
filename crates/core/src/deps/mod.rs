@@ -35,7 +35,9 @@ impl ExpressionKind {
             ArenaEntry::AnyOf(_) => {
                 matches!(self, Self::Dependency | Self::License | Self::RequiredUse)
             }
-            ArenaEntry::OneOf(_) | ArenaEntry::OnlyOneOf(_) => matches!(self, Self::RequiredUse),
+            ArenaEntry::ExactlyOneOf(_) | ArenaEntry::AtMostOneOf(_) => {
+                matches!(self, Self::RequiredUse)
+            }
             ArenaEntry::Forbidden(_) => matches!(self, Self::Dependency),
         }
     }
