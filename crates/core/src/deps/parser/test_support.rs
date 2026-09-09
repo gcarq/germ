@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use crate::deps::ExpressionItem;
-use crate::deps::expression::{Expression, ExpressionChildren, ExpressionTree};
+use crate::deps::expression::{Expression, ExpressionNodes, ExpressionTree};
 use crate::useflag::UseFlag;
 use TestExpression::{AllOf, AnyOf, Forbidden, Item, Not, OneOf, OnlyOneOf, Use};
 
@@ -15,7 +15,7 @@ pub enum TestExpression<T> {
     Use {
         flag: UseFlag,
         negated: bool,
-        children: Vec<Self>,
+        nodes: Vec<Self>,
     },
     Not(Box<Self>),
     Forbidden(Box<Self>),
@@ -26,7 +26,7 @@ pub fn assert_expr<T: ExpressionItem + Debug + PartialEq>(
     tree: ExpressionTree<'_, T>,
     expected: &[TestExpression<T>],
 ) {
-    assert_children(tree.roots(), expected);
+    assert_nodes(tree.roots(), expected);
 }
 
 /// Creates a [`TestExpression`] from the given `input`.
@@ -40,25 +40,25 @@ fn assert_expression<T: ExpressionItem + Debug + PartialEq>(
 ) {
     match (actual, expected) {
         (Expression::Item(actual), Item(expected)) => assert_eq!(actual, expected),
-        (Expression::AllOf(actual), AllOf(expected)) => assert_children(actual, expected),
-        (Expression::AnyOf(actual), AnyOf(expected)) => assert_children(actual, expected),
-        (Expression::OneOf(actual), OneOf(expected)) => assert_children(actual, expected),
-        (Expression::OnlyOneOf(actual), OnlyOneOf(expected)) => assert_children(actual, expected),
+        (Expression::AllOf(actual), AllOf(expected)) => assert_nodes(actual, expected),
+        (Expression::AnyOf(actual), AnyOf(expected)) => assert_nodes(actual, expected),
+        (Expression::OneOf(actual), OneOf(expected)) => assert_nodes(actual, expected),
+        (Expression::OnlyOneOf(actual), OnlyOneOf(expected)) => assert_nodes(actual, expected),
         (
             Expression::Use {
                 flag: actual_flag,
                 negated: actual_negated,
-                children: actual_children,
+                nodes: actual_nodes,
             },
             Use {
                 flag: expected_flag,
                 negated: expected_negated,
-                children: expected_children,
+                nodes: expected_nodes,
             },
         ) => {
             assert_eq!(actual_flag, expected_flag);
             assert_eq!(actual_negated, *expected_negated);
-            assert_children(actual_children, expected_children);
+            assert_nodes(actual_nodes, expected_nodes);
         }
         (Expression::Not(actual), Not(expected)) => {
             assert_expression(actual.expression(), expected);
@@ -70,8 +70,8 @@ fn assert_expression<T: ExpressionItem + Debug + PartialEq>(
     }
 }
 
-fn assert_children<T: ExpressionItem + Debug + PartialEq>(
-    mut actual: ExpressionChildren<'_, T>,
+fn assert_nodes<T: ExpressionItem + Debug + PartialEq>(
+    mut actual: ExpressionNodes<'_, T>,
     expected: &[TestExpression<T>],
 ) {
     for expected in expected {

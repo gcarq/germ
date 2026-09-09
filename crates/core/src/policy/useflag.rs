@@ -269,10 +269,10 @@ fn eval_expression<'a>(
         Expression::Use {
             flag,
             negated,
-            children,
+            nodes,
         } => match state.is_enabled(flag)? == negated {
             true => true,
-            false => try_all(children, |n| eval_expression(n.expression(), state))?,
+            false => try_all(nodes, |n| eval_expression(n.expression(), state))?,
         },
         Expression::Not(node) => !eval_expression(node.expression(), state)?,
         _ => unreachable!(),

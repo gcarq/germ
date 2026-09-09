@@ -11,8 +11,8 @@ pub struct ExpressionTree<'a, T: ExpressionItem> {
 
 impl<'a, T: ExpressionItem> ExpressionTree<'a, T> {
     /// Returns the root nodes in source order.
-    pub fn roots(&self) -> ExpressionChildren<'a, T> {
-        ExpressionChildren::new(*self, self.arena.root_range())
+    pub fn roots(&self) -> ExpressionNodes<'a, T> {
+        ExpressionNodes::new(*self, self.arena.root_range())
     }
 }
 
@@ -27,14 +27,14 @@ impl<'a, T: ExpressionItem> Clone for ExpressionTree<'a, T> {
 /// A borrowed expression from [`ExpressionNode`].
 pub enum Expression<'a, T: ExpressionItem> {
     Item(&'a T),
-    AllOf(ExpressionChildren<'a, T>),     // ( a b )
-    AnyOf(ExpressionChildren<'a, T>),     // || ( a b )
-    OneOf(ExpressionChildren<'a, T>),     // ^^ ( a b )
-    OnlyOneOf(ExpressionChildren<'a, T>), // ?? ( a b )
+    AllOf(ExpressionNodes<'a, T>),     // ( a b )
+    AnyOf(ExpressionNodes<'a, T>),     // || ( a b )
+    OneOf(ExpressionNodes<'a, T>),     // ^^ ( a b )
+    OnlyOneOf(ExpressionNodes<'a, T>), // ?? ( a b )
     Use {
         flag: &'a UseFlag,
         negated: bool,
-        children: ExpressionChildren<'a, T>,
+        nodes: ExpressionNodes<'a, T>,
     },
     Not(ExpressionNode<'a, T>),
     Forbidden(ExpressionNode<'a, T>),
@@ -52,59 +52,53 @@ impl<'a, T: ExpressionItem> ExpressionNode<'a, T> {
     pub fn expression(&self) -> Expression<'a, T> {
         match self.tree.arena.get_expression(&self.id) {
             ArenaEntry::Item(item) => Expression::Item(item),
-            ArenaEntry::AllOf(children) => {
-                Expression::AllOf(ExpressionChildren::new(self.tree, children))
-            }
-            ArenaEntry::AnyOf(children) => {
-                Expression::AnyOf(ExpressionChildren::new(self.tree, children))
-            }
-            ArenaEntry::OneOf(children) => {
-                Expression::OneOf(ExpressionChildren::new(self.tree, children))
-            }
-            ArenaEntry::OnlyOneOf(children) => {
-                Expression::OnlyOneOf(ExpressionChildren::new(self.tree, children))
+            ArenaEntry::AllOf(nodes) => Expression::AllOf(ExpressionNodes::new(self.tree, nodes)),
+            ArenaEntry::AnyOf(nodes) => Expression::AnyOf(ExpressionNodes::new(self.tree, nodes)),
+            ArenaEntry::OneOf(nodes) => Expression::OneOf(ExpressionNodes::new(self.tree, nodes)),
+            ArenaEntry::OnlyOneOf(nodes) => {
+                Expression::OnlyOneOf(ExpressionNodes::new(self.tree, nodes))
             }
             ArenaEntry::Use {
                 flag,
                 negated,
-                children,
+                nodes,
             } => Expression::Use {
                 flag,
                 negated: *negated,
-                children: ExpressionChildren::new(self.tree, children),
+                nodes: ExpressionNodes::new(self.tree, nodes),
             },
-            ArenaEntry::Not(child) => Expression::Not(Self {
+            ArenaEntry::Not(node) => Expression::Not(Self {
                 tree: self.tree,
-                id: *child,
+                id: *node,
             }),
-            ArenaEntry::Forbidden(child) => Expression::Forbidden(Self {
+            ArenaEntry::Forbidden(node) => Expression::Forbidden(Self {
                 tree: self.tree,
-                id: *child,
+                id: *node,
             }),
         }
     }
 }
 
-/// An iterator over the children of an expression.
-pub struct ExpressionChildren<'a, T: ExpressionItem> {
+/// An iterator over the nodes of an expression.
+pub struct ExpressionNodes<'a, T: ExpressionItem> {
     tree: ExpressionTree<'a, T>,
-    children: slice::Iter<'a, ExpressionId>,
+    nodes: slice::Iter<'a, ExpressionId>,
 }
 
-impl<'a, T: ExpressionItem> ExpressionChildren<'a, T> {
+impl<'a, T: ExpressionItem> ExpressionNodes<'a, T> {
     fn new(tree: ExpressionTree<'a, T>, range: &Range<u32>) -> Self {
-        let children = tree.arena.get_children(range).iter();
-        Self { tree, children }
+        let nodes = tree.arena.get_children(range).iter();
+        Self { tree, nodes }
     }
 }
 
-impl<'a, T: ExpressionItem> Iterator for ExpressionChildren<'a, T> {
+impl<'a, T: ExpressionItem> Iterator for ExpressionNodes<'a, T> {
     type Item = ExpressionNode<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(ExpressionNode {
             tree: self.tree,
-            id: self.children.next().copied()?,
+            id: self.nodes.next().copied()?,
         })
     }
 }

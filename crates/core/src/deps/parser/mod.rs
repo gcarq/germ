@@ -102,7 +102,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
         Ok(ArenaEntry::Use {
             flag: UseFlag::parse(flag)?,
             negated,
-            children: self.parse_group()?,
+            nodes: self.parse_group()?,
         })
     }
 
@@ -227,7 +227,7 @@ mod tests {
             &[Use {
                 flag: "bar".parse().unwrap(),
                 negated: false,
-                children: vec![item("sys-libs/db"), item("app-misc/foo")],
+                nodes: vec![item("sys-libs/db"), item("app-misc/foo")],
             }],
         );
         assert_eq!(expr.to_string(), input);
@@ -281,13 +281,13 @@ mod tests {
                 Use {
                     flag: "bar".parse().unwrap(),
                     negated: false,
-                    children: vec![item("sys-libs/db")],
+                    nodes: vec![item("sys-libs/db")],
                 },
                 AnyOf(vec![item("=sys-libs/db-5*:5"), item("=sys-libs/db-4*:4")]),
                 Use {
                     flag: "foo".parse().unwrap(),
                     negated: true,
-                    children: vec![Not(item("app-misc/foo").into())],
+                    nodes: vec![Not(item("app-misc/foo").into())],
                 },
                 Forbidden(item("<dev-perl/Mail-Box-3").into()),
             ],
@@ -312,7 +312,7 @@ mod tests {
                 Use {
                     flag: "ssh".parse().unwrap(),
                     negated: false,
-                    children: vec![AnyOf(vec![
+                    nodes: vec![AnyOf(vec![
                         item("rdp"),
                         AllOf(vec![item("vnc"), item("X")]),
                     ])],

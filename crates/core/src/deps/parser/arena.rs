@@ -21,7 +21,7 @@ pub enum ArenaEntry<T: ExpressionItem> {
     Use {
         flag: UseFlag,
         negated: bool,
-        children: Range<u32>,
+        nodes: Range<u32>,
     },
 
     Not(ExpressionId),
@@ -113,8 +113,8 @@ impl<T: ExpressionItem> ExpressionArena<T> {
     }
 
     fn validate_range(&self, range: &Range<u32>, kind: ExpressionKind) -> anyhow::Result<()> {
-        for child in self.get_children(range) {
-            self.validate_expression(*child, kind)?;
+        for node in self.get_children(range) {
+            self.validate_expression(*node, kind)?;
         }
         Ok(())
     }
@@ -127,17 +127,17 @@ impl<T: ExpressionItem> ExpressionArena<T> {
 
         match expression {
             ArenaEntry::Item(_) | ArenaEntry::Forbidden(_) => Ok(()),
-            ArenaEntry::AllOf(children)
-            | ArenaEntry::AnyOf(children)
-            | ArenaEntry::OneOf(children)
-            | ArenaEntry::OnlyOneOf(children)
-            | ArenaEntry::Use { children, .. } => self.validate_range(children, kind),
-            ArenaEntry::Not(child) => self.validate_negation(*child, kind),
+            ArenaEntry::AllOf(nodes)
+            | ArenaEntry::AnyOf(nodes)
+            | ArenaEntry::OneOf(nodes)
+            | ArenaEntry::OnlyOneOf(nodes)
+            | ArenaEntry::Use { nodes, .. } => self.validate_range(nodes, kind),
+            ArenaEntry::Not(node) => self.validate_negation(*node, kind),
         }
     }
 
-    fn validate_negation(&self, child: ExpressionId, kind: ExpressionKind) -> anyhow::Result<()> {
-        match self.get_expression(&child) {
+    fn validate_negation(&self, node: ExpressionId, kind: ExpressionKind) -> anyhow::Result<()> {
+        match self.get_expression(&node) {
             ArenaEntry::Item(_) => match kind {
                 ExpressionKind::Dependency | ExpressionKind::RequiredUse => Ok(()),
                 _ => bail!("negation is not valid in {kind} expressions"),
@@ -149,44 +149,44 @@ impl<T: ExpressionItem> ExpressionArena<T> {
     fn fmt_expression(&self, expr: &ArenaEntry<T>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match expr {
             ArenaEntry::Item(item) => item.fmt(f),
-            ArenaEntry::Not(child) => {
+            ArenaEntry::Not(node) => {
                 f.write_str("!")?;
-                self.fmt_expression(self.get_expression(child), f)
+                self.fmt_expression(self.get_expression(node), f)
             }
-            ArenaEntry::Forbidden(child) => {
+            ArenaEntry::Forbidden(node) => {
                 f.write_str("!!")?;
-                self.fmt_expression(self.get_expression(child), f)
+                self.fmt_expression(self.get_expression(node), f)
             }
             ArenaEntry::Use {
                 flag,
                 negated,
-                children,
+                nodes,
             } => {
                 if *negated {
                     f.write_str("!")?;
                 }
                 write!(f, "{flag}? ( ")?;
-                self.fmt_children(children, f)?;
+                self.fmt_children(nodes, f)?;
                 f.write_str(" )")
             }
-            ArenaEntry::AllOf(children) => {
+            ArenaEntry::AllOf(nodes) => {
                 f.write_str("( ")?;
-                self.fmt_children(children, f)?;
+                self.fmt_children(nodes, f)?;
                 f.write_str(" )")
             }
-            ArenaEntry::AnyOf(children) => {
+            ArenaEntry::AnyOf(nodes) => {
                 f.write_str("|| ( ")?;
-                self.fmt_children(children, f)?;
+                self.fmt_children(nodes, f)?;
                 f.write_str(" )")
             }
-            ArenaEntry::OneOf(children) => {
+            ArenaEntry::OneOf(nodes) => {
                 f.write_str("^^ ( ")?;
-                self.fmt_children(children, f)?;
+                self.fmt_children(nodes, f)?;
                 f.write_str(" )")
             }
-            ArenaEntry::OnlyOneOf(children) => {
+            ArenaEntry::OnlyOneOf(nodes) => {
                 f.write_str("?? ( ")?;
-                self.fmt_children(children, f)?;
+                self.fmt_children(nodes, f)?;
                 f.write_str(" )")
             }
         }
@@ -194,11 +194,11 @@ impl<T: ExpressionItem> ExpressionArena<T> {
 
     fn fmt_children(&self, range: &Range<u32>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, id) in self.get_children(range).iter().enumerate() {
-            let child = self.get_expression(id);
+            let node = self.get_expression(id);
             if i > 0 {
                 f.write_str(" ")?;
             }
-            self.fmt_expression(child, f)?;
+            self.fmt_expression(node, f)?;
         }
         Ok(())
     }
