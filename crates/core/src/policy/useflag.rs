@@ -1,12 +1,13 @@
 use crate::deps::atom::Atom;
+use crate::deps::expression::{Expression, ExpressionNode};
 use crate::files::pkgfile::{PackageUseRecords, UseFlags};
 use crate::files::{UseEntries, entry::Entry};
 use crate::package::PackageView;
 use crate::profile::ProfileUseRecords;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::{IUseEntry, IUseState, UseExpandConfig, UseFlag};
-use crate::utils::Inherit;
-use anyhow::Context;
+use crate::utils::{Inherit, try_all, try_any};
+use anyhow::{Context, bail};
 
 /// Simple DTO used to build [`UsePolicy`] from user configured USE entries.
 #[derive(Default)]
@@ -87,9 +88,13 @@ impl UsePolicy {
         pkg: &P,
         stable_in_use: bool,
     ) -> anyhow::Result<bool> {
-        let _use_state = self.effective_for(pkg, stable_in_use);
-        // TODO: implement me
-        Ok(true)
+        let use_state = self.effective_for(pkg, stable_in_use);
+        let tree = pkg.metadata().required_use.view();
+        // TODO: This currently only checks the required USE flags to satisfy the expression,
+        // inactive branches can contain unreferenced USE flags which might not be PMS compatible.
+        try_all(tree.roots(), |n| {
+            eval_expression(n.expression(), &use_state)
+        })
     }
 
     /// Returns the effective USE state for the given [`PackageView`].
@@ -220,7 +225,6 @@ impl PackageUse {
 }
 
 /// Final USE state of one package.
-#[cfg_attr(not(test), expect(dead_code))]
 struct EffectiveUse<'a> {
     /// All flags that can exist for the package.
     /// This corresponds to `IUSE_EFFECTIVE`.
@@ -230,11 +234,19 @@ struct EffectiveUse<'a> {
 }
 
 impl<'a> EffectiveUse<'a> {
+    /// Returns `true` if the given `flag` is enabled, `false` otherwise.
+    /// `Err` is returned if the flag is not available.
+    fn is_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
+        match self.state(flag) {
+            Some(enabled) => Ok(enabled),
+            None => bail!("flag {flag} is not available"),
+        }
+    }
+
     /// Returns the effective state of the given `flag`.
     /// - `Some(true)` if the flag is enabled.
     /// - `Some(false)` if the flag is disabled.
     /// - `None` if the flag is not available.
-    #[cfg_attr(not(test), expect(dead_code))]
     fn state(&self, flag: &UseFlag) -> Option<bool> {
         self.available
             .contains(flag)
@@ -242,12 +254,58 @@ impl<'a> EffectiveUse<'a> {
     }
 }
 
+/// Evaluates `expr` that is part of `REQUIRED_USE` to determine whether
+/// the USE flags are satisfied for the given `state`.
+fn eval_expression<'a>(
+    expr: Expression<'a, UseFlag>,
+    state: &EffectiveUse,
+) -> anyhow::Result<bool> {
+    let result = match expr {
+        Expression::Item(flag) => state.is_enabled(flag)?,
+        Expression::AllOf(nodes) => try_all(nodes, |n| eval_expression(n.expression(), state))?,
+        Expression::AnyOf(nodes) => try_any(nodes, |n| eval_expression(n.expression(), state))?,
+        Expression::OneOf(nodes) => eval_up_to_two(nodes, state)? == 1,
+        Expression::OnlyOneOf(nodes) => eval_up_to_two(nodes, state)? < 2,
+        Expression::Use {
+            flag,
+            negated,
+            children,
+        } => match state.is_enabled(flag)? == negated {
+            true => true,
+            false => try_all(children, |n| eval_expression(n.expression(), state))?,
+        },
+        Expression::Not(node) => !eval_expression(node.expression(), state)?,
+        _ => unreachable!(),
+    };
+    Ok(result)
+}
+
+/// Evaluates `nodes` and counts how many are satisfied by the given `state`.
+///
+/// Breaks early if more than two nodes are satisfied.
+fn eval_up_to_two<'a, I>(nodes: I, state: &EffectiveUse) -> anyhow::Result<u8>
+where
+    I: IntoIterator<Item = ExpressionNode<'a, UseFlag>>,
+{
+    let mut count = 0;
+    for node in nodes.into_iter() {
+        if eval_expression(node.expression(), state)? {
+            count += 1;
+            if count > 2 {
+                break;
+            }
+        }
+    }
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deps::{DepExpression, ExpressionKind};
+    use crate::eapi::Eapi;
     use crate::files::entry::Precedence;
     use crate::makenv::{MakeEnv, MakeEnvStack};
-
     use crate::package::Package;
     use crate::package::metadata::PackageMetadata;
     use crate::test_support::cpv;
@@ -286,6 +344,54 @@ mod tests {
         Ok(policy
             .effective_for(&package, false)
             .state(&UseFlag::new(flag)?))
+    }
+
+    #[test]
+    fn test_eval_required_use() -> anyhow::Result<()> {
+        // expression, foo state, bar state, expected
+        let cases = [
+            ("foo", true, false, true),
+            ("!foo", false, false, true),
+            ("!foo", true, false, false),
+            ("foo bar", true, true, true),
+            ("foo bar", true, false, false),
+            ("( foo bar )", true, true, true),
+            ("( foo bar )", true, false, false),
+            ("|| ( foo bar )", false, true, true),
+            ("|| ( foo bar )", false, false, false),
+            ("^^ ( foo bar )", true, false, true),
+            ("^^ ( foo bar )", true, true, false),
+            ("?? ( foo bar )", true, false, true),
+            ("?? ( foo bar )", true, true, false),
+            ("foo? ( bar )", false, false, true),
+            ("foo? ( bar )", true, true, true),
+            ("foo? ( bar )", true, false, false),
+            ("!foo? ( bar )", false, true, true),
+            ("!foo? ( bar )", false, false, false),
+            ("!foo? ( bar )", true, true, true),
+            ("!foo? ( bar )", true, false, true),
+        ];
+
+        let foo = UseFlag::new("foo")?;
+        let bar = UseFlag::new("bar")?;
+        let available = FxHashSet::from_iter([&foo, &bar]);
+        for (input, foo_state, bar_state, expected) in cases {
+            let expr =
+                DepExpression::<UseFlag>::parse(Eapi::Eight, ExpressionKind::RequiredUse, input)?;
+            let state = EffectiveUse {
+                available: available.clone(),
+                enabled: [(&foo, foo_state), (&bar, bar_state)]
+                    .into_iter()
+                    .filter_map(|(flag, enabled)| enabled.then_some(flag))
+                    .collect(),
+            };
+            let actual = try_all(expr.view().roots(), |n| {
+                eval_expression(n.expression(), &state)
+            })?;
+
+            assert_eq!(actual, expected, "{input}");
+        }
+        Ok(())
     }
 
     #[test]

@@ -82,6 +82,34 @@ pub fn list_files(path: &Path) -> anyhow::Result<Vec<PathBuf>> {
     Ok(files)
 }
 
+/// Fallible variant of [`Iterator::all()`]
+pub fn try_all<I, F, E>(iter: I, mut func: F) -> Result<bool, E>
+where
+    I: IntoIterator,
+    F: FnMut(I::Item) -> Result<bool, E>,
+{
+    for item in iter {
+        if !func(item)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Fallible variant of [`Iterator::any()`].
+pub fn try_any<I, F, E>(iter: I, mut func: F) -> Result<bool, E>
+where
+    I: IntoIterator,
+    F: FnMut(I::Item) -> Result<bool, E>,
+{
+    for item in iter {
+        if func(item)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

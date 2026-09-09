@@ -27,10 +27,10 @@ impl<'a, T: ExpressionItem> Clone for ExpressionTree<'a, T> {
 /// A borrowed expression from [`ExpressionNode`].
 pub enum Expression<'a, T: ExpressionItem> {
     Item(&'a T),
-    AllOf(ExpressionChildren<'a, T>),
-    AnyOf(ExpressionChildren<'a, T>),
-    OneOf(ExpressionChildren<'a, T>),
-    OnlyOneOf(ExpressionChildren<'a, T>),
+    AllOf(ExpressionChildren<'a, T>),     // ( a b )
+    AnyOf(ExpressionChildren<'a, T>),     // || ( a b )
+    OneOf(ExpressionChildren<'a, T>),     // ^^ ( a b )
+    OnlyOneOf(ExpressionChildren<'a, T>), // ?? ( a b )
     Use {
         flag: &'a UseFlag,
         negated: bool,
