@@ -190,12 +190,8 @@ impl RepoSet {
     pub fn validate_profile(&self, profile: &Profile, arch: &Arch) -> anyhow::Result<()> {
         for repo in self.values() {
             let profile_prefix = format!("{}/profiles/", repo.location.display());
-            if let Some(profile_path) = profile
-                .location
-                .display()
-                .to_string()
-                .strip_prefix(&profile_prefix)
-                && repo.is_known_profile(arch, profile_path)
+            if let Ok(path) = profile.location.strip_prefix(&profile_prefix)
+                && repo.is_known_profile(arch, path)
             {
                 return Ok(());
             }

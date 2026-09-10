@@ -122,14 +122,14 @@ impl Repository {
         self.resolve_packages(cpvs).await
     }
 
-    /// Checks if the profile with the relative `profile_path` is valid for the given `arch`.
+    /// Checks if the profile with the relative `rel_path` is valid for the given `arch`.
     ///
-    /// The repository location prefix must be stripped from the passed `profile_path` string
+    /// The repository location prefix must be stripped from the passed `rel_path`,
     /// e.g.: `default/linux/23.0`
-    pub fn is_known_profile(&self, arch: &Arch, profile_path: &str) -> bool {
+    pub fn is_known_profile(&self, arch: &Arch, rel_path: &Path) -> bool {
         self.profiles_desc
             .iter()
-            .any(|desc| &desc.arch == arch && desc.profile_path == profile_path)
+            .any(|desc| &desc.arch == arch && desc.profile_path.as_str() == rel_path.as_os_str())
     }
 
     /// Resolves all configured categories and eclasses and also clears the CPV index.
