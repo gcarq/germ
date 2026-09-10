@@ -2,7 +2,6 @@ use crate::deps::{ExpressionItem, ExpressionKind};
 use crate::useflag::UseFlag;
 use anyhow::{Context, bail};
 use rkyv::{Archive, Deserialize, Serialize};
-use std::fmt;
 use std::ops::Range;
 
 /// Represents an arena entry, this can be an `Item` (USE Flag, Atom, URI, ...),
@@ -144,69 +143,6 @@ impl<T: ExpressionItem> ExpressionArena<T> {
             },
             _ => bail!("negation must apply to an item"),
         }
-    }
-
-    fn fmt_expression(&self, expr: &ArenaEntry<T>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match expr {
-            ArenaEntry::Item(item) => item.fmt(f),
-            ArenaEntry::Not(node) => {
-                f.write_str("!")?;
-                self.fmt_expression(self.get_expression(node), f)
-            }
-            ArenaEntry::Forbidden(node) => {
-                f.write_str("!!")?;
-                self.fmt_expression(self.get_expression(node), f)
-            }
-            ArenaEntry::Use {
-                flag,
-                negated,
-                nodes,
-            } => {
-                if *negated {
-                    f.write_str("!")?;
-                }
-                write!(f, "{flag}? ( ")?;
-                self.fmt_children(nodes, f)?;
-                f.write_str(" )")
-            }
-            ArenaEntry::AllOf(nodes) => {
-                f.write_str("( ")?;
-                self.fmt_children(nodes, f)?;
-                f.write_str(" )")
-            }
-            ArenaEntry::AnyOf(nodes) => {
-                f.write_str("|| ( ")?;
-                self.fmt_children(nodes, f)?;
-                f.write_str(" )")
-            }
-            ArenaEntry::ExactlyOneOf(nodes) => {
-                f.write_str("^^ ( ")?;
-                self.fmt_children(nodes, f)?;
-                f.write_str(" )")
-            }
-            ArenaEntry::AtMostOneOf(nodes) => {
-                f.write_str("?? ( ")?;
-                self.fmt_children(nodes, f)?;
-                f.write_str(" )")
-            }
-        }
-    }
-
-    fn fmt_children(&self, range: &Range<u32>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, id) in self.get_children(range).iter().enumerate() {
-            let node = self.get_expression(id);
-            if i > 0 {
-                f.write_str(" ")?;
-            }
-            self.fmt_expression(node, f)?;
-        }
-        Ok(())
-    }
-}
-
-impl<T: ExpressionItem> fmt::Display for ExpressionArena<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_children(&self.roots, f)
     }
 }
 

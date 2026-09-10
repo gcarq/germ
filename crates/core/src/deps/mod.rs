@@ -101,15 +101,14 @@ impl<T: ExpressionItem> DepExpression<T> {
     }
 
     /// Returns a view of the expression.
-    #[allow(dead_code)]
     pub const fn view(&self) -> ExpressionTree<'_, T> {
         self.arena.view()
     }
 }
 
-impl<T: ExpressionItem + fmt::Display> fmt::Display for DepExpression<T> {
+impl<T: ExpressionItem> fmt::Display for DepExpression<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.arena.fmt(f)
+        self.view().fmt(f)
     }
 }
 
@@ -137,6 +136,7 @@ mod tests {
         let expression =
             DepExpression::<Atom>::parse(Eapi::Eight, ExpressionKind::Dependency, "cat/pkg")
                 .unwrap();
+        assert_eq!(expression.to_string(), "cat/pkg");
         assert_eq!(expression.view().roots().count(), 1);
     }
 

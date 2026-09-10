@@ -2,7 +2,7 @@ use super::ExpressionItem;
 use super::parser::arena::{ArenaEntry, ExpressionArena, ExpressionId};
 use crate::useflag::UseFlag;
 use std::ops::Range;
-use std::slice;
+use std::{fmt, slice};
 
 /// A borrowed view of [`ExpressionArena`].
 pub struct ExpressionTree<'a, T: ExpressionItem> {
@@ -24,6 +24,12 @@ impl<'a, T: ExpressionItem> Clone for ExpressionTree<'a, T> {
     }
 }
 
+impl<T: ExpressionItem> fmt::Display for ExpressionTree<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.roots().fmt(f)
+    }
+}
+
 /// A borrowed expression from [`ExpressionNode`].
 pub enum Expression<'a, T: ExpressionItem> {
     Item(&'a T),
@@ -40,8 +46,29 @@ pub enum Expression<'a, T: ExpressionItem> {
     Forbidden(ExpressionNode<'a, T>),
 }
 
+impl<T: ExpressionItem> fmt::Display for Expression<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expression::Item(item) => item.fmt(f),
+            Expression::AllOf(nodes) => write!(f, "( {nodes} )"),
+            Expression::AnyOf(nodes) => write!(f, "|| ( {nodes} )"),
+            Expression::ExactlyOneOf(nodes) => write!(f, "^^ ( {nodes} )"),
+            Expression::AtMostOneOf(nodes) => write!(f, "?? ( {nodes} )"),
+            Expression::Use {
+                flag,
+                negated,
+                nodes,
+            } => match *negated {
+                true => write!(f, "!{flag}? ( {nodes} )"),
+                false => write!(f, "{flag}? ( {nodes} )"),
+            },
+            Expression::Not(node) => write!(f, "!{node}"),
+            Expression::Forbidden(node) => write!(f, "!!{node}"),
+        }
+    }
+}
+
 /// Represents a handle to one node in an [`ExpressionTree`].
-#[derive(Copy, Clone)]
 pub struct ExpressionNode<'a, T: ExpressionItem> {
     tree: ExpressionTree<'a, T>,
     id: ExpressionId,
@@ -69,15 +96,27 @@ impl<'a, T: ExpressionItem> ExpressionNode<'a, T> {
                 negated: *negated,
                 nodes: ExpressionNodes::new(self.tree, nodes),
             },
-            ArenaEntry::Not(node) => Expression::Not(Self {
-                tree: self.tree,
-                id: *node,
-            }),
-            ArenaEntry::Forbidden(node) => Expression::Forbidden(Self {
-                tree: self.tree,
-                id: *node,
-            }),
+            ArenaEntry::Not(node) => Expression::Not(Self::new(self.tree, *node)),
+            ArenaEntry::Forbidden(node) => Expression::Forbidden(Self::new(self.tree, *node)),
         }
+    }
+
+    const fn new(tree: ExpressionTree<'a, T>, id: ExpressionId) -> Self {
+        Self { tree, id }
+    }
+}
+
+impl<T: ExpressionItem> Copy for ExpressionNode<'_, T> {}
+
+impl<T: ExpressionItem> Clone for ExpressionNode<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: ExpressionItem> fmt::Display for ExpressionNode<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.expression().fmt(f)
     }
 }
 
@@ -85,6 +124,18 @@ impl<'a, T: ExpressionItem> ExpressionNode<'a, T> {
 pub struct ExpressionNodes<'a, T: ExpressionItem> {
     tree: ExpressionTree<'a, T>,
     nodes: slice::Iter<'a, ExpressionId>,
+}
+
+impl<T: ExpressionItem> fmt::Display for ExpressionNodes<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, id) in self.nodes.as_slice().iter().enumerate() {
+            if index > 0 {
+                f.write_str(" ")?;
+            }
+            ExpressionNode::new(self.tree, *id).fmt(f)?;
+        }
+        Ok(())
+    }
 }
 
 impl<'a, T: ExpressionItem> ExpressionNodes<'a, T> {
@@ -98,10 +149,7 @@ impl<'a, T: ExpressionItem> Iterator for ExpressionNodes<'a, T> {
     type Item = ExpressionNode<'a, T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Some(ExpressionNode {
-            tree: self.tree,
-            id: self.nodes.next().copied()?,
-        })
+        Some(ExpressionNode::new(self.tree, self.nodes.next().copied()?))
     }
 }
 
@@ -109,5 +157,19 @@ impl<T: ExpressionItem> ExpressionArena<T> {
     /// Returns a view of the arena.
     pub const fn view(&self) -> ExpressionTree<'_, T> {
         ExpressionTree { arena: self }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::parser::ExpressionParser;
+    use crate::useflag::UseFlag;
+
+    #[test]
+    fn test_display_nested() {
+        let input = "|| ( cli gui ) gui? ( ^^ ( X wayland ) X? ( ?? ( gles2 opengl ) !minimal? ( || ( vulkan vaapi ) ) ) )";
+        let arena = ExpressionParser::<UseFlag>::parse(input).unwrap();
+
+        assert_eq!(arena.view().to_string(), input);
     }
 }

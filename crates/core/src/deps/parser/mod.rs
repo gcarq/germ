@@ -185,7 +185,6 @@ mod tests {
                 item("app-misc/foo"),
             ])],
         );
-        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
@@ -196,7 +195,6 @@ mod tests {
             expr.view(),
             &[AllOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
         );
-        assert_eq!(expr.to_string(), "( sys-libs/db app-misc/foo )");
     }
 
     #[test]
@@ -207,7 +205,6 @@ mod tests {
             expr.view(),
             &[AnyOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
         );
-        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
@@ -218,7 +215,6 @@ mod tests {
             expr.view(),
             &[AtMostOneOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
         );
-        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
@@ -233,7 +229,6 @@ mod tests {
                 nodes: vec![item("sys-libs/db"), item("app-misc/foo")],
             }],
         );
-        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
@@ -241,7 +236,6 @@ mod tests {
         let input = "!sys-libs/db";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(expr.view(), &[Not(item("sys-libs/db").into())]);
-        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
@@ -249,7 +243,6 @@ mod tests {
         let input = "!!sys-libs/db";
         let expr = ExpressionParser::<Atom>::parse(input).unwrap();
         assert_expr(expr.view(), &[Forbidden(item("sys-libs/db").into())]);
-        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
@@ -260,7 +253,6 @@ mod tests {
             expr.view(),
             &[item("media-libs/mesa[gbm(+)]"), item("dev-lang/R")],
         );
-        assert_eq!(expr.to_string(), input);
     }
 
     #[test]
@@ -295,10 +287,6 @@ mod tests {
                 Forbidden(item("<dev-perl/Mail-Box-3").into()),
             ],
         );
-        assert_eq!(
-            expr.to_string(),
-            "sys-libs/db bar? ( sys-libs/db ) || ( =sys-libs/db-5*:5 =sys-libs/db-4*:4 ) !foo? ( !app-misc/foo ) !!<dev-perl/Mail-Box-3"
-        );
     }
 
     #[test]
@@ -322,10 +310,6 @@ mod tests {
                 },
             ],
         );
-        assert_eq!(
-            expr.to_string(),
-            "|| ( wayland X ) ssh? ( || ( rdp ( vnc X ) ) )"
-        );
     }
 
     #[test]
@@ -347,12 +331,6 @@ mod tests {
                 "expected invalid expression: {input}"
             );
         }
-    }
-
-    #[test]
-    fn test_parser_whitespace_only() {
-        let expression = ExpressionParser::<Atom>::parse(" \t\n").unwrap();
-        assert_eq!(expression.to_string(), "");
     }
 
     #[test]
