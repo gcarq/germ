@@ -13,8 +13,8 @@ use crate::policy::pkgmask::RepositorySource;
 use crate::profile::Profile;
 use crate::repository::Arch;
 use crate::repository::tree::PackageResult;
-use crate::types::{FxHashMap, FxHashSet};
-use crate::utils::Inherit;
+use crate::types::FxHashMap;
+use crate::utils::{DfsState, Inherit, Visit};
 use anyhow::anyhow;
 use either::Either;
 use indexmap::IndexMap;
@@ -178,8 +178,8 @@ impl RepoSet {
 
     /// Validates that at least one available repository supports the given architecture.
     pub fn validate_arch(&self, arch: &Arch) -> anyhow::Result<()> {
-        for repository in self.values() {
-            if repository.arches.contains(arch) {
+        for repo in self.values() {
+            if repo.arches.contains(arch) {
                 return Ok(());
             }
         }
@@ -202,9 +202,9 @@ impl RepoSet {
     /// Returns the aggregated package mask/unmask entries from all available repos.
     pub fn package_mask_source(&self) -> anyhow::Result<RepositorySource> {
         let mut source = RepositorySource::default();
-        for repository in self.values() {
-            source.mask.inherit_from(&repository.package_mask)?;
-            source.unmask.inherit_from(&repository.package_unmask)?;
+        for repo in self.values() {
+            source.mask.inherit_from(&repo.package_mask)?;
+            source.unmask.inherit_from(&repo.package_unmask)?;
         }
         Ok(source)
     }
@@ -238,8 +238,8 @@ impl RepoSet {
                 Ok(_) => {
                     match Repository::load(&config.name, &config.location, config.priority, sysconf)
                     {
-                        Ok(repository) => {
-                            pending.insert(config.name.clone(), repository);
+                        Ok(repo) => {
+                            pending.insert(config.name.clone(), repo);
                         }
                         Err(
                             error @ (RepositoryError::Data(_)
@@ -273,7 +273,7 @@ impl RepoSet {
                 let masters = config.masters.clone().unwrap_or_else(|| {
                     pending
                         .get(&config.name)
-                        .map(|repository| repository.layout.masters.clone())
+                        .map(|repo| repo.layout.masters.clone())
                         .unwrap_or_default()
                 });
                 (config.name.clone(), masters)
@@ -287,50 +287,47 @@ impl RepoSet {
             Self::finalize(&name, &graph, &mut pending, &mut completed)?;
         }
 
-        for (name, repository) in completed {
+        for (name, repo) in completed {
             let entry = self.entries.get_mut(&name).ok_or_else(|| {
                 RepoSetError::Internal(anyhow!(
                     "replacement entry for repository '{name}' is missing"
                 ))
             })?;
-            entry.repository = Some(repository);
+            entry.repository = Some(repo);
         }
 
         Ok(())
     }
 
+    /// Validates that the given `graph` is not cyclic.
     fn validate_master_graph(
         graph: &FxHashMap<RepoName, Vec<RepoName>>,
     ) -> Result<(), RepoSetError> {
-        let mut visiting = FxHashSet::default();
-        let mut visited = FxHashSet::default();
+        fn visit(
+            name: &RepoName,
+            graph: &FxHashMap<RepoName, Vec<RepoName>>,
+            dfs: &mut DfsState<RepoName>,
+        ) -> Result<(), RepoSetError> {
+            match dfs.enter(name) {
+                Ok(Visit::AlreadyVisited) => return Ok(()),
+                Ok(Visit::Continue) => {}
+                Err(_) => return Err(RepoSetError::Cycle(name.to_string())),
+            }
+
+            if let Some(masters) = graph.get(name) {
+                for master in masters {
+                    visit(master, graph, dfs)?;
+                }
+            }
+
+            dfs.leave(name);
+            Ok(())
+        }
+
+        let mut dfs = DfsState::default();
         for name in graph.keys() {
-            Self::validate_master(name, graph, &mut visiting, &mut visited)?;
+            visit(name, graph, &mut dfs)?;
         }
-        Ok(())
-    }
-
-    fn validate_master(
-        name: &RepoName,
-        graph: &FxHashMap<RepoName, Vec<RepoName>>,
-        visiting: &mut FxHashSet<RepoName>,
-        visited: &mut FxHashSet<RepoName>,
-    ) -> Result<(), RepoSetError> {
-        if visited.contains(name) {
-            return Ok(());
-        }
-        let Some(masters) = graph.get(name) else {
-            return Ok(());
-        };
-        if !visiting.insert(name.to_owned()) {
-            return Err(RepoSetError::Cycle(name.to_string()));
-        }
-
-        for master in masters {
-            Self::validate_master(master, graph, visiting, visited)?;
-        }
-        visiting.remove(name);
-        visited.insert(name.to_owned());
         Ok(())
     }
 
@@ -351,12 +348,12 @@ impl RepoSet {
             Self::finalize(master, graph, pending, completed)?;
         }
 
-        let mut repository = pending.remove(name).ok_or_else(|| {
+        let mut repo = pending.remove(name).ok_or_else(|| {
             RepoSetError::Internal(anyhow!("pending repository '{name}' is missing"))
         })?;
         for master_name in masters {
             if let Some(master) = completed.get(master_name) {
-                repository.inherit_from(master).map_err(|source| {
+                repo.inherit_from(master).map_err(|source| {
                     RepoSetError::repo_failure(name, RepositoryError::Internal(source))
                 })?;
             } else {
@@ -364,10 +361,10 @@ impl RepoSet {
             }
         }
 
-        match repository.finalize() {
+        match repo.finalize() {
             Ok(()) => {
                 debug!("Loaded repository '{name}'");
-                completed.insert(name.to_owned(), repository);
+                completed.insert(name.to_owned(), repo);
             }
             Err(
                 error @ (RepositoryError::Data(_)

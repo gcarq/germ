@@ -9,7 +9,7 @@ use crate::profile::deprecation::DeprecationInfo;
 use crate::profile::parent::ParentEntry;
 use crate::repository::{RepoSet, Repository};
 use crate::useflag::UseExpandConfig;
-use crate::utils::Inherit;
+use crate::utils::{DfsState, Inherit};
 use anyhow::{Context, bail};
 use log::warn;
 use std::path::{Path, PathBuf};
@@ -83,7 +83,8 @@ impl Profile {
         let source = ProfileSource::from_path(location, repo_set)?;
 
         let mut parents = Vec::new();
-        Self::build_parents(&source, repo_set, &mut parents)
+        let mut dfs = DfsState::default();
+        Self::build_parents(&source, repo_set, &mut parents, &mut dfs)
             .with_context(|| format!("unable to resolve parents for {source}"))?;
 
         // Fold make.defaults layers before inheriting other profile files so active
@@ -157,18 +158,30 @@ impl Profile {
         source: &ProfileSource<'repo>,
         repo_set: &'repo RepoSet,
         profiles: &mut Vec<Self>,
+        dfs: &mut DfsState<PathBuf>,
     ) -> anyhow::Result<()> {
+        if let Err(cycle) = dfs.enter(&source.path) {
+            let path = cycle
+                .path
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            bail!("profile parent cycle detected involving {path}");
+        }
+
         for parent in ParentEntry::from_parent_file(&source.path.join("parent"))? {
             let source = parent.resolve(source, repo_set).with_context(|| {
                 format!("invalid parent reference '{parent}' in profile {source}")
             })?;
-            Self::build_parents(&source, repo_set, profiles)?;
+            Self::build_parents(&source, repo_set, profiles, dfs)?;
 
             let order = Precedence::Profile(profiles.len());
             let profile = Self::load(&source, order)
                 .with_context(|| format!("unable to build profile from {source}"))?;
             profiles.push(profile);
         }
+        dfs.leave(&source.path);
         Ok(())
     }
 
@@ -500,5 +513,37 @@ mod tests {
             Profile::resolve(&profile_path(source_path, "ordinary-relative"), &fixture).is_err()
         );
         Ok(())
+    }
+
+    #[test]
+    fn test_parent_direct_cycle() {
+        let fixture = repo_set(vec![
+            RepoBuilder::new("repo")
+                .formats(["pms"])
+                .profile("selected")
+                .parents("selected", ["../selected"]),
+        ])
+        .unwrap();
+        let repo_path = fixture.get("repo").unwrap().location.as_path();
+
+        assert!(Profile::resolve(&profile_path(repo_path, "selected"), &fixture).is_err());
+    }
+
+    #[test]
+    fn test_parent_indirect_cycle() {
+        let fixture = repo_set(vec![
+            RepoBuilder::new("repo")
+                .formats(["pms"])
+                .profile("first")
+                .profile("second")
+                .profile("third")
+                .parents("first", ["../second"])
+                .parents("second", ["../third"])
+                .parents("third", ["../first"]),
+        ])
+        .unwrap();
+        let repo_path = fixture.get("repo").unwrap().location.as_path();
+
+        assert!(Profile::resolve(&profile_path(repo_path, "first"), &fixture).is_err());
     }
 }

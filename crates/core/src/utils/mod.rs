@@ -1,3 +1,7 @@
+mod dfs;
+
+pub(crate) use self::dfs::{DfsState, Visit};
+
 use anyhow::{anyhow, bail};
 use md5::{Digest, Md5};
 use std::fmt::Write;
