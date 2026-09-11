@@ -77,7 +77,7 @@ impl RepoSet {
     /// TODO: Order the returned packages by version
     pub async fn find_packages(&mut self, atom: &Atom) -> Result<Vec<PackageResult>, RepoSetError> {
         let mut results = Vec::new();
-        for repo in self.select_mut(atom.repo.as_ref().map(RepoName::as_str)) {
+        for repo in self.select_mut(atom.repo().map(RepoName::as_str)) {
             let repo_name = repo.name.clone();
             results.extend(
                 repo.find_packages(atom)

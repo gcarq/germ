@@ -33,19 +33,19 @@ impl VersionComponent<'_> {
 
 /// Checks if the `candidate` is a prefix of the given `atom` version.
 pub fn matches_wildcard(atom: &PackageVersion, candidate: &PackageVersion) -> bool {
-    let mut atom_comps = components(atom);
-    let mut candiate_comps = components(candidate).peekable();
+    let mut wildcard = components(atom);
+    let mut candidate = components(candidate).peekable();
 
     loop {
-        let Some(atom_comp) = atom_comps.next() else {
+        let Some(wc_comp) = wildcard.next() else {
             return true;
         };
-        let candidate_comp = candiate_comps.peek().copied();
-        match candidate_comp {
-            Some(candidate_comp) if atom_comp == candidate_comp => {
-                candiate_comps.next();
+        let cand_comp = candidate.peek().copied();
+        match cand_comp {
+            Some(cand_comp) if wc_comp == cand_comp => {
+                candidate.next();
             }
-            Some(_) | None if atom_comp.matches_omitted(candidate_comp) => {}
+            Some(_) | None if wc_comp.matches_omitted(cand_comp) => {}
             _ => return false,
         }
     }
@@ -79,54 +79,53 @@ fn components(version: &PackageVersion) -> impl Iterator<Item = VersionComponent
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deps::atom::Atom;
 
     #[test]
     fn test_version_wildcard_matching() {
         let tests = [
             // suffix name and candidate extensions
-            ("=cat/pkg-1_pre*", "1_pre", true),
-            ("=cat/pkg-1_pre*", "1_pre1", true),
-            ("=cat/pkg-1_pre*", "1_pre10", true),
-            ("=cat/pkg-1_pre*", "1_rc1", false),
-            ("=cat/pkg-1_pre*", "1", false),
-            ("=cat/pkg-1_alpha*", "1_beta", false),
+            ("1_pre", "1_pre", true),
+            ("1_pre", "1_pre1", true),
+            ("1_pre", "1_pre10", true),
+            ("1_pre", "1_rc1", false),
+            ("1_pre", "1", false),
+            ("1_alpha", "1_beta", false),
             // explicit suffix integers and component boundaries
-            ("=cat/pkg-1_pre1*", "1_pre1", true),
-            ("=cat/pkg-1_pre1*", "1_pre", false),
-            ("=cat/pkg-1_pre1*", "1_pre0", false),
-            ("=cat/pkg-1_pre1*", "1_pre10", false),
-            ("=cat/pkg-1_pre0*", "1_pre", true),
-            ("=cat/pkg-1_pre0*", "1_pre0", true),
-            ("=cat/pkg-1_pre0*", "1_pre1", false),
-            ("=cat/pkg-1_pre_beta*", "1_pre_beta", true),
-            ("=cat/pkg-1_pre_beta*", "1_pre1_beta", false),
-            ("=cat/pkg-1_pre0_beta*", "1_pre_beta", true),
+            ("1_pre1", "1_pre1", true),
+            ("1_pre1", "1_pre", false),
+            ("1_pre1", "1_pre0", false),
+            ("1_pre1", "1_pre10", false),
+            ("1_pre0", "1_pre", true),
+            ("1_pre0", "1_pre0", true),
+            ("1_pre0", "1_pre1", false),
+            ("1_pre_beta", "1_pre_beta", true),
+            ("1_pre_beta", "1_pre1_beta", false),
+            ("1_pre0_beta", "1_pre_beta", true),
             // revisions
-            ("=cat/pkg-1-r1*", "1-r1", true),
-            ("=cat/pkg-1-r1*", "1-r11", false),
-            ("=cat/pkg-1-r1*", "1_alpha1", false),
-            ("=cat/pkg-1-r0*", "1", true),
-            ("=cat/pkg-1-r0*", "1-r0", true),
-            ("=cat/pkg-1-r0*", "1-r1", false),
-            ("=cat/pkg-1-r0*", "1_alpha", false),
+            ("1-r1", "1-r1", true),
+            ("1-r1", "1-r11", false),
+            ("1-r1", "1_alpha1", false),
+            ("1-r0", "1", true),
+            ("1-r0", "1-r0", true),
+            ("1-r0", "1-r1", false),
+            ("1-r0", "1_alpha", false),
             // numeric component boundaries
-            ("=cat/pkg-1.1*", "1.1-r1", true),
-            ("=cat/pkg-1.1*", "1.10-r1", false),
+            ("1.1", "1.1-r1", true),
+            ("1.1", "1.10-r1", false),
             // ordinary prefix
-            ("=cat/pkg-1*", "1.1", true),
-            ("=cat/pkg-15*", "15.2.1a", true),
-            ("=cat/pkg-15.2*", "15.2.1a", true),
-            ("=cat/pkg-15.2.1*", "15.2.1a", true),
-            ("=cat/pkg-15.2.1a*", "15.2.1a", true),
-            ("=cat/pkg-15.2.1b*", "15.2.1a", false),
-            ("=cat/pkg-15.2.2*", "15.2.1a", false),
+            ("1", "1.1", true),
+            ("15", "15.2.1a", true),
+            ("15.2", "15.2.1a", true),
+            ("15.2.1", "15.2.1a", true),
+            ("15.2.1a", "15.2.1a", true),
+            ("15.2.1b", "15.2.1a", false),
+            ("15.2.2", "15.2.1a", false),
         ];
 
-        for (atom, version, expected) in tests {
-            let atom = Atom::new(atom).unwrap();
-            let version = PackageVersion::try_from(version).unwrap();
-            assert_eq!(version.matches_atom(&atom), expected);
+        for (wildcard, candidate, expected) in tests {
+            let wildcard = PackageVersion::try_from(wildcard).unwrap();
+            let candidate = PackageVersion::try_from(candidate).unwrap();
+            assert_eq!(matches_wildcard(&wildcard, &candidate), expected);
         }
     }
 }

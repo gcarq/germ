@@ -4,7 +4,6 @@ mod numeric;
 mod revision;
 mod suffix;
 
-use crate::deps::atom::{Atom, AtomOperator, AtomVariant};
 use crate::grammar::{REVISION, VERSION, VERSION_SUFFIXES};
 use anyhow::anyhow;
 use base::VersionNumber;
@@ -15,6 +14,8 @@ use std::fmt;
 use std::fmt::Write;
 use std::sync::LazyLock;
 use suffix::VersionSuffixes;
+
+pub use matching::matches_wildcard;
 
 /// Regex to validate and parse `version`, `suffixes` and the `revision`.
 static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -74,27 +75,9 @@ impl PackageVersion {
         pvr
     }
 
-    /// Checks if the given `atom` matches this version.
-    pub fn matches_atom(&self, atom: &Atom) -> bool {
-        let Some(atom_ver) = &atom.version else {
-            return true;
-        };
-
-        match atom.variant {
-            AtomVariant::Simple => self == atom_ver,
-            AtomVariant::VersionOperator => match atom.operator {
-                Some(AtomOperator::Less) => self < atom_ver,
-                Some(AtomOperator::LessEqual) => self <= atom_ver,
-                Some(AtomOperator::Equal) => self == atom_ver,
-                Some(AtomOperator::Greater) => self > atom_ver,
-                Some(AtomOperator::GreaterEqual) => self >= atom_ver,
-                Some(AtomOperator::Approximate) => {
-                    self.number == atom_ver.number && self.suffixes == atom_ver.suffixes
-                }
-                None => unreachable!("BUG: atom is expected to have an operator"),
-            },
-            AtomVariant::VersionWildcard => matching::matches_wildcard(atom_ver, self),
-        }
+    /// Returns `true` if the two versions are equal, ignoring the revision.
+    pub fn matches_approximate(&self, other: &Self) -> bool {
+        self.number == other.number && self.suffixes == other.suffixes
     }
 }
 
@@ -248,13 +231,5 @@ mod tests {
         assert_eq!(explicit.pr(), "r0");
         assert_eq!(implicit.pvr(), "1.0.0");
         assert_eq!(explicit.pvr(), "1.0.0-r0");
-    }
-
-    #[test]
-    fn test_package_version_zero_revision_atom() {
-        let version = PackageVersion::new("1.0.0", None, Some("0")).unwrap();
-        for atom in ["=dev-libs/pkg-1.0.0", "=dev-libs/pkg-1.0.0-r0"] {
-            assert!(version.matches_atom(&Atom::new(atom).unwrap()));
-        }
     }
 }

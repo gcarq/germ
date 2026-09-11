@@ -1,4 +1,3 @@
-use crate::deps::atom::Atom;
 use crate::package::names::{CatName, PkgName};
 use crate::package::version::PackageVersion;
 use std::{cmp::Ordering, fmt};
@@ -25,13 +24,6 @@ impl CPV {
             fqn,
             version,
         }
-    }
-
-    /// Checks if the given [`Atom`] matches this CPV.
-    pub fn matches_atom(&self, atom: &Atom) -> bool {
-        atom.category.matches(&self.category)
-            && atom.package.matches(&self.package)
-            && self.version.matches_atom(atom)
     }
 
     /// Returns the package name, e.g.: `python`.
@@ -124,54 +116,7 @@ impl fmt::Display for CPV {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::test_support::cpv;
-
-    #[test]
-    fn test_cpv_matches_atom_true() {
-        let atoms = vec![
-            "sys-devel/gcc",
-            "=sys-devel/gcc-15*",
-            "=sys-devel/gcc-15.2*",
-            "=sys-devel/gcc-15.2.1*",
-            "=sys-devel/gcc-15.2.1_p20251122-r1",
-            ">sys-devel/gcc-15",
-            ">=sys-devel/gcc-15.2.1",
-            "<sys-devel/gcc-16",
-            "<=sys-devel/gcc-15.2.2_p20260101",
-            "~sys-devel/gcc-15.2.1_p20251122",
-        ];
-        let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
-        for atom in atoms {
-            let atom = Atom::new(atom).unwrap();
-            assert!(cpv.matches_atom(&atom), "{atom} should match {cpv}");
-        }
-    }
-
-    #[test]
-    fn test_cpv_matches_atom_false() {
-        let atoms = vec![
-            "sys-devel/binutils",
-            "virtual/gcc",
-            "<sys-devel/gcc-15",
-            "<=sys-devel/gcc-15.2.1",
-            ">sys-devel/gcc-16",
-            ">=sys-devel/gcc-15.2.2_p20251122-r2",
-            "=sys-devel/gcc-15.2.2",
-            "=sys-devel/gcc-15.2.2*",
-            "=sys-devel/gcc-15.2.1_p20260330",
-            "~sys-devel/gcc-15.3",
-            "~sys-devel/gcc-15",
-            "~sys-devel/gcc-15.2",
-            "~sys-devel/gcc-15.2.1",
-            "~sys-devel/gcc-15.2.1_p20260101",
-        ];
-        let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
-        for atom in atoms {
-            let atom = Atom::new(atom).unwrap();
-            assert!(!cpv.matches_atom(&atom), "{atom} shouldn't match {cpv}");
-        }
-    }
 
     #[test]
     fn test_cpv_explicit_r0_formatting() {

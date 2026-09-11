@@ -15,7 +15,7 @@ pub use profiles::{Arch, Arches, ProfileError};
 use self::package::CPVIndex;
 use self::profiles::ProfileDescriptions;
 use crate::SysConf;
-use crate::deps::atom::{Atom, AtomIdent};
+use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
 use crate::ebuild::Ebuild;
 use crate::files::{PackageEntries, entry::Precedence};
@@ -261,19 +261,17 @@ impl Repository {
             return;
         }
 
-        let cpvs = match &atom.category {
-            AtomIdent::Exact(cat) => match &atom.package {
-                AtomIdent::Exact(pkg) => Either::Left(resolve_from_pkg_path(
-                    cat,
-                    pkg.clone(),
-                    &self.location.join(cat.as_str()).join(pkg.as_str()),
-                )),
-                AtomIdent::Any => Either::Right(Either::Left(resolve_from_category_path(
-                    cat,
-                    &self.location.join(cat.as_str()),
-                ))),
-            },
-            AtomIdent::Any => Either::Right(Either::Right(resolve_from_repo_path(
+        let cpvs = match (atom.category(), atom.package()) {
+            (Some(cat), Some(pkg)) => Either::Left(resolve_from_pkg_path(
+                cat,
+                pkg.clone(),
+                &self.location.join(cat.as_str()).join(pkg.as_str()),
+            )),
+            (Some(cat), None) => Either::Right(Either::Left(resolve_from_category_path(
+                cat,
+                &self.location.join(cat.as_str()),
+            ))),
+            (None, _) => Either::Right(Either::Right(resolve_from_repo_path(
                 &self.location,
                 &self.categories,
             ))),

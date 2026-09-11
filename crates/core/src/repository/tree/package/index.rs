@@ -1,4 +1,4 @@
-use crate::deps::atom::{Atom, AtomIdent};
+use crate::deps::atom::Atom;
 use crate::package::cpv::CPV;
 use crate::package::names::{CatName, PkgName};
 use crate::types::{FxHashMap, FxHashSet};
@@ -59,13 +59,11 @@ impl CPVIndex {
     }
 
     /// Returns all packages matching the given [`Atom`].
-    ///
-    /// Wildcards for atom category and package are supported, see [`AtomIdent::Any`].
     pub fn find_packages(&self, atom: &Atom) -> impl Iterator<Item = &CPV> {
-        let matches = move |cpv: &&CPV| cpv.matches_atom(atom);
+        let matches = move |cpv: &&CPV| atom.matches(cpv);
 
-        match (&atom.category, &atom.package) {
-            (AtomIdent::Exact(category), AtomIdent::Exact(package)) => Either::Left(
+        match (atom.category(), atom.package()) {
+            (Some(category), Some(package)) => Either::Left(
                 self.index
                     .get(category)
                     .into_iter()
@@ -73,7 +71,7 @@ impl CPVIndex {
                     .flat_map(|cpvs| cpvs.iter())
                     .filter(matches),
             ),
-            (AtomIdent::Exact(category), AtomIdent::Any) => Either::Right(Either::Left(
+            (Some(category), None) => Either::Right(Either::Left(
                 self.index
                     .get(category)
                     .into_iter()
@@ -81,18 +79,14 @@ impl CPVIndex {
                     .flat_map(|cpvs| cpvs.iter())
                     .filter(matches),
             )),
-            (AtomIdent::Any, AtomIdent::Exact(package)) => {
-                Either::Right(Either::Right(Either::Left(
-                    self.index
-                        .values()
-                        .filter_map(|pkgs| pkgs.get(package))
-                        .flat_map(|cpvs| cpvs.iter())
-                        .filter(matches),
-                )))
-            }
-            (AtomIdent::Any, AtomIdent::Any) => {
-                Either::Right(Either::Right(Either::Right(self.iter())))
-            }
+            (None, Some(package)) => Either::Right(Either::Right(Either::Left(
+                self.index
+                    .values()
+                    .filter_map(|pkgs| pkgs.get(package))
+                    .flat_map(|cpvs| cpvs.iter())
+                    .filter(matches),
+            ))),
+            (None, None) => Either::Right(Either::Right(Either::Right(self.iter()))),
         }
     }
 
@@ -125,9 +119,9 @@ impl DiscoveryState {
             return true;
         }
 
-        match (&atom.category, &atom.package) {
-            (AtomIdent::Exact(cat), _) if self.categories.contains(cat) => true,
-            (AtomIdent::Exact(cat), AtomIdent::Exact(pkg)) => self
+        match (atom.category(), atom.package()) {
+            (Some(cat), _) if self.categories.contains(cat) => true,
+            (Some(cat), Some(pkg)) => self
                 .packages
                 .get(cat)
                 .is_some_and(|pkgs| pkgs.contains(pkg)),
@@ -137,17 +131,17 @@ impl DiscoveryState {
 
     /// Marks the given [`Atom`] as discovered.
     pub fn mark_discovered(&mut self, atom: &Atom) {
-        match (&atom.category, &atom.package) {
-            (AtomIdent::Exact(cat), AtomIdent::Exact(pkg)) => {
+        match (atom.category(), atom.package()) {
+            (Some(cat), Some(pkg)) => {
                 self.packages
                     .entry(cat.clone())
                     .or_default()
                     .insert(pkg.clone());
             }
-            (AtomIdent::Exact(cat), AtomIdent::Any) => {
+            (Some(cat), None) => {
                 self.categories.insert(cat.clone());
             }
-            (AtomIdent::Any, _) => self.all = true,
+            (None, _) => self.all = true,
         }
     }
 

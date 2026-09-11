@@ -24,17 +24,17 @@ pub trait PackageView {
 
     /// Checks if the given [`Atom`] matches.
     fn matches_atom(&self, atom: &Atom) -> bool {
-        if let Some(repo) = atom.repo.as_ref()
+        if let Some(repo) = atom.repo()
             && repo != self.repo()
         {
             return false;
         }
-        if let Some(slot) = &atom.slot
+        if let Some(slot) = atom.slot()
             && slot != &self.metadata().slot
         {
             return false;
         }
-        self.cpv().matches_atom(atom)
+        atom.matches(self.cpv())
     }
 }
 

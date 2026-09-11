@@ -1,6 +1,6 @@
 pub mod package;
 
-use crate::deps::atom::{Atom, AtomIdent};
+use crate::deps::atom::Atom;
 use crate::grammar::{PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
 use crate::package::names::CatName;
 use crate::package::version::PackageVersion;
@@ -48,21 +48,20 @@ impl Vdb {
 
     /// Returns all packages matching the given `atom`.
     pub fn find_by_atom(&mut self, atom: &Atom) -> anyhow::Result<Vec<&InstalledPackage>> {
-        match &atom.category {
-            AtomIdent::Exact(category) => {
-                self.load_from_category(category)
-                    .with_context(|| format!("failed to load category {category}"))?;
+        match atom.category() {
+            Some(cat) => {
+                self.load_from_category(cat)
+                    .with_context(|| format!("failed to load category {cat}"))?;
             }
-            AtomIdent::Any => {
-                if !self.fully_loaded {
-                    self.load().context("failed to load packages from VDB")?;
-                }
+            None if !self.fully_loaded => {
+                self.load().context("failed to load packages from VDB")?;
             }
+            None => {}
         }
 
-        let iter = match &atom.category {
-            AtomIdent::Exact(name) => Either::Left(self.packages.get(name).into_iter().flatten()),
-            AtomIdent::Any => Either::Right(self.packages.values().flatten()),
+        let iter = match atom.category() {
+            Some(cat) => Either::Left(self.packages.get(cat).into_iter().flatten()),
+            None => Either::Right(self.packages.values().flatten()),
         };
         Ok(iter
             .filter(|pkg| pkg.matches_atom(atom))
