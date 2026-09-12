@@ -44,7 +44,7 @@ impl From<Entry<Atom>> for MaskEntry {
 
 impl PackageMasks {
     /// Builds [`PackageMasks`] from repository and portage source records.
-    pub fn new(repository: RepositorySource, portage: PortageSource) -> anyhow::Result<Self> {
+    pub fn new(repository: &RepositorySource, portage: PortageSource) -> anyhow::Result<Self> {
         let mut mask = portage.profile_mask;
         let mut unmask = portage.profile_unmask;
         mask.inherit_from(&repository.mask)?;
@@ -106,16 +106,15 @@ mod tests {
     #[test]
     fn test_is_masked() -> anyhow::Result<()> {
         let masks = PackageMasks::new(
-            RepositorySource::default(),
+            &RepositorySource::default(),
             PortageSource {
-                local_mask: PackageEntries::from_string(
+                local_mask: PackageEntries::from_content(
                     "dev-lang/rust
-                        app-editors/vim"
-                        .into(),
+                        app-editors/vim",
                     Precedence::User,
                 )?,
-                local_unmask: PackageEntries::from_string(
-                    "=dev-lang/rust-1.50*".into(),
+                local_unmask: PackageEntries::from_content(
+                    "=dev-lang/rust-1.50*",
                     Precedence::User,
                 )?,
                 ..Default::default()

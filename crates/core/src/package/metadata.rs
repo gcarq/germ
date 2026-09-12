@@ -63,7 +63,10 @@ impl PackageMetadata {
     /// Builds package metadata from the given `map` and validates it against `eapi`.
     ///
     /// Returns a [`PackageMetadataError`] if a required variable is missing or invalid.
-    pub fn from_map(map: FxHashMap<&str, &str>, eapi: &Eapi) -> Result<Self, PackageMetadataError> {
+    pub fn from_map(
+        map: &FxHashMap<&str, &str>,
+        eapi: &Eapi,
+    ) -> Result<Self, PackageMetadataError> {
         let metadata = Self::default()
             .eapi(map.get("EAPI").copied().unwrap_or(""))
             .map_err(|err| invalid("EAPI", err))?;
@@ -342,7 +345,7 @@ mod tests {
 
     #[test]
     fn test_metadata_from_map_ok() {
-        let metadata = PackageMetadata::from_map(metadata_map(), &Eapi::Eight);
+        let metadata = PackageMetadata::from_map(&metadata_map(), &Eapi::Eight);
         assert!(metadata.is_ok(), "metadata should be parsed successfully");
 
         let metadata = metadata.unwrap();
@@ -401,7 +404,7 @@ mod tests {
         let mut data = metadata_map();
         data.insert("EAPI", "7");
         data.insert("IDEPEND", "(");
-        let metadata = PackageMetadata::from_map(data, &Eapi::Seven).unwrap();
+        let metadata = PackageMetadata::from_map(&data, &Eapi::Seven).unwrap();
 
         assert_eq!(
             metadata.bdepend.to_string(),
@@ -415,7 +418,7 @@ mod tests {
         let mut data = metadata_map();
         data.remove("SLOT");
         assert!(matches!(
-            PackageMetadata::from_map(data, &Eapi::Eight).unwrap_err(),
+            PackageMetadata::from_map(&data, &Eapi::Eight).unwrap_err(),
             PackageMetadataError::Missing("SLOT")
         ));
     }
@@ -426,7 +429,7 @@ mod tests {
             let mut data = metadata_map();
             data.insert(field, "");
             assert!(matches!(
-                PackageMetadata::from_map(data, &Eapi::Eight).unwrap_err(),
+                PackageMetadata::from_map(&data, &Eapi::Eight).unwrap_err(),
                 PackageMetadataError::Empty(name) if name == field
             ));
         }
@@ -437,14 +440,14 @@ mod tests {
         let mut data = metadata_map();
         data.insert("SLOT", "invalid/slot/value");
         assert!(matches!(
-            PackageMetadata::from_map(data, &Eapi::Eight).unwrap_err(),
+            PackageMetadata::from_map(&data, &Eapi::Eight).unwrap_err(),
             PackageMetadataError::Invalid { field: "SLOT", .. }
         ));
 
         let mut data = metadata_map();
         data.insert("IUSE", "foo?");
         assert!(matches!(
-            PackageMetadata::from_map(data, &Eapi::Eight).unwrap_err(),
+            PackageMetadata::from_map(&data, &Eapi::Eight).unwrap_err(),
             PackageMetadataError::Invalid { field: "IUSE", .. }
         ));
     }

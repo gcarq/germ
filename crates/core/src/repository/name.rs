@@ -35,6 +35,12 @@ impl Borrow<str> for RepoName {
     }
 }
 
+impl AsRef<str> for RepoName {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl FromStr for RepoName {
     type Err = anyhow::Error;
 

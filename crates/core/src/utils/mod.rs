@@ -51,9 +51,9 @@ pub fn md5sum(data: &[u8]) -> anyhow::Result<String> {
     Ok(checksum)
 }
 
-/// Uses [`shlex`] to analyze and split the given [`String`] into key-value pairs.
-pub fn shlex_split(content: String) -> anyhow::Result<Vec<(String, String)>> {
-    shlex::split(&content)
+/// Uses [`shlex`] to analyze and split the given `content` into key-value pairs.
+pub fn shlex_split(content: &str) -> anyhow::Result<Vec<(String, String)>> {
+    shlex::split(content)
         .ok_or_else(|| anyhow!("Unable to split text due to syntax errors"))?
         .into_iter()
         .map(|line| match line.split_once('=') {
@@ -161,7 +161,7 @@ mod tests {
             VAR4=value_with_\"escaped_quotes\"
         "#;
 
-        let result = shlex_split(content.into()).unwrap();
+        let result = shlex_split(content).unwrap();
         let expected = vec![
             ("VAR1".into(), "value1".into()),
             ("VAR2".into(), "value with spaces".into()),
@@ -180,7 +180,7 @@ mod tests {
             INVALID_LINE
         "#;
 
-        assert!(shlex_split(content.to_string()).is_err());
+        assert!(shlex_split(content).is_err());
     }
 
     #[test]

@@ -32,7 +32,7 @@ impl RepoSetConfig {
                 _ => None,
             })
             .map(|(name, properties)| {
-                RepositoryConfig::new(&name, properties.into_iter().collect::<FxHashMap<_, _>>())
+                RepositoryConfig::new(&name, &properties.into_iter().collect::<FxHashMap<_, _>>())
                     .with_context(|| format!("unable to build repository config for '{name}'"))
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
@@ -85,7 +85,7 @@ impl RepositoryConfig {
     /// from repos.conf.
     fn new(
         repo_name: &str,
-        properties: FxHashMap<String, String>,
+        properties: &FxHashMap<String, String>,
     ) -> anyhow::Result<RepositoryConfig> {
         let name = repo_name.parse::<RepoName>()?;
 

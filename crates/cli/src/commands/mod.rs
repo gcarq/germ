@@ -51,7 +51,7 @@ pub enum Command {
 
 pub async fn execute(args: &Args, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     match &args.command {
-        Command::Info { atom } => info(atom.as_ref(), sysconf)?,
+        Command::Info { atom } => info(atom.as_ref(), &sysconf)?,
         Command::Install { atom } => install(atom, sysconf).await?,
         Command::Gencache { force, repo } => gencache(repo.as_deref(), *force, sysconf).await?,
         Command::Sync { repo } => sync(repo.as_deref(), sysconf)?,

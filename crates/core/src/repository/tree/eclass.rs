@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 static ECLASS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][a-zA-Z0-9_.-]*$").unwrap());
 
-/// Contains all known eclasses, including inherited eclasses,
+/// Contains all known eclasses, including inherited ones,
 /// and their repository lookup paths.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Default))]

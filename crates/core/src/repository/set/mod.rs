@@ -57,8 +57,8 @@ impl RepoSet {
     /// Builds a [`RepoSet`] with the given runtime system configuration.
     pub fn new(sysconf: Arc<SysConf>) -> Result<Self, RepoSetError> {
         let repos_conf = sysconf.portage_conf().join("repos.conf");
-        let config = RepoSetConfig::load(&repos_conf).map_err(|error| {
-            RepoSetError::Configuration(error.context(format!(
+        let config = RepoSetConfig::load(&repos_conf).map_err(|err| {
+            RepoSetError::Configuration(err.context(format!(
                 "unable to load repository configuration from {}",
                 repos_conf.display()
             )))
@@ -77,21 +77,27 @@ impl RepoSet {
     /// TODO: Order the returned packages by version
     pub async fn find_packages(&mut self, atom: &Atom) -> Result<Vec<PackageResult>, RepoSetError> {
         let mut results = Vec::new();
-        for repo in self.select_mut(atom.repo().map(RepoName::as_str)) {
-            let repo_name = repo.name.clone();
+
+        let repos = match atom.repo() {
+            Some(repo) => Either::Left(self.get_mut(repo).into_iter()),
+            None => Either::Right(self.iter_mut()),
+        };
+
+        for repo in repos {
+            let name = repo.name().clone();
             results.extend(
                 repo.find_packages(atom)
                     .await
-                    .map_err(|err| RepoSetError::repo_failure(&repo_name, err))?,
+                    .map_err(|err| RepoSetError::repo_failure(&name, err))?,
             );
         }
         Ok(results)
     }
 
-    /// Attempts to synchronize all repositories and reloads repo data from disk.
+    /// Attempts to synchronize all repos and reloads repo data from disk.
     ///
     /// If `repo` is provided, only it will be synced, overriding `auto-sync`,
-    /// otherwise all repositories with `auto-sync` enabled will be synced.
+    /// otherwise all repos with `auto-sync` enabled will be synced.
     /// A sync failure is logged as error but doesn't return an `Err`.
     pub fn maybe_sync(&mut self, repo: Option<&str>) -> Result<(), RepoSetError> {
         if let Some(name) = repo {
@@ -114,46 +120,31 @@ impl RepoSet {
         self.reload_from_disk()
     }
 
-    pub fn get(&self, name: &str) -> Option<&Repository> {
-        self.entries.get(name)?.repository.as_ref()
+    /// Returns a repository reference for the given `name`.
+    pub fn get(&self, name: impl AsRef<str>) -> Option<&Repository> {
+        self.entries.get(name.as_ref())?.repository.as_ref()
     }
 
-    pub fn get_mut(&mut self, name: &str) -> Option<&mut Repository> {
-        self.entries.get_mut(name)?.repository.as_mut()
+    /// Returns a mutable repository reference for the given `name`.
+    pub fn get_mut(&mut self, name: impl AsRef<str>) -> Option<&mut Repository> {
+        self.entries.get_mut(name.as_ref())?.repository.as_mut()
     }
 
-    /// Returns an iterator over all repositories ordered by priority,
-    /// or just the repository with the given `name`.
-    pub fn select(&self, name: Option<&str>) -> impl Iterator<Item = &Repository> {
-        match name {
-            Some(name) => Either::Left(self.get(name).into_iter()),
-            None => Either::Right(self.values()),
-        }
-    }
-
-    /// Returns a mutable iterator over all repositories ordered by priority,
-    /// or just the repository with the given `name`.
-    pub fn select_mut(&mut self, name: Option<&str>) -> impl Iterator<Item = &mut Repository> {
-        match name {
-            Some(name) => Either::Left(self.get_mut(name).into_iter()),
-            None => Either::Right(self.values_mut()),
-        }
-    }
-
-    /// Returns an iterator over all available repositories ordered by priority.
-    pub fn values(&self) -> impl Iterator<Item = &Repository> {
+    /// Returns an iterator over all available repos ordered by priority.
+    pub fn iter(&self) -> impl Iterator<Item = &Repository> {
         self.entries
             .values()
             .filter_map(|entry| entry.repository.as_ref())
     }
 
-    /// Returns a mutable iterator over all available repositories ordered by priority.
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Repository> {
+    /// Returns a mutable iterator over all available repos ordered by priority.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Repository> {
         self.entries
             .values_mut()
             .filter_map(|entry| entry.repository.as_mut())
     }
 
+    /// Returns an iterator that drains all available repos ordered by priority.
     pub fn drain(self) -> impl Iterator<Item = Repository> {
         self.entries
             .into_values()
@@ -171,25 +162,23 @@ impl RepoSet {
         self.len() == 0
     }
 
-    /// Resolves a profile using the available repositories.
+    /// Resolves a profile using the available repos.
     pub fn resolve_profile(&self, location: &Path) -> anyhow::Result<Profile> {
         Profile::resolve(location, self)
     }
 
     /// Validates that at least one available repository supports the given architecture.
     pub fn validate_arch(&self, arch: &Arch) -> anyhow::Result<()> {
-        for repo in self.values() {
-            if repo.arches.contains(arch) {
-                return Ok(());
-            }
+        if !self.iter().any(|repo| repo.supports_arch(arch)) {
+            anyhow::bail!("ARCH '{arch}' is not supported by any configured repository");
         }
-        anyhow::bail!("ARCH value '{arch}' is not supported by any configured repository")
+        Ok(())
     }
 
     /// Validates that a profile is described by at least one available repository for `arch`.
     pub fn validate_profile(&self, profile: &Profile, arch: &Arch) -> anyhow::Result<()> {
-        for repo in self.values() {
-            let profile_prefix = format!("{}/profiles/", repo.location.display());
+        for repo in self.iter() {
+            let profile_prefix = format!("{}/profiles/", repo.location().display());
             if let Ok(path) = profile.location.strip_prefix(&profile_prefix)
                 && repo.is_known_profile(arch, path)
             {
@@ -202,7 +191,7 @@ impl RepoSet {
     /// Returns the aggregated package mask/unmask entries from all available repos.
     pub fn package_mask_source(&self) -> anyhow::Result<RepositorySource> {
         let mut source = RepositorySource::default();
-        for repo in self.values() {
+        for repo in self.iter() {
             source.mask.inherit_from(&repo.package_mask)?;
             source.unmask.inherit_from(&repo.package_unmask)?;
         }
@@ -235,24 +224,21 @@ impl RepoSet {
         for config in self.config.iter() {
             let sysconf = self.sysconf.clone();
             match fs::metadata(&config.location) {
-                Ok(_) => {
-                    match Repository::load(&config.name, &config.location, config.priority, sysconf)
-                    {
-                        Ok(repo) => {
-                            pending.insert(config.name.clone(), repo);
-                        }
-                        Err(
-                            error @ (RepositoryError::Data(_)
-                            | RepositoryError::Layout(_)
-                            | RepositoryError::Profile(_)),
-                        ) => {
-                            warn!("Repository '{}' is unavailable: {error:#}", config.name);
-                        }
-                        Err(source) => {
-                            return Err(RepoSetError::repo_failure(&config.name, source));
-                        }
+                Ok(_) => match Repository::load(&config.name, &config.location, sysconf) {
+                    Ok(repo) => {
+                        pending.insert(config.name.clone(), repo);
                     }
-                }
+                    Err(
+                        error @ (RepositoryError::Data(_)
+                        | RepositoryError::Layout(_)
+                        | RepositoryError::Profile(_)),
+                    ) => {
+                        warn!("Repository '{}' is unavailable: {error:#}", config.name);
+                    }
+                    Err(source) => {
+                        return Err(RepoSetError::repo_failure(&config.name, source));
+                    }
+                },
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => {
                     return Err(RepoSetError::Configuration(
@@ -273,7 +259,7 @@ impl RepoSet {
                 let masters = config.masters.clone().unwrap_or_else(|| {
                     pending
                         .get(&config.name)
-                        .map(|repo| repo.layout.masters.clone())
+                        .map(|repo| repo.layout().masters.clone())
                         .unwrap_or_default()
                 });
                 (config.name.clone(), masters)
@@ -389,28 +375,28 @@ mod tests {
 
     #[test]
     fn test_validate_arch() -> anyhow::Result<()> {
-        let fixture = repo_set([RepoBuilder::new("repo")])?;
+        let reposet = repo_set([RepoBuilder::new("repo")])?;
 
-        assert!(fixture.validate_arch(&"amd64".parse()?).is_ok());
-        assert!(fixture.validate_arch(&"arm64".parse()?).is_err());
+        assert!(reposet.validate_arch(&"amd64".parse()?).is_ok());
+        assert!(reposet.validate_arch(&"arm64".parse()?).is_err());
         Ok(())
     }
 
     #[test]
     fn test_validate_profile() -> anyhow::Result<()> {
-        let fixture = repo_set([RepoBuilder::new("repo")
+        let reposet = repo_set([RepoBuilder::new("repo")
             .profile("default/linux")
             .profile("other")])?;
-        let repository = fixture.get("repo").unwrap();
+        let repository = reposet.get("repo").unwrap();
         let valid = Profile::resolve(
-            &repository.location.join("profiles/default/linux"),
-            &fixture,
+            &repository.location().join("profiles/default/linux"),
+            &reposet,
         )?;
-        let invalid = Profile::resolve(&repository.location.join("profiles/other"), &fixture)?;
+        let invalid = Profile::resolve(&repository.location().join("profiles/other"), &reposet)?;
 
-        assert!(fixture.validate_profile(&valid, &"amd64".parse()?).is_ok());
+        assert!(reposet.validate_profile(&valid, &"amd64".parse()?).is_ok());
         assert!(
-            fixture
+            reposet
                 .validate_profile(&invalid, &"amd64".parse()?)
                 .is_err()
         );
@@ -419,11 +405,11 @@ mod tests {
 
     #[test]
     fn test_package_mask_source() -> anyhow::Result<()> {
-        let fixture = repo_set([RepoBuilder::new("repo")
+        let reposet = repo_set([RepoBuilder::new("repo")
             .profile_file("package.mask", "dev-lang/rust")
             .profile_file("package.unmask", "app-editors/vim")])?;
 
-        let source = fixture.package_mask_source()?;
+        let source = reposet.package_mask_source()?;
         let mask = source.mask.into_iter().next().expect("repository mask");
         let unmask = source.unmask.into_iter().next().expect("repository unmask");
 
@@ -436,21 +422,21 @@ mod tests {
 
     #[test]
     fn test_repository_data_failure() {
-        let mut fixture =
+        let mut reposet =
             repo_set(vec![RepoBuilder::new("valid"), RepoBuilder::new("invalid")]).unwrap();
         fs::remove_file(
-            fixture
+            reposet
                 .get("invalid")
                 .unwrap()
-                .location
+                .location()
                 .join("metadata/layout.conf"),
         )
         .unwrap();
 
-        fixture.reload_from_disk().unwrap();
+        reposet.reload_from_disk().unwrap();
 
-        assert!(fixture.get("valid").is_some());
-        assert!(fixture.get("invalid").is_none());
+        assert!(reposet.get("valid").is_some());
+        assert!(reposet.get("invalid").is_none());
     }
 
     #[test]
@@ -505,17 +491,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_unavailable_repo() {
-        let mut fixture = repo_set(vec![
+        let mut reposet = repo_set(vec![
             RepoBuilder::new("repo")
                 .repos_conf_property("sync-type", "git")
                 .repos_conf_property("sync-uri", "https://example.invalid/repo.git"),
         ])
         .unwrap();
-        fs::remove_dir_all(fixture.get("repo").unwrap().location.clone()).unwrap();
-        fixture.reload_from_disk().unwrap();
+        fs::remove_dir_all(reposet.get("repo").unwrap().location()).unwrap();
+        reposet.reload_from_disk().unwrap();
 
         assert!(
-            fixture
+            reposet
                 .find_packages(&Atom::new("app-misc/foo::repo").unwrap())
                 .await
                 .unwrap()
@@ -531,7 +517,6 @@ mod tests {
                 .eclass("master"),
             RepoBuilder::new("overlay")
                 .masters(["master"])
-                .categories(["app-misc"])
                 .ebuild("app-misc", "foo", "1", ""),
         ])
         .unwrap();
@@ -540,20 +525,18 @@ mod tests {
         let has_package = overlay.cpvs().any(|cpv| cpv.fqn() == "app-misc/foo-1");
 
         assert!(has_package);
-        assert_eq!(overlay.categories.len(), 1);
-        assert!(overlay.categories.contains(&"app-misc".parse().unwrap()));
         assert!(
             fixture
                 .get("overlay")
                 .unwrap()
-                .eclasses
+                .eclasses()
                 .contains_key("master")
         );
     }
 
     #[test]
     fn test_empty_masters_override() {
-        let mut fixture = repo_set(vec![
+        let mut reposet = repo_set(vec![
             RepoBuilder::new("master")
                 .categories(["app-misc"])
                 .eclass("master"),
@@ -564,7 +547,7 @@ mod tests {
         ])
         .unwrap();
 
-        let has_package = fixture
+        let has_package = reposet
             .get_mut("overlay")
             .unwrap()
             .cpvs()
@@ -572,17 +555,17 @@ mod tests {
 
         assert!(!has_package);
         assert!(
-            !fixture
+            !reposet
                 .get("overlay")
                 .unwrap()
-                .eclasses
+                .eclasses()
                 .contains_key("master")
         );
     }
 
     #[test]
     fn test_reload_refreshes_dependent_overlays() {
-        let mut fixture = repo_set(vec![
+        let mut reposet = repo_set(vec![
             RepoBuilder::new("master").categories(["app-misc"]),
             RepoBuilder::new("overlay")
                 .masters(["master"])
@@ -591,30 +574,30 @@ mod tests {
         ])
         .unwrap();
 
-        let overlay_before = fixture.get_mut("overlay").unwrap();
+        let overlay_before = reposet.get_mut("overlay").unwrap();
         assert!(
             !overlay_before
                 .cpvs()
                 .any(|cpv| cpv.fqn() == "dev-libs/bar-1")
         );
-        assert!(!overlay_before.eclasses.contains_key("refreshed"));
+        assert!(!overlay_before.eclasses().contains_key("refreshed"));
 
-        let master_path = fixture.get("master").unwrap().location.as_path();
+        let master_path = reposet.get("master").unwrap().location();
         fs::write(
             master_path.join("profiles").join("categories"),
             "app-misc\ndev-libs\n",
         )
         .unwrap();
         fs::write(master_path.join("eclass").join("refreshed.eclass"), "").unwrap();
-        fixture.reload_from_disk().unwrap();
+        reposet.reload_from_disk().unwrap();
 
-        let overlay_after = fixture.get_mut("overlay").unwrap();
+        let overlay_after = reposet.get_mut("overlay").unwrap();
         assert!(
             overlay_after
                 .cpvs()
                 .any(|cpv| cpv.fqn() == "dev-libs/bar-1")
         );
-        assert!(overlay_after.eclasses.contains_key("refreshed"));
+        assert!(overlay_after.eclasses().contains_key("refreshed"));
     }
 
     #[test]
@@ -657,7 +640,7 @@ mod tests {
 
     #[test]
     fn test_unavailable_masters() {
-        let mut fixture = repo_set(vec![
+        let mut reposet = repo_set(vec![
             RepoBuilder::new("available")
                 .categories(["app-misc"])
                 .eclass("available"),
@@ -671,52 +654,52 @@ mod tests {
         .unwrap();
 
         // Remove the unavailable repo so it simulates a non-existent location
-        let unavailable_path = fixture.get("unavailable").unwrap().location.clone();
+        let unavailable_path = reposet.get("unavailable").unwrap().location();
         fs::remove_dir_all(unavailable_path).unwrap();
-        fixture.reload_from_disk().unwrap();
-        assert!(fixture.get_mut("unavailable").is_none());
+        reposet.reload_from_disk().unwrap();
+        assert!(reposet.get_mut("unavailable").is_none());
 
-        let child = fixture.get_mut("child").unwrap();
-        assert!(child.eclasses.contains_key("available"));
+        let child = reposet.get_mut("child").unwrap();
+        assert!(child.eclasses().contains_key("available"));
         assert!(child.cpvs().any(|cpv| cpv.fqn() == "app-misc/foo-1"));
     }
 
     #[test]
     fn test_direct_master_order_is_preserved() {
-        let fixture = repo_set(vec![
+        let reposet = repo_set(vec![
             RepoBuilder::new("first").eclass("shared"),
             RepoBuilder::new("second").eclass("shared"),
             RepoBuilder::new("child").masters(["first", "second"]),
         ])
         .unwrap();
 
-        let second_path = fixture.get("second").unwrap().location.as_path();
-        let shared = fixture
+        let second_path = reposet.get("second").unwrap().location();
+        let shared = reposet
             .get("child")
             .unwrap()
-            .eclasses
+            .eclasses()
             .get("shared")
             .unwrap();
 
         assert!(shared.path.starts_with(second_path));
 
-        let child = fixture.get("child").unwrap();
-        let paths = child.eclasses.repo_paths().collect::<Vec<_>>();
-        assert_eq!(paths[0], fixture.get("child").unwrap().location.as_path());
-        assert_eq!(paths[1], fixture.get("first").unwrap().location.as_path());
+        let child = reposet.get("child").unwrap();
+        let paths = child.eclasses().repo_paths().collect::<Vec<_>>();
+        assert_eq!(paths[0], reposet.get("child").unwrap().location());
+        assert_eq!(paths[1], reposet.get("first").unwrap().location());
         assert_eq!(paths[2], second_path);
     }
 
     #[test]
     fn test_priority_order() -> anyhow::Result<()> {
-        let fixture = repo_set([
+        let reposet = repo_set([
             RepoBuilder::new("fallback").repos_conf_property("priority", "10"),
             RepoBuilder::new("preferred").repos_conf_property("priority", "-10"),
         ])?;
 
-        let names = fixture
-            .values()
-            .map(|repo| repo.name.as_str())
+        let names = reposet
+            .iter()
+            .map(|repo| repo.name().as_str())
             .collect::<Vec<_>>();
 
         assert_eq!(names, vec!["preferred", "fallback"]);

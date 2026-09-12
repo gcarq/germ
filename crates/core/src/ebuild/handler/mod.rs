@@ -68,7 +68,7 @@ impl<'r> EbuildPhaseHandler<'r> {
     /// Spawns the process and returns the data sent by the ebuild process.
     ///
     /// The returned future completes when the process has finished or the IPC channel has been closed.
-    pub async fn spawn(&mut self) -> Result<Vec<String>, PhaseExecutionError> {
+    pub async fn spawn(&self) -> Result<Vec<String>, PhaseExecutionError> {
         debug!(
             "Executing ebuild phase '{}' for '{}' ...",
             self.phase, self.ebuild.cpv

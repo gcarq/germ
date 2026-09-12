@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use either::Either;
 use germ_core::{SysConf, repository::RepoSet};
 use log::{info, warn};
 
@@ -14,9 +15,14 @@ pub async fn gencache(
         info!("Forcing cache recreation...");
     }
 
-    let mut repo_set = RepoSet::new(sysconf).context("unable to build repo set")?;
-    for repo in repo_set.select_mut(repo_name) {
-        let name = repo.name.clone();
+    let mut reposet = RepoSet::new(sysconf).context("unable to build repo set")?;
+    let repos = match repo_name {
+        Some(name) => Either::Left(reposet.get_mut(name).into_iter()),
+        None => Either::Right(reposet.iter_mut()),
+    };
+
+    for repo in repos {
+        let name = repo.name().clone();
         if force {
             repo.recreate_cache()
                 .with_context(|| format!("unable to recreate cache for {name}"))?;

@@ -16,7 +16,7 @@ impl VersionComponent<'_> {
     /// Checks if the `candidate` version component is considered omitted for`self`.
     ///
     /// This is necessary because an omitted suffix number or revision equals a zero value.
-    #[allow(clippy::match_like_matches_macro)]
+    #[expect(clippy::match_like_matches_macro)]
     fn matches_omitted(self, candidate: Option<VersionComponent<'_>>) -> bool {
         match self {
             Self::SuffixNumber(value) if value.is_zero() => match candidate {

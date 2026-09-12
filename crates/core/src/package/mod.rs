@@ -42,9 +42,9 @@ pub trait PackageView {
 /// metadata required to install it.
 #[derive(Debug)]
 pub struct Package {
-    pub cpv: CPV,
-    pub repo: RepoName,
-    pub metadata: PackageMetadata,
+    cpv: CPV,
+    repo: RepoName,
+    metadata: PackageMetadata,
 }
 
 impl Package {
@@ -83,7 +83,6 @@ mod tests {
     use super::*;
     use crate::package::slot::PackageSlot;
     use crate::test_support::cpv;
-    use crate::useflag::UseFlag;
     use crate::vdb::package::InstalledPackage;
 
     fn assert_package_view_matches_atoms<P: PackageView>(package: &P) {
@@ -131,15 +130,15 @@ mod tests {
 
     #[test]
     fn test_package_view_matches_installed_package() {
-        let package = InstalledPackage {
-            cpv: cpv("sys-devel", "gcc", "15.2.1_p20251122-r1"),
-            repo: "gentoo".parse().unwrap(),
-            metadata: PackageMetadata {
+        let package = InstalledPackage::from_parts(
+            cpv("sys-devel", "gcc", "15.2.1_p20251122-r1"),
+            "gentoo".parse().unwrap(),
+            PackageMetadata {
                 slot: PackageSlot::Eq("15".into()),
                 ..Default::default()
             },
-            use_flags: Vec::<UseFlag>::new(),
-        };
+            Vec::default(),
+        );
         assert_package_view_matches_atoms(&package);
         assert_eq!(package.qualified_name(), "sys-devel/gcc");
     }

@@ -9,22 +9,22 @@ use std::str::FromStr;
 use std::{fmt, fs};
 
 pub struct InstalledPackage {
-    pub cpv: CPV,
-    pub repo: RepoName,
-    pub metadata: PackageMetadata,
-    pub use_flags: Vec<UseFlag>,
+    cpv: CPV,
+    repo: RepoName,
+    metadata: PackageMetadata,
+    useflags: Vec<UseFlag>,
 }
 
 impl InstalledPackage {
-    /// Creates a new [`InstalledPackage`] from the given `CPV`.
+    /// Creates a new [`InstalledPackage`] from the given `CPV` and `path`.
     ///
-    /// `path` is the path to the packages vdb directory where additional metadata can be queried.
-    pub fn new(cpv: CPV, path: &Path) -> anyhow::Result<Self> {
+    /// `path` is expected to be the VDB directory where additional metadata is stored.
+    pub fn from_path(cpv: CPV, path: &Path) -> anyhow::Result<Self> {
         let repo = fs::read_to_string(path.join("repository"))
             .context("unable to read repo")?
             .trim()
             .parse()?;
-        let use_flags = fs::read_to_string(path.join("USE"))
+        let useflags = fs::read_to_string(path.join("USE"))
             .context("unable to read USE flags")?
             .split_whitespace()
             .map(UseFlag::from_str)
@@ -35,8 +35,28 @@ impl InstalledPackage {
             cpv,
             repo,
             metadata,
-            use_flags,
+            useflags,
         })
+    }
+
+    /// Creates a new [`InstalledPackage`] from the given `CPV`, `RepoName`, and `PackageMetadata`.
+    pub const fn from_parts(
+        cpv: CPV,
+        repo: RepoName,
+        metadata: PackageMetadata,
+        useflags: Vec<UseFlag>,
+    ) -> Self {
+        Self {
+            cpv,
+            repo,
+            metadata,
+            useflags,
+        }
+    }
+
+    /// Returns the enabled USE flags for this package.
+    pub fn enabled_useflags(&self) -> &[UseFlag] {
+        &self.useflags
     }
 }
 
@@ -72,7 +92,7 @@ mod tests {
             cpv,
             repo: "gentoo".parse().unwrap(),
             metadata: PackageMetadata::default(),
-            use_flags: Vec::new(),
+            useflags: Vec::new(),
         };
         assert_eq!(pkg.to_string(), "app-editors/vim-7.0.174-r1::gentoo");
     }

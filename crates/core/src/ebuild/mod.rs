@@ -65,9 +65,9 @@ impl<'r> Ebuild<'r> {
     /// Returns an [`EbuildError`] if the ebuild is malformed.
     pub fn new(cpv: &'r CPV, repo: &'r Repository) -> Result<Self, EbuildError> {
         let path = repo
-            .location
-            .join(cpv.category().as_str())
-            .join(cpv.package().as_str())
+            .location()
+            .join(cpv.category().as_ref())
+            .join(cpv.package().as_ref())
             .join(format!("{}.ebuild", cpv.pf()));
 
         let eapi = Self::parse_eapi(&path)?;
@@ -87,7 +87,7 @@ impl<'r> Ebuild<'r> {
     ///
     /// Returns a [`MetadataGenerationError`] if it cannot be resolved.
     pub async fn generate_metadata(&self) -> Result<PackageMetadata, MetadataGenerationError> {
-        let mut handler = EbuildPhaseHandler::new(self, EbuildPhase::Depend, &MakeEnv::default())?;
+        let handler = EbuildPhaseHandler::new(self, EbuildPhase::Depend, &MakeEnv::default())?;
 
         let data = handler.spawn().await?;
         let data = data
@@ -98,7 +98,7 @@ impl<'r> Ebuild<'r> {
             })
             .collect::<Result<FxHashMap<_, _>, _>>();
 
-        Ok(PackageMetadata::from_map(data?, &self.eapi)?)
+        Ok(PackageMetadata::from_map(&data?, &self.eapi)?)
     }
 
     /// Parses the EAPI from the ebuild file at the given `path`.
@@ -240,7 +240,7 @@ mod tests {
             repo: &repo,
         };
         let ebuild2 = Ebuild {
-            path: path.clone(),
+            path,
             eapi: Eapi::Eight,
             cpv: &cpv,
             repo: &repo,

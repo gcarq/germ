@@ -317,11 +317,11 @@ mod tests {
         iuse: &str,
         flag: &str,
     ) -> anyhow::Result<Option<bool>> {
-        let global = MakeEnv::from_string(makenv.into())?;
-        let user = MakeEnv::from_string(make_conf.into())?;
+        let global = MakeEnv::from_content(makenv)?;
+        let user = MakeEnv::from_content(make_conf)?;
         let makenv_stack = MakeEnvStack::new(global, MakeEnv::default(), user)?;
         let local = LocalRecords {
-            package_use: PackageUseRecords::from_string(package_use.into(), Precedence::User)?,
+            package_use: PackageUseRecords::from_content(package_use, Precedence::User)?,
             ..Default::default()
         };
         let policy = UsePolicy::new(

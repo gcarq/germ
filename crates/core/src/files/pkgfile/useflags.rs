@@ -19,8 +19,8 @@ impl PackageUseRecords {
         Ok(Self(AtomPolicies::from_path(path, order, recursive)?))
     }
 
-    pub fn from_string(content: String, order: Precedence) -> anyhow::Result<Self> {
-        Ok(Self(AtomPolicies::from_string(content, order)?))
+    pub fn from_content(content: &str, order: Precedence) -> anyhow::Result<Self> {
+        Ok(Self(AtomPolicies::from_content(content, order)?))
     }
 
     /// Consumes self, expands all groups and returns all USE flags.
@@ -226,10 +226,9 @@ mod tests {
     }
 
     fn config() -> anyhow::Result<UseExpandConfig> {
-        let makenv = MakeEnv::from_string(
+        let makenv = MakeEnv::from_content(
             "USE_EXPAND=\"LLVM_TARGETS\"
-                USE_EXPAND_UNPREFIXED=\"ARCH\""
-                .into(),
+                USE_EXPAND_UNPREFIXED=\"ARCH\"",
         )?;
         UseExpandConfig::from_makenv(&makenv)
     }
@@ -244,10 +243,9 @@ mod tests {
 
     #[test]
     fn test_parse_duplicate_atom_updates_flags() -> anyhow::Result<()> {
-        let policy = PackageUseRecords::from_string(
+        let policy = PackageUseRecords::from_content(
             "app-admin/sudo foo -bar baz
-                app-admin/sudo -foo"
-                .into(),
+                app-admin/sudo -foo",
             Precedence::User,
         )?;
         let sudo = policy.0.0.get(&Atom::new("app-admin/sudo")?).unwrap();
@@ -293,10 +291,9 @@ mod tests {
 
     #[test]
     fn test_parse_group_context_is_line_local() -> anyhow::Result<()> {
-        let entries = PackageUseRecords::from_string(
+        let entries = PackageUseRecords::from_content(
             "dev-lang/rust LLVM_TARGETS: AMDGPU
-                app-arch/xz-utils direct_flag"
-                .into(),
+                app-arch/xz-utils direct_flag",
             Precedence::User,
         )?;
 
@@ -336,8 +333,8 @@ mod tests {
 
     #[test]
     fn test_resolve_expansion_groups() -> anyhow::Result<()> {
-        let entries = PackageUseRecords::from_string(
-            "dev-lang/rust LLVM_TARGETS: WebAssembly -AMDGPU ARCH: amd64 -x86".into(),
+        let entries = PackageUseRecords::from_content(
+            "dev-lang/rust LLVM_TARGETS: WebAssembly -AMDGPU ARCH: amd64 -x86",
             Precedence::Profile(2),
         )?;
         let resolved = entries.expand(&config()?)?;
@@ -376,25 +373,23 @@ mod tests {
             "dev-lang/rust foo ARCH: foo",
         ];
         for line in cases {
-            let entries = PackageUseRecords::from_string(line.into(), Precedence::User)?;
+            let entries = PackageUseRecords::from_content(line, Precedence::User)?;
             assert!(entries.expand(&config()?).is_err(), "{line}");
         }
 
-        let trailing =
-            PackageUseRecords::from_string("dev-lang/rust UNKNOWN:".into(), Precedence::User)?;
+        let trailing = PackageUseRecords::from_content("dev-lang/rust UNKNOWN:", Precedence::User)?;
         assert!(trailing.expand(&config()?).is_ok());
         Ok(())
     }
 
     #[test]
     fn test_inherit_ignores_reset_only_group() -> anyhow::Result<()> {
-        let parent = PackageUseRecords::from_string(
-            "dev-lang/rust LLVM_TARGETS: X86".into(),
+        let parent = PackageUseRecords::from_content(
+            "dev-lang/rust LLVM_TARGETS: X86",
             Precedence::Profile(0),
         )?;
-        let child =
-            PackageUseRecords::from_string("dev-lang/rust UNKNOWN: -*".into(), Precedence::User)?
-                .inherit(&parent)?;
+        let child = PackageUseRecords::from_content("dev-lang/rust UNKNOWN: -*", Precedence::User)?
+            .inherit(&parent)?;
         let resolved = child.expand(&config()?)?;
         let flags = flags_for(&resolved, "dev-lang/rust")?;
 
@@ -410,10 +405,9 @@ mod tests {
 
     #[test]
     fn test_resolve_rejects_overlapping_groups() -> anyhow::Result<()> {
-        let makenv = MakeEnv::from_string(
+        let makenv = MakeEnv::from_content(
             "USE_EXPAND=\"ARCH\"
-                USE_EXPAND_UNPREFIXED=\"ARCH\""
-                .into(),
+                USE_EXPAND_UNPREFIXED=\"ARCH\"",
         )?;
         assert!(UseExpandConfig::from_makenv(&makenv).is_err());
         Ok(())
@@ -421,12 +415,12 @@ mod tests {
 
     #[test]
     fn test_inherit_group_reset() -> anyhow::Result<()> {
-        let grand_parent = PackageUseRecords::from_string(
-            "dev-lang/rust lto LLVM_TARGETS: X86".into(),
+        let grand_parent = PackageUseRecords::from_content(
+            "dev-lang/rust lto LLVM_TARGETS: X86",
             Precedence::Profile(0),
         )?;
-        let parent = PackageUseRecords::from_string(
-            "dev-lang/rust -lto LLVM_TARGETS: -* AMDGPU".into(),
+        let parent = PackageUseRecords::from_content(
+            "dev-lang/rust -lto LLVM_TARGETS: -* AMDGPU",
             Precedence::Profile(1),
         )?
         .inherit(&grand_parent)?;
@@ -446,8 +440,8 @@ mod tests {
             )?)
         );
 
-        let child = PackageUseRecords::from_string(
-            "dev-lang/rust lto LLVM_TARGETS: -* WebAssembly".into(),
+        let child = PackageUseRecords::from_content(
+            "dev-lang/rust lto LLVM_TARGETS: -* WebAssembly",
             Precedence::User,
         )?
         .inherit(&parent)?;
@@ -471,12 +465,11 @@ mod tests {
 
     #[test]
     fn test_resets_are_local_to_atom() -> anyhow::Result<()> {
-        let entries = PackageUseRecords::from_string(
+        let entries = PackageUseRecords::from_content(
             "
             dev-lang/rust LLVM_TARGETS: -* AMDGPU
             */* LLVM_TARGETS: X86
-            "
-            .into(),
+            ",
             Precedence::User,
         )?;
         let resolved = entries.expand(&config()?)?;

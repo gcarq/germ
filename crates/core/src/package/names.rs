@@ -34,6 +34,12 @@ impl CatName {
     }
 }
 
+impl AsRef<str> for CatName {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl FromStr for CatName {
     type Err = anyhow::Error;
 
@@ -63,6 +69,12 @@ impl PkgName {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl AsRef<str> for PkgName {
+    fn as_ref(&self) -> &str {
+        self.as_str()
     }
 }
 

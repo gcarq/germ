@@ -23,22 +23,22 @@ pub struct PortageConf {
 }
 
 impl PortageConf {
-    /// Builds a [`PortageConf`] from the given `repo_set` and `sysconf`.
-    pub fn new(repo_set: &RepoSet, sysconf: &SysConf) -> anyhow::Result<Self> {
+    /// Builds a [`PortageConf`] from the given `reposet` and `sysconf`.
+    pub fn new(reposet: &RepoSet, sysconf: &SysConf) -> anyhow::Result<Self> {
         let path = sysconf.portage_conf();
         let profile_path = path.join("make.profile");
         debug!(
             "Configured profile {}",
             profile_path.canonicalize()?.display()
         );
-        let profile = repo_set
+        let profile = reposet
             .resolve_profile(&profile_path)
             .with_context(|| format!("unable to build profile from {}", profile_path.display()))?;
 
         let makenv_stack = Self::init_makenv(&profile, sysconf)?;
         let arch = makenv_stack.arch()?;
-        repo_set.validate_arch(&arch)?;
-        repo_set.validate_profile(&profile, &arch)?;
+        reposet.validate_arch(&arch)?;
+        reposet.validate_profile(&profile, &arch)?;
 
         Ok(Self {
             path,

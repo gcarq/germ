@@ -17,6 +17,7 @@ pub struct ExpressionParser<'a, T: ExpressionItem> {
     arena: ExpressionArena<T>,
 }
 
+#[expect(clippy::needless_pass_by_value)]
 impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     /// Parses the `input` string and constructs an [`ExpressionArena`].
     ///
@@ -290,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parser_use_flags() {
+    fn test_parser_useflags() {
         let input = r"
             || ( wayland X )
             ssh? ( || ( rdp ( vnc X ) ) )

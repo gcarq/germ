@@ -23,13 +23,13 @@ struct ProfileSource<'repo> {
 
 impl<'repo> ProfileSource<'repo> {
     /// Resolves a profile path and identifies its owning repository.
-    fn from_path(path: &Path, repo_set: &'repo RepoSet) -> anyhow::Result<Self> {
+    fn from_path(path: &Path, reposet: &'repo RepoSet) -> anyhow::Result<Self> {
         let path = path
             .canonicalize()
             .with_context(|| format!("unable to resolve profile {}", path.display()))?;
 
-        for repository in repo_set.values() {
-            let profiles_root = repository.location.join("profiles").canonicalize()?;
+        for repository in reposet.iter() {
+            let profiles_root = repository.location().join("profiles").canonicalize()?;
             if path.starts_with(&profiles_root) {
                 return Ok(Self {
                     path,
@@ -75,16 +75,16 @@ pub struct Profile {
 
 impl Profile {
     /// Resolves a profile from the given `location` and takes care of inheriting all parents.
-    /// `repo_set` is used to resolve profiles in different repositories.
+    /// `reposet` is used to resolve profiles in different repositories.
     ///
     /// Returns `Err` if `location` doesn't exist, the profile directory is invalid or
     /// if the profile is not valid.
-    pub fn resolve(location: &Path, repo_set: &RepoSet) -> anyhow::Result<Self> {
-        let source = ProfileSource::from_path(location, repo_set)?;
+    pub fn resolve(location: &Path, reposet: &RepoSet) -> anyhow::Result<Self> {
+        let source = ProfileSource::from_path(location, reposet)?;
 
         let mut parents = Vec::new();
         let mut dfs = DfsState::default();
-        Self::build_parents(&source, repo_set, &mut parents, &mut dfs)
+        Self::build_parents(&source, reposet, &mut parents, &mut dfs)
             .with_context(|| format!("unable to resolve parents for {source}"))?;
 
         // Fold make.defaults layers before inheriting other profile files so active
@@ -110,7 +110,7 @@ impl Profile {
         let path = &source.path;
         let eapi = Eapi::from_eapi_file(&path.join("eapi"))?;
         let recursive = eapi.supports_profile_file_dirs()
-            || source.owning_repo.layout.supports_profile_file_dirs();
+            || source.owning_repo.layout().supports_profile_file_dirs();
 
         let profile = Self {
             make_defaults: MakeEnv::from_path(&path.join("make.defaults"), false, true)?,
@@ -156,7 +156,7 @@ impl Profile {
     /// and stores them in `profiles`.
     fn build_parents<'repo>(
         source: &ProfileSource<'repo>,
-        repo_set: &'repo RepoSet,
+        reposet: &'repo RepoSet,
         profiles: &mut Vec<Self>,
         dfs: &mut DfsState<PathBuf>,
     ) -> anyhow::Result<()> {
@@ -171,10 +171,10 @@ impl Profile {
         }
 
         for parent in ParentEntry::from_parent_file(&source.path.join("parent"))? {
-            let source = parent.resolve(source, repo_set).with_context(|| {
+            let source = parent.resolve(source, reposet).with_context(|| {
                 format!("invalid parent reference '{parent}' in profile {source}")
             })?;
-            Self::build_parents(&source, repo_set, profiles, dfs)?;
+            Self::build_parents(&source, reposet, profiles, dfs)?;
 
             let order = Precedence::Profile(profiles.len());
             let profile = Self::load(&source, order)
@@ -297,7 +297,7 @@ mod tests {
     }
 
     fn assert_parent_case(format: &str, parent: &str, succeeds: bool) -> anyhow::Result<()> {
-        let fixture = repo_set(vec![
+        let reposet = repo_set(vec![
             RepoBuilder::new("source")
                 .formats([format])
                 .profile("base")
@@ -305,10 +305,10 @@ mod tests {
             RepoBuilder::new("target").formats(["pms"]).profile("base"),
         ])?;
 
-        let source_path = fixture.get("source").unwrap().location.as_path();
+        let source_path = reposet.get("source").unwrap().location();
         let selected = profile_path(source_path, "child");
 
-        assert_eq!(Profile::resolve(&selected, &fixture).is_ok(), succeeds);
+        assert_eq!(Profile::resolve(&selected, &reposet).is_ok(), succeeds);
         Ok(())
     }
 
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_profile_resolve() -> anyhow::Result<()> {
-        let fixture = repo_set(vec![
+        let reposet = repo_set(vec![
             RepoBuilder::new("repo")
                 .formats(["pms"])
                 .profile("base")
@@ -389,9 +389,9 @@ mod tests {
                 .profile_file("selected/package.use.mask", "dev-lang/rust baz\n"),
         ])?;
 
-        let repository = fixture.get("repo").unwrap();
-        let selected = profile_path(&repository.location, "selected");
-        let profile = Profile::resolve(&selected, &fixture)?;
+        let repository = reposet.get("repo").unwrap();
+        let selected = profile_path(repository.location(), "selected");
+        let profile = Profile::resolve(&selected, &reposet)?;
 
         assert_eq!(
             profile.make_defaults.get("CAMERAS").unwrap().to_string(),
@@ -455,34 +455,34 @@ mod tests {
         ];
 
         for (name, format, eapi, succeeds) in cases {
-            let fixture = repo_set(vec![
+            let reposet = repo_set(vec![
                 RepoBuilder::new(name)
                     .formats([format])
                     .profile_eapi("selected", eapi)
                     .profile_entries_dir("selected/use.mask", "test\n"),
             ])?;
 
-            let repo_path = fixture.get(name).unwrap().location.as_path();
+            let repo_path = reposet.get(name).unwrap().location();
             let selected = profile_path(repo_path, "selected");
 
-            assert_eq!(Profile::resolve(&selected, &fixture).is_ok(), succeeds);
+            assert_eq!(Profile::resolve(&selected, &reposet).is_ok(), succeeds);
         }
         Ok(())
     }
 
     #[test]
     fn test_packages_are_file_only() -> anyhow::Result<()> {
-        let fixture = repo_set(vec![
+        let reposet = repo_set(vec![
             RepoBuilder::new("repo")
                 .formats(["portage-2"])
                 .profile_eapi("selected", "8")
                 .profile_entries_dir("selected/packages", "sys-apps/coreutils\n"),
         ])?;
 
-        let repo_path = fixture.get("repo").unwrap().location.as_path();
+        let repo_path = reposet.get("repo").unwrap().location();
         let selected = profile_path(repo_path, "selected");
 
-        assert!(Profile::resolve(&selected, &fixture).is_err());
+        assert!(Profile::resolve(&selected, &reposet).is_err());
         Ok(())
     }
 
@@ -498,40 +498,40 @@ mod tests {
 
     #[test]
     fn test_root_parent_escape() -> anyhow::Result<()> {
-        let fixture = repo_set(vec![
+        let reposet = repo_set(vec![
             RepoBuilder::new("source")
                 .formats(["portage-2"])
                 .parents("root-relative", [":../outside"])
                 .parents("ordinary-relative", ["../../outside"]),
         ])?;
 
-        let source_path = fixture.get("source").unwrap().location.as_path();
+        let source_path = reposet.get("source").unwrap().location();
         fs::create_dir(source_path.join("outside"))?;
 
-        assert!(Profile::resolve(&profile_path(source_path, "root-relative"), &fixture).is_err());
+        assert!(Profile::resolve(&profile_path(source_path, "root-relative"), &reposet).is_err());
         assert!(
-            Profile::resolve(&profile_path(source_path, "ordinary-relative"), &fixture).is_err()
+            Profile::resolve(&profile_path(source_path, "ordinary-relative"), &reposet).is_err()
         );
         Ok(())
     }
 
     #[test]
     fn test_parent_direct_cycle() {
-        let fixture = repo_set(vec![
+        let reposet = repo_set(vec![
             RepoBuilder::new("repo")
                 .formats(["pms"])
                 .profile("selected")
                 .parents("selected", ["../selected"]),
         ])
         .unwrap();
-        let repo_path = fixture.get("repo").unwrap().location.as_path();
+        let repo_path = reposet.get("repo").unwrap().location();
 
-        assert!(Profile::resolve(&profile_path(repo_path, "selected"), &fixture).is_err());
+        assert!(Profile::resolve(&profile_path(repo_path, "selected"), &reposet).is_err());
     }
 
     #[test]
     fn test_parent_indirect_cycle() {
-        let fixture = repo_set(vec![
+        let reposet = repo_set(vec![
             RepoBuilder::new("repo")
                 .formats(["pms"])
                 .profile("first")
@@ -542,8 +542,8 @@ mod tests {
                 .parents("third", ["../first"]),
         ])
         .unwrap();
-        let repo_path = fixture.get("repo").unwrap().location.as_path();
+        let repo_path = reposet.get("repo").unwrap().location();
 
-        assert!(Profile::resolve(&profile_path(repo_path, "first"), &fixture).is_err());
+        assert!(Profile::resolve(&profile_path(repo_path, "first"), &reposet).is_err());
     }
 }

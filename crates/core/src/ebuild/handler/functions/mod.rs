@@ -27,7 +27,7 @@ pub fn resolve_eclass(
     name: &str,
     repository: &Repository,
 ) -> Result<FunctionReply, PhaseExecutionError> {
-    let Some(eclass) = repository.eclasses.get(name) else {
+    let Some(eclass) = repository.eclasses().get(name) else {
         return Err(FuncCallError::EclassNotFound {
             name: name.to_owned(),
             repository: repository.to_string(),
@@ -57,12 +57,12 @@ mod tests {
     use std::path::PathBuf;
 
     fn with_handler(eapi: Eapi, test: impl FnOnce(&EbuildPhaseHandler)) {
-        let fixture = repo_set(vec![RepoBuilder::new("repo")]).unwrap();
+        let reposet = repo_set(vec![RepoBuilder::new("repo")]).unwrap();
         let cpv = cpv("app-editors", "vim", "1.2.3b_alpha4");
         let ebuild = Ebuild {
             eapi,
             cpv: &cpv,
-            repo: fixture.get("repo").unwrap(),
+            repo: reposet.get("repo").unwrap(),
             path: PathBuf::default(),
         };
         let handler =

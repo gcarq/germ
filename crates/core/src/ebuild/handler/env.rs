@@ -176,9 +176,14 @@ impl EbuildEnv {
     /// TODO: ensure `LC_CTYPE` and `LC_COLLATE` are equivalent to POSIX locale
     /// TODO: add more variables as needed
     pub fn new(ebuild: &Ebuild, phase: &EbuildPhase, makenv: &MakeEnv) -> anyhow::Result<Self> {
-        let repo_paths =
-            shlex::try_join(ebuild.repo.eclasses.repo_paths().filter_map(|p| p.to_str()))
-                .context("unable to escape repo paths")?;
+        let repo_paths = shlex::try_join(
+            ebuild
+                .repo
+                .eclasses()
+                .repo_paths()
+                .filter_map(|p| p.to_str()),
+        )
+        .context("unable to escape repo paths")?;
 
         let bash_version = ebuild.eapi.supported_bash_version().to_owned();
 
@@ -201,7 +206,7 @@ impl EbuildEnv {
                 ("PN".to_owned(), ebuild.cpv.pn().to_owned()),
                 (
                     "CATEGORY".to_owned(),
-                    ebuild.cpv.category().as_str().to_owned(),
+                    ebuild.cpv.category().as_ref().to_owned(),
                 ),
                 ("PV".to_owned(), ebuild.cpv.pv()),
                 ("PR".to_owned(), ebuild.cpv.pr()),

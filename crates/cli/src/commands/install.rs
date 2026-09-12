@@ -13,15 +13,15 @@ use crate::utils::format_error;
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.
 pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
-    let mut repo_set = RepoSet::new(sysconf.clone()).context("unable to build repo set")?;
-    let conf = PortageConf::new(&repo_set, &sysconf)?;
+    let mut reposet = RepoSet::new(sysconf.clone()).context("unable to build repo set")?;
+    let conf = PortageConf::new(&reposet, &sysconf)?;
     let policy = PackagePolicy::new(
         conf.effective_keywords()?,
         conf.use_policy()?,
-        PackageMasks::new(repo_set.package_mask_source()?, conf.package_mask_source()?)?,
+        PackageMasks::new(&reposet.package_mask_source()?, conf.package_mask_source()?)?,
     );
 
-    for pkg in repo_set.find_packages(atom).await? {
+    for pkg in reposet.find_packages(atom).await? {
         let pkg = match pkg {
             Ok(pkg) => pkg,
             Err(err) => {

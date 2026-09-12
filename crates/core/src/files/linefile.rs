@@ -19,11 +19,11 @@ impl<T: EntryValue> LineEntries<T> {
     /// if `recursive` is set, `path` is treated as directory and all files in that directory are merged together.
     pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
         let content = content_from_path(path, recursive, true)?;
-        Self::from_string(content, order)
+        Self::from_content(&content, order)
             .with_context(|| format!("failed to parse {}", path.display()))
     }
 
-    pub fn from_string(content: String, order: Precedence) -> anyhow::Result<Self> {
+    pub fn from_content(content: &str, order: Precedence) -> anyhow::Result<Self> {
         let entries = content
             .lines()
             .enumerate()
@@ -76,7 +76,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_from_string() -> anyhow::Result<()> {
+    fn test_from_content() -> anyhow::Result<()> {
         let content = "
             dev-libs/libffi # inline comment
 
@@ -86,7 +86,7 @@ mod tests {
             -app-arch/rpm # removal comment
         ";
 
-        let file = PackageEntries::from_string(content.into(), Precedence::Repository)?;
+        let file = PackageEntries::from_content(content, Precedence::Repository)?;
         assert_eq!(
             file.0,
             vec![
@@ -101,34 +101,31 @@ mod tests {
 
     #[test]
     fn test_inherit_from() -> anyhow::Result<()> {
-        let grand_parent = PackageEntries::from_string(
+        let grand_parent = PackageEntries::from_content(
             "
             dev-libs/libffi
             app-arch/xz-utils
             app-arch/zstd
             app-arch/rpm
-        "
-            .into(),
+        ",
             Precedence::Repository,
         )?;
 
-        let parent = PackageEntries::from_string(
+        let parent = PackageEntries::from_content(
             "
             -app-arch/rpm
             -sys-libs/glibc
-            "
-            .into(),
+            ",
             Precedence::Profile(0),
         )?;
 
-        let mut child = PackageEntries::from_string(
+        let mut child = PackageEntries::from_content(
             "
             -app-arch/xz-utils
             app-arch/zstd
             app-arch/rpm
             -app-arch/rpm
-            "
-            .into(),
+            ",
             Precedence::Profile(1),
         )?;
 

@@ -19,6 +19,7 @@ use crate::deps::atom::Atom;
 use crate::eapi::Eapi;
 use crate::ebuild::Ebuild;
 use crate::files::{PackageEntries, entry::Precedence};
+use crate::package::PackageView;
 use crate::package::names::CatName;
 use crate::package::{Package, cpv::CPV};
 use crate::repository::RepoName;
@@ -41,19 +42,19 @@ pub use package::cache::CacheError;
 /// See https://projects.gentoo.org/pms/8/pms.html#x1-290004.1
 #[derive(Debug)]
 pub struct Repository {
-    pub location: PathBuf,
-    pub name: RepoName,
-    pub layout: Layout,
-    pub eclasses: Eclasses,
-    pub package_mask: PackageEntries,
-    pub package_unmask: PackageEntries,
-    pub arches: Arches,
-    pub categories: FxHashSet<CatName>,
-    pub priority: i32,
+    location: PathBuf,
+    name: RepoName,
+    layout: Layout,
+    eclasses: Eclasses,
+    supported_arches: Arches,
+    known_categories: FxHashSet<CatName>,
     profiles_desc: ProfileDescriptions,
     cpv_index: CPVIndex,
     metadata_cache: MetadataCache,
     sysconf: Arc<SysConf>,
+
+    pub(super) package_mask: PackageEntries,
+    pub(super) package_unmask: PackageEntries,
 }
 
 impl Repository {
@@ -61,7 +62,6 @@ impl Repository {
     pub fn load(
         name: &RepoName,
         location: &Path,
-        priority: i32,
         sysconf: Arc<SysConf>,
     ) -> Result<Self, RepositoryError> {
         let layout = Layout::from_path(&location.join("metadata").join("layout.conf"))?;
@@ -87,12 +87,11 @@ impl Repository {
         Ok(Self {
             location: location.to_owned(),
             metadata_cache: MetadataCache::new(&location.join("cache")),
-            categories: FxHashSet::default(),
+            known_categories: FxHashSet::default(),
             eclasses: Eclasses::empty(location),
-            arches: Arches::from_path(&profiles.join("arch.list"))?,
+            supported_arches: Arches::from_path(&profiles.join("arch.list"))?,
             profiles_desc: ProfileDescriptions::from_path(&profiles.join("profiles.desc"))?,
             cpv_index: CPVIndex::default(),
-            priority,
             package_mask,
             package_unmask,
             layout,
@@ -122,6 +121,26 @@ impl Repository {
         self.resolve_packages(cpvs).await
     }
 
+    /// Returns the [`RepoName`].
+    pub const fn name(&self) -> &RepoName {
+        &self.name
+    }
+
+    /// Returns the location on disk.
+    pub fn location(&self) -> &Path {
+        &self.location
+    }
+
+    /// Returns all defined eclasses.
+    pub const fn eclasses(&self) -> &Eclasses {
+        &self.eclasses
+    }
+
+    /// Returns the current [`Layout`].
+    pub const fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
     /// Checks if the profile with the relative `rel_path` is valid for the given `arch`.
     ///
     /// The repository location prefix must be stripped from the passed `rel_path`,
@@ -130,6 +149,11 @@ impl Repository {
         self.profiles_desc
             .iter()
             .any(|desc| &desc.arch == arch && desc.profile_path.as_str() == rel_path.as_os_str())
+    }
+
+    /// Checks if the repository supports the given `arch`.
+    pub fn supports_arch(&self, arch: &Arch) -> bool {
+        self.supported_arches.contains(arch)
     }
 
     /// Resolves all configured categories and eclasses and also clears the CPV index.
@@ -217,7 +241,7 @@ impl Repository {
             resolved
                 .iter()
                 .filter_map(|result| result.as_ref().ok())
-                .map(|pkg| (&pkg.cpv, &pkg.metadata)),
+                .map(|pkg| (pkg.cpv(), pkg.metadata())),
         )?;
 
         cached.extend(resolved);
@@ -248,7 +272,7 @@ impl Repository {
                         None
                     }
                 });
-            self.categories.extend(iter);
+            self.known_categories.extend(iter);
         }
     }
 
@@ -273,7 +297,7 @@ impl Repository {
             ))),
             (None, _) => Either::Right(Either::Right(resolve_from_repo_path(
                 &self.location,
-                &self.categories,
+                &self.known_categories,
             ))),
         };
 
@@ -318,9 +342,10 @@ impl Inherit for Repository {
     /// Inherits relevant metadata from the given `master` repository.
     fn inherit_from(&mut self, master: &Repository) -> anyhow::Result<()> {
         debug!("Inheriting '{}' from '{}' ...", self.name, master.name);
-        self.categories.extend(master.categories.iter().cloned());
+        self.known_categories
+            .extend(master.known_categories.iter().cloned());
         self.eclasses.extend(&master.eclasses);
-        self.arches.extend(&master.arches);
+        self.supported_arches.extend(&master.supported_arches);
         Ok(())
     }
 }
@@ -355,13 +380,12 @@ impl Default for Repository {
         Self {
             name: "repo".parse().unwrap(),
             location: temp_dir.path().to_owned(),
-            priority: 0,
             layout: Layout::default(),
-            categories: FxHashSet::default(),
+            known_categories: FxHashSet::default(),
             package_mask: PackageEntries::default(),
             package_unmask: PackageEntries::default(),
             eclasses: Eclasses::default(),
-            arches: Arches::default(),
+            supported_arches: Arches::default(),
             profiles_desc: ProfileDescriptions::default(),
             cpv_index: CPVIndex::default(),
             sysconf: SysConf::default().into(),
@@ -400,7 +424,7 @@ mod tests {
             .next()
             .unwrap()
             .unwrap();
-        assert_eq!(package.metadata, metadata);
+        assert_eq!(package.metadata(), &metadata);
     }
 
     #[test]
@@ -449,14 +473,17 @@ mod tests {
         let mut repository = Repository::load(
             &RepoName::default(),
             &location,
-            0,
             Arc::new(SysConf::default()),
         )
         .unwrap();
         repository.finalize().unwrap();
 
-        assert!(repository.categories.contains(&"app-misc".parse().unwrap()));
-        assert_eq!(repository.categories.len(), 1);
+        assert!(
+            repository
+                .known_categories
+                .contains(&"app-misc".parse().unwrap())
+        );
+        assert_eq!(repository.known_categories.len(), 1);
     }
 
     #[test]

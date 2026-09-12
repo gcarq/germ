@@ -45,7 +45,7 @@ impl ParentEntry {
     pub fn resolve<'repo>(
         &self,
         referring_profile: &ProfileSource<'repo>,
-        repo_set: &'repo RepoSet,
+        reposet: &'repo RepoSet,
     ) -> anyhow::Result<ProfileSource<'repo>> {
         let owning_repo = referring_profile.owning_repo;
         match self {
@@ -60,7 +60,7 @@ impl ParentEntry {
                     .with_context(|| {
                         format!("unable to resolve parent path '{}'", profile_path.display())
                     })?;
-                let canonical_root = owning_repo.location.join("profiles").canonicalize()?;
+                let canonical_root = owning_repo.location().join("profiles").canonicalize()?;
                 if !path.starts_with(&canonical_root) {
                     bail!(
                         "parent profile {} escapes repository profiles root {}",
@@ -71,11 +71,13 @@ impl ParentEntry {
                 Ok(ProfileSource { path, owning_repo })
             }
             Self::RootRelative(profile_path) => {
-                if !owning_repo.layout.supports_root_relative_parents() {
+                if !owning_repo.layout().supports_root_relative_parents() {
                     bail!("root-relative parent requires profile-format 'portage-2'");
                 }
-                let path =
-                    Self::resolve_contained(&owning_repo.location.join("profiles"), profile_path)?;
+                let path = Self::resolve_contained(
+                    &owning_repo.location().join("profiles"),
+                    profile_path,
+                )?;
                 Ok(ProfileSource {
                     path,
                     owning_repo: referring_profile.owning_repo,
@@ -85,14 +87,16 @@ impl ParentEntry {
                 repo_name,
                 profile_path,
             } => {
-                if !owning_repo.layout.supports_cross_repo_parents() {
+                if !owning_repo.layout().supports_cross_repo_parents() {
                     bail!("cross-repository parent requires profile-format 'portage-2'");
                 }
-                let parent_repo = repo_set.get(repo_name.as_str()).ok_or_else(|| {
+                let parent_repo = reposet.get(repo_name.as_str()).ok_or_else(|| {
                     anyhow!("repository '{repo_name}' is not available for parent '{self}'")
                 })?;
-                let path =
-                    Self::resolve_contained(&parent_repo.location.join("profiles"), profile_path)?;
+                let path = Self::resolve_contained(
+                    &parent_repo.location().join("profiles"),
+                    profile_path,
+                )?;
                 Ok(ProfileSource {
                     path,
                     owning_repo: parent_repo,

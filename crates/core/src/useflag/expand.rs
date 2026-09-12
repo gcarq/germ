@@ -140,12 +140,11 @@ mod tests {
 
     #[test]
     fn test_materialize() -> anyhow::Result<()> {
-        let makenv = MakeEnv::from_string(
+        let makenv = MakeEnv::from_content(
             "USE_EXPAND=VIDEO_CARDS
             USE_EXPAND_UNPREFIXED=ARCH
             VIDEO_CARDS=\"amdgpu -amdgpu -* nouveau\"
-            ARCH=\"amd64 -arm64\""
-                .into(),
+            ARCH=\"amd64 -arm64\"",
         )?;
         let config = UseExpandConfig::from_makenv(&makenv)?;
 
@@ -165,14 +164,13 @@ mod tests {
 
     #[test]
     fn test_implicit_flags() -> anyhow::Result<()> {
-        let makenv = MakeEnv::from_string(
+        let makenv = MakeEnv::from_content(
             "USE_EXPAND=\"ELIBC VIDEO_CARDS\"
              USE_EXPAND_UNPREFIXED=ARCH
              USE_EXPAND_IMPLICIT=\"ARCH ELIBC\"
              USE_EXPAND_VALUES_ARCH=\"amd64 x86\"
              USE_EXPAND_VALUES_ELIBC=\"glibc\"
-             USE_EXPAND_VALUES_VIDEO_CARDS=amdgpu"
-                .into(),
+             USE_EXPAND_VALUES_VIDEO_CARDS=amdgpu",
         )?;
         let config = UseExpandConfig::from_makenv(&makenv)?;
 
@@ -189,10 +187,9 @@ mod tests {
 
     #[test]
     fn test_rejects_overlapping_groups() -> anyhow::Result<()> {
-        let makenv = MakeEnv::from_string(
+        let makenv = MakeEnv::from_content(
             "USE_EXPAND=\"LLVM_TARGETS\"
-                USE_EXPAND_UNPREFIXED=\"LLVM_TARGETS\""
-                .into(),
+                USE_EXPAND_UNPREFIXED=\"LLVM_TARGETS\"",
         )?;
 
         assert!(UseExpandConfig::from_makenv(&makenv).is_err());

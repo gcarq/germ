@@ -65,7 +65,7 @@ impl CPV {
 
     /// Returns the package name, for example `vim`.
     pub fn pn(&self) -> &str {
-        self.package().as_str()
+        self.package().as_ref()
     }
 
     /// Returns the package version, with no revision. For example `7.0.174`.

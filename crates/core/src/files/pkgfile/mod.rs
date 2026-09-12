@@ -25,11 +25,11 @@ pub struct AtomPolicies<T: AtomPolicy>(IndexMap<Atom, T>);
 impl<T: AtomPolicy> AtomPolicies<T> {
     pub fn from_path(path: &Path, precedence: Precedence, recursive: bool) -> anyhow::Result<Self> {
         let content = content_from_path(path, recursive, true)?;
-        Self::from_string(content, precedence)
+        Self::from_content(&content, precedence)
             .with_context(|| format!("failed to parse {}", path.display()))
     }
 
-    pub fn from_string(content: String, precedence: Precedence) -> anyhow::Result<Self> {
+    pub fn from_content(content: &str, precedence: Precedence) -> anyhow::Result<Self> {
         let mut policies = IndexMap::<Atom, T>::default();
 
         for (lineno, line) in content.lines().enumerate() {
@@ -106,14 +106,13 @@ mod tests {
 
     #[test]
     fn test_parse_atom_order() -> anyhow::Result<()> {
-        let policies = AtomPolicies::<TestPolicy>::from_string(
+        let policies = AtomPolicies::<TestPolicy>::from_content(
             "
                 # ignored
                 dev-lang/rust first
                 dev-lang/rust second # comment
                 app-editors/vim third
-            "
-            .into(),
+            ",
             Precedence::User,
         )?;
 
@@ -137,16 +136,14 @@ mod tests {
 
     #[test]
     fn test_inherit_atom_order() -> anyhow::Result<()> {
-        let parent = AtomPolicies::<TestPolicy>::from_string(
+        let parent = AtomPolicies::<TestPolicy>::from_content(
             "dev-lang/rust parent
-                app-editors/vim inherited"
-                .into(),
+                app-editors/vim inherited",
             Precedence::Profile(0),
         )?;
-        let mut child = AtomPolicies::<TestPolicy>::from_string(
+        let mut child = AtomPolicies::<TestPolicy>::from_content(
             "dev-lang/rust child
-                app-editors/nano own"
-                .into(),
+                app-editors/nano own",
             Precedence::Profile(1),
         )?;
 

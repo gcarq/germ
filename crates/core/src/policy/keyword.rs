@@ -163,7 +163,7 @@ mod tests {
                 .map(str::parse)
                 .collect::<anyhow::Result<_>>()
                 .unwrap(),
-            PackageAcceptKeywords::from_string(package_keywords.into(), Precedence::User).unwrap(),
+            PackageAcceptKeywords::from_content(package_keywords, Precedence::User).unwrap(),
         )
     }
 
@@ -268,11 +268,9 @@ mod tests {
 
     #[test]
     fn test_policy_precedence() -> anyhow::Result<()> {
-        let profile = PackageAcceptKeywords::from_string(
-            "dev-lang/rust amd64".into(),
-            Precedence::Profile(0),
-        )?;
-        let user = PackageAcceptKeywords::from_string("*/* -amd64".into(), Precedence::User)?;
+        let profile =
+            PackageAcceptKeywords::from_content("dev-lang/rust amd64", Precedence::Profile(0))?;
+        let user = PackageAcceptKeywords::from_content("*/* -amd64", Precedence::User)?;
         let package_accept_keywords = user.inherit(&profile)?;
         let policy = EffectiveKeywords::new(Vec::default(), package_accept_keywords);
 
@@ -299,15 +297,15 @@ mod tests {
     #[test]
     fn test_policy_installed_package() {
         let policy = policy("amd64", "");
-        let pkg = InstalledPackage {
-            cpv: cpv("dev-lang", "rust", "1.0"),
-            repo: "gentoo".parse().unwrap(),
-            metadata: PackageMetadata {
+        let pkg = InstalledPackage::from_parts(
+            cpv("dev-lang", "rust", "1.0"),
+            "gentoo".parse().unwrap(),
+            PackageMetadata {
                 keywords: vec!["amd64".parse().unwrap()],
                 ..Default::default()
             },
-            use_flags: Vec::new(),
-        };
+            Vec::default(),
+        );
         assert_eq!(policy.evaluate(&pkg), KeywordEvalResult::new(true, true));
     }
 

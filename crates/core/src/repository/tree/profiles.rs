@@ -48,7 +48,7 @@ impl Deref for ProfileDescriptions {
 pub struct ProfileDescription {
     pub arch: Arch,
     pub profile_path: String,
-    #[allow(unused)]
+    #[expect(unused)]
     stability: String,
 }
 

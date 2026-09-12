@@ -23,8 +23,8 @@ impl PackageAcceptKeywords {
     }
 
     #[cfg(test)]
-    pub fn from_string(content: String, order: Precedence) -> anyhow::Result<Self> {
-        Ok(Self(AtomPolicies::from_string(content, order)?))
+    pub fn from_content(content: &str, order: Precedence) -> anyhow::Result<Self> {
+        Ok(Self(AtomPolicies::from_content(content, order)?))
     }
 
     /// Consumes this configuration and returns [`Atom`] and [`KeywordRule`] pairs.
@@ -164,8 +164,7 @@ mod tests {
 
     #[test]
     fn test_atom_only_defaults_testing() -> anyhow::Result<()> {
-        let entries =
-            PackageAcceptKeywords::from_string("net-analyzer/netcat".into(), Precedence::User)?;
+        let entries = PackageAcceptKeywords::from_content("net-analyzer/netcat", Precedence::User)?;
         let rules = entries.into_rules().collect::<Vec<_>>();
 
         let atom = Atom::new("net-analyzer/netcat")?;
@@ -175,13 +174,12 @@ mod tests {
 
     #[test]
     fn test_duplicate_atom_reset() -> anyhow::Result<()> {
-        let entries = PackageAcceptKeywords::from_string(
+        let entries = PackageAcceptKeywords::from_content(
             r#"
                 dev-lang/rust amd64
                 dev-lang/rust -*
                 dev-lang/rust ~amd64
-            "#
-            .into(),
+            "#,
             Precedence::User,
         )?;
         let rules = entries
@@ -201,14 +199,10 @@ mod tests {
 
     #[test]
     fn test_keyword_spec_inherit_reset() -> anyhow::Result<()> {
-        let parent = PackageAcceptKeywords::from_string(
-            "dev-lang/rust amd64".into(),
-            Precedence::Profile(0),
-        )?;
-        let mut child = PackageAcceptKeywords::from_string(
-            "dev-lang/rust -* ~amd64".into(),
-            Precedence::Profile(1),
-        )?;
+        let parent =
+            PackageAcceptKeywords::from_content("dev-lang/rust amd64", Precedence::Profile(0))?;
+        let mut child =
+            PackageAcceptKeywords::from_content("dev-lang/rust -* ~amd64", Precedence::Profile(1))?;
 
         child.inherit_from(&parent)?;
         let rules = child.into_rules().map(|(_, rule)| rule).collect::<Vec<_>>();

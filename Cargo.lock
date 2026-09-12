@@ -371,6 +371,7 @@ dependencies = [
  "anyhow",
  "clap",
  "colored",
+ "either",
  "fern",
  "germ-core",
  "log",

@@ -65,11 +65,11 @@ pub struct MakeEnv(FxHashMap<Box<str>, EnvValue>);
 
 impl MakeEnv {
     pub fn from_path(path: &Path, recursive: bool, optional: bool) -> anyhow::Result<Self> {
-        Self::from_string(content_from_path(path, recursive, optional)?)
+        Self::from_content(&content_from_path(path, recursive, optional)?)
     }
 
     /// Builds a [`MakeEnv`] from the given content of a make.conf or make.defaults file.
-    pub fn from_string(content: String) -> anyhow::Result<Self> {
+    pub fn from_content(content: &str) -> anyhow::Result<Self> {
         let mut vars = utils::shlex_split(content)?
             .into_iter()
             .map(|(key, value)| {
@@ -169,7 +169,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_makenv_from_string_ok() {
+    fn test_makenv_from_content_ok() {
         let content = r#"
 # This is a comment
 USE="cet"
@@ -184,7 +184,7 @@ USE="${USE} -bar"
 
 enable_year2038="no"
         "#;
-        let makenv = MakeEnv::from_string(content.into()).unwrap();
+        let makenv = MakeEnv::from_content(content).unwrap();
         assert_eq!(makenv.get("USE").unwrap().to_string(), "cet -foo -bar");
         assert_eq!(
             makenv.get("BOOTSTRAP_USE").unwrap().to_string(),
@@ -194,14 +194,14 @@ enable_year2038="no"
     }
 
     #[test]
-    fn test_makenv_from_string_err() {
-        assert!(MakeEnv::from_string("/VAR1=test".into()).is_err());
+    fn test_makenv_from_content_err() {
+        assert!(MakeEnv::from_content("/VAR1=test").is_err());
     }
 
     #[test]
     fn test_makenv_expand_from() -> anyhow::Result<()> {
-        let parent = MakeEnv::from_string("USE=foo".into())?;
-        let mut child = MakeEnv::from_string("USE=\"${USE} -foo\"".into())?;
+        let parent = MakeEnv::from_content("USE=foo")?;
+        let mut child = MakeEnv::from_content("USE=\"${USE} -foo\"")?;
         child.expand_from(&parent)?;
 
         assert_eq!(
@@ -221,8 +221,8 @@ enable_year2038="no"
         USE="${USE} seccomp branding -cet"
         GRUB_PLATFORM="efi-64"
         "#;
-        let parent = MakeEnv::from_string(parent_content.into()).unwrap();
-        let mut child = MakeEnv::from_string(child_content.into()).unwrap();
+        let parent = MakeEnv::from_content(parent_content).unwrap();
+        let mut child = MakeEnv::from_content(child_content).unwrap();
         child.inherit_from(&parent).unwrap();
         assert_eq!(child.get("USE").unwrap().to_string(), "seccomp branding");
         assert_eq!(child.get("INPUT_DEVICES").unwrap().to_string(), "libinput");
@@ -232,7 +232,7 @@ enable_year2038="no"
     fn fold_contents(contents: &[&str]) -> anyhow::Result<MakeEnv> {
         let envs = contents
             .iter()
-            .map(|content| MakeEnv::from_string((*content).to_owned()))
+            .map(|content| MakeEnv::from_content(content))
             .collect::<anyhow::Result<Vec<_>>>()
             .unwrap();
         let layers = envs.iter().collect::<Vec<_>>();

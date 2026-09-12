@@ -114,7 +114,7 @@ impl Vdb {
             })
             .filter_map(Result::transpose)
             .collect::<anyhow::Result<Vec<_>>>()?;
-        packages.sort_unstable_by(|a, b| b.cpv.cmp(&a.cpv));
+        packages.sort_unstable_by(|a, b| b.cpv().cmp(a.cpv()));
         self.packages.insert(category.clone(), packages);
         Ok(())
     }
@@ -143,7 +143,7 @@ impl Vdb {
             caps.name("revision").map(|m| m.as_str()),
         )?;
         let cpv = CPV::new(category.clone(), package, version);
-        let pkg = InstalledPackage::new(cpv, path)
+        let pkg = InstalledPackage::from_path(cpv, path)
             .with_context(|| format!("failed to collect package from {}", path.display()))?;
         Ok(Some(pkg))
     }
@@ -178,8 +178,8 @@ mod tests {
 
         let category: CatName = "dev-libs".parse().unwrap();
         let package = Vdb::package_from_path(&category, &path).unwrap().unwrap();
-        assert_eq!(package.cpv, cpv("dev-libs", "foo-", "1"));
-        assert_eq!(package.repo.as_str(), "repo-");
+        assert_eq!(package.cpv(), &cpv("dev-libs", "foo-", "1"));
+        assert_eq!(package.repo().as_str(), "repo-");
 
         let path = temp.path().join("dev-libs").join("foo-1");
         write_vdb_package(&path, "invalid name");
@@ -212,7 +212,7 @@ mod tests {
             let packages = vdb.find_by_atom(&Atom::new(atom).unwrap()).unwrap();
             let actual = packages
                 .iter()
-                .map(|package| package.cpv.fqn())
+                .map(|package| package.cpv().fqn())
                 .collect::<Vec<_>>();
             assert_eq!(actual, expected);
         }

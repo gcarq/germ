@@ -7,6 +7,7 @@ edition.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 colored.workspace = true
+either.workspace = true
 fern.workspace = true
 log.workspace = true
 germ-core.workspace = true

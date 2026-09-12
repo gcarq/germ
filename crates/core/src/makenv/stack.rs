@@ -128,8 +128,8 @@ mod tests {
     #[test]
     fn test_global_use() -> anyhow::Result<()> {
         let stack = MakeEnvStack::new(
-            MakeEnv::from_string("USE=foo".into())?,
-            MakeEnv::from_string("USE=\"bar -foo\"".into())?,
+            MakeEnv::from_content("USE=foo")?,
+            MakeEnv::from_content("USE=\"bar -foo\"")?,
             MakeEnv::default(),
         )?;
         assert_eq!(
@@ -138,9 +138,9 @@ mod tests {
         );
 
         let stack = MakeEnvStack::new(
-            MakeEnv::from_string("USE=foo".into())?,
+            MakeEnv::from_content("USE=foo")?,
             MakeEnv::default(),
-            MakeEnv::from_string("USE=-foo".into())?,
+            MakeEnv::from_content("USE=-foo")?,
         )?;
         assert_eq!(
             stack.global_use()?,
@@ -148,9 +148,9 @@ mod tests {
         );
 
         let stack = MakeEnvStack::new(
-            MakeEnv::from_string("USE=\"foo bar\"".into())?,
+            MakeEnv::from_content("USE=\"foo bar\"")?,
             MakeEnv::default(),
-            MakeEnv::from_string("USE=\"-* baz\"".into())?,
+            MakeEnv::from_content("USE=\"-* baz\"")?,
         )?;
         assert_eq!(
             stack.global_use()?,
@@ -160,7 +160,7 @@ mod tests {
         let stack = MakeEnvStack::new(
             MakeEnv::default(),
             MakeEnv::default(),
-            MakeEnv::from_string("USE=+invalid".into())?,
+            MakeEnv::from_content("USE=+invalid")?,
         )?;
         assert!(stack.global_use().is_err());
         Ok(())
@@ -169,13 +169,12 @@ mod tests {
     #[test]
     fn test_global_use_expansion() -> anyhow::Result<()> {
         let stack = MakeEnvStack::new(
-            MakeEnv::from_string(
+            MakeEnv::from_content(
                 "USE_EXPAND=VIDEO_CARDS
-                 VIDEO_CARDS=amdgpu"
-                    .into(),
+                 VIDEO_CARDS=amdgpu",
             )?,
-            MakeEnv::from_string("VIDEO_CARDS=nouveau".into())?,
-            MakeEnv::from_string("VIDEO_CARDS=\"-amdgpu radeonsi\"".into())?,
+            MakeEnv::from_content("VIDEO_CARDS=nouveau")?,
+            MakeEnv::from_content("VIDEO_CARDS=\"-amdgpu radeonsi\"")?,
         )?;
         assert_eq!(
             stack.global_use()?,
@@ -187,16 +186,14 @@ mod tests {
         );
 
         let stack = MakeEnvStack::new(
-            MakeEnv::from_string(
+            MakeEnv::from_content(
                 "USE_EXPAND=VIDEO_CARDS
-                VIDEO_CARDS=amdgpu"
-                    .into(),
+                VIDEO_CARDS=amdgpu",
             )?,
             MakeEnv::default(),
-            MakeEnv::from_string(
+            MakeEnv::from_content(
                 "USE_EXPAND=\"-VIDEO_CARDS INPUT_DEVICES\"
-                    INPUT_DEVICES=libinput"
-                    .into(),
+                    INPUT_DEVICES=libinput",
             )?,
         )?;
         assert_eq!(
@@ -210,14 +207,13 @@ mod tests {
     fn test_iuse_implicit_profile() -> anyhow::Result<()> {
         let stack = MakeEnvStack::new(
             MakeEnv::default(),
-            MakeEnv::from_string(
+            MakeEnv::from_content(
                 "IUSE_IMPLICIT=profile_flag
                  USE_EXPAND_UNPREFIXED=ARCH
                  USE_EXPAND_IMPLICIT=ARCH
-                 USE_EXPAND_VALUES_ARCH=\"amd64\""
-                    .into(),
+                 USE_EXPAND_VALUES_ARCH=\"amd64\"",
             )?,
-            MakeEnv::from_string("IUSE_IMPLICIT=local_flag".into())?,
+            MakeEnv::from_content("IUSE_IMPLICIT=local_flag")?,
         )?;
 
         let flags = FxHashSet::from_iter([UseFlag::new("profile_flag")?, UseFlag::new("amd64")?]);

@@ -249,7 +249,7 @@ impl RepoBuilder {
 
         self.write_to(&location)
             .with_context(|| format!("failed to write repository '{name}'"))?;
-        let repository = Repository::load(&name, &location, 0, SysConf::default().into())?;
+        let repository = Repository::load(&name, &location, SysConf::default().into())?;
         Ok(Temp::new(repository, temp_dir))
     }
 }
@@ -282,7 +282,7 @@ pub fn repo_set(repos: impl IntoIterator<Item = RepoBuilder>) -> anyhow::Result<
     let sysconf = SysConf::new(temp.path().to_path_buf());
     let repos_conf = sysconf.portage_conf().join("repos.conf");
     write_file(repos_conf, conf).context("failed to write repos.conf")?;
-    let repo_set = RepoSet::new(sysconf.into())?;
+    let reposet = RepoSet::new(sysconf.into())?;
 
-    Ok(Temp::new(repo_set, temp))
+    Ok(Temp::new(reposet, temp))
 }
