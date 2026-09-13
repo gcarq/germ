@@ -75,12 +75,12 @@ impl RepoSet {
 
     /// Eagerly resolves and returns all packages that match the given `atom`.
     /// TODO: Order the returned packages by version
-    pub async fn find_packages(&mut self, atom: &Atom) -> Result<Vec<PackageResult>, RepoSetError> {
+    pub async fn find_packages(&self, atom: &Atom) -> Result<Vec<PackageResult>, RepoSetError> {
         let mut results = Vec::new();
 
         let repos = match atom.repo() {
-            Some(repo) => Either::Left(self.get_mut(repo).into_iter()),
-            None => Either::Right(self.iter_mut()),
+            Some(repo) => Either::Left(self.get(repo).into_iter()),
+            None => Either::Right(self.iter()),
         };
 
         for repo in repos {
@@ -463,10 +463,11 @@ mod tests {
             .unwrap();
         set.maybe_sync(None).unwrap();
 
-        assert!(
-            set.get_mut("repo")
-                .is_some_and(|repo| repo.cpvs().any(|cpv| cpv.fqn() == "app-misc/foo-1"))
-        );
+        assert!(set.get("repo").is_some_and(|repo| {
+            repo.cpvs()
+                .into_iter()
+                .any(|cpv| cpv.fqn() == "app-misc/foo-1")
+        }));
     }
 
     #[test]
@@ -511,7 +512,7 @@ mod tests {
 
     #[test]
     fn test_layout_masters_are_used() {
-        let mut fixture = repo_set(vec![
+        let reposet = repo_set(vec![
             RepoBuilder::new("master")
                 .categories(["app-misc"])
                 .eclass("master"),
@@ -521,12 +522,15 @@ mod tests {
         ])
         .unwrap();
 
-        let overlay = fixture.get_mut("overlay").unwrap();
-        let has_package = overlay.cpvs().any(|cpv| cpv.fqn() == "app-misc/foo-1");
+        let overlay = reposet.get("overlay").unwrap();
+        let has_package = overlay
+            .cpvs()
+            .into_iter()
+            .any(|cpv| cpv.fqn() == "app-misc/foo-1");
 
         assert!(has_package);
         assert!(
-            fixture
+            reposet
                 .get("overlay")
                 .unwrap()
                 .eclasses()
@@ -536,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_empty_masters_override() {
-        let mut reposet = repo_set(vec![
+        let reposet = repo_set(vec![
             RepoBuilder::new("master")
                 .categories(["app-misc"])
                 .eclass("master"),
@@ -548,9 +552,10 @@ mod tests {
         .unwrap();
 
         let has_package = reposet
-            .get_mut("overlay")
+            .get("overlay")
             .unwrap()
             .cpvs()
+            .into_iter()
             .any(|cpv| cpv.fqn() == "app-misc/foo-1");
 
         assert!(!has_package);
@@ -574,10 +579,11 @@ mod tests {
         ])
         .unwrap();
 
-        let overlay_before = reposet.get_mut("overlay").unwrap();
+        let overlay_before = reposet.get("overlay").unwrap();
         assert!(
             !overlay_before
                 .cpvs()
+                .into_iter()
                 .any(|cpv| cpv.fqn() == "dev-libs/bar-1")
         );
         assert!(!overlay_before.eclasses().contains_key("refreshed"));
@@ -591,10 +597,11 @@ mod tests {
         fs::write(master_path.join("eclass").join("refreshed.eclass"), "").unwrap();
         reposet.reload_from_disk().unwrap();
 
-        let overlay_after = reposet.get_mut("overlay").unwrap();
+        let overlay_after = reposet.get("overlay").unwrap();
         assert!(
             overlay_after
                 .cpvs()
+                .into_iter()
                 .any(|cpv| cpv.fqn() == "dev-libs/bar-1")
         );
         assert!(overlay_after.eclasses().contains_key("refreshed"));
@@ -659,9 +666,14 @@ mod tests {
         reposet.reload_from_disk().unwrap();
         assert!(reposet.get_mut("unavailable").is_none());
 
-        let child = reposet.get_mut("child").unwrap();
+        let child = reposet.get("child").unwrap();
         assert!(child.eclasses().contains_key("available"));
-        assert!(child.cpvs().any(|cpv| cpv.fqn() == "app-misc/foo-1"));
+        assert!(
+            child
+                .cpvs()
+                .into_iter()
+                .any(|cpv| cpv.fqn() == "app-misc/foo-1")
+        );
     }
 
     #[test]

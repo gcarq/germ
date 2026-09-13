@@ -101,24 +101,21 @@ impl Repository {
     }
 
     /// Returns all existing CPVs in the repository.
-    pub fn cpvs(&mut self) -> impl Iterator<Item = &CPV> {
-        self.ensure_discovered_cpvs(&Atom::default());
-        self.cpv_index.iter()
+    pub fn cpvs(&self) -> Vec<CPV> {
+        self.update_cpv_index(&Atom::default());
+        self.cpv_index.entries()
     }
 
     /// Eagerly resolves and returns all known packages.
-    pub async fn packages(&mut self) -> Result<Vec<PackageResult>, RepositoryError> {
+    pub async fn packages(&self) -> Result<Vec<PackageResult>, RepositoryError> {
         self.find_packages(&Atom::default()).await
     }
 
     /// Eagerly resolves all packages that match the given [`Atom`].
-    pub async fn find_packages(
-        &mut self,
-        atom: &Atom,
-    ) -> Result<Vec<PackageResult>, RepositoryError> {
-        self.ensure_discovered_cpvs(atom);
-        let cpvs = self.cpv_index.find_packages(atom);
-        self.resolve_packages(cpvs).await
+    pub async fn find_packages(&self, atom: &Atom) -> Result<Vec<PackageResult>, RepositoryError> {
+        self.update_cpv_index(atom);
+        self.resolve_packages(self.cpv_index.matching_entries(atom))
+            .await
     }
 
     /// Returns the [`RepoName`].
@@ -167,7 +164,7 @@ impl Repository {
     }
 
     /// Resolves all package metadata and builds [`MetadataCache`].
-    pub async fn build_cache(&mut self) -> Result<Vec<PackageResolutionError>, RepositoryError> {
+    pub async fn build_cache(&self) -> Result<Vec<PackageResolutionError>, RepositoryError> {
         Ok(self
             .packages()
             .await?
@@ -184,15 +181,15 @@ impl Repository {
     /// Compacts the [`MetadataCache`] by removing all entries that are no longer valid,
     /// and reclaiming disk space if possible.
     pub fn compact_cache(&mut self) -> anyhow::Result<()> {
-        self.ensure_discovered_cpvs(&Atom::default());
-        self.metadata_cache.retain(self.cpv_index.iter())?;
+        self.update_cpv_index(&Atom::default());
+        self.metadata_cache.retain(&self.cpv_index.entries())?;
         self.metadata_cache.compact()?;
         Ok(())
     }
 
     /// Resolves the [`Package`] for the given [`CPV`].
-    async fn resolve_package<'r>(&'r self, cpv: &'r CPV) -> PackageResult {
-        let ebuild = match Ebuild::new(cpv, self) {
+    async fn resolve_package(&self, cpv: CPV) -> PackageResult {
+        let ebuild = match Ebuild::new(&cpv, self) {
             Ok(ebuild) => ebuild,
             Err(error) => {
                 return Err(PackageResolutionError::new(cpv.fqn(), error.into()));
@@ -200,27 +197,23 @@ impl Repository {
         };
 
         match ebuild.generate_metadata().await {
-            Ok(metadata) => Ok(Package::new(cpv.to_owned(), self.name.clone(), metadata)),
+            Ok(metadata) => Ok(Package::new(cpv, self.name.clone(), metadata)),
             Err(source) => Err(PackageResolutionError::new(cpv.fqn(), source)),
         }
     }
 
     /// Builds the [`Package`] index for the given `cpvs`.
-    async fn resolve_packages<'r>(
-        &'r self,
-        cpvs: impl Iterator<Item = &'r CPV>,
+    async fn resolve_packages(
+        &self,
+        cpvs: Vec<CPV>,
     ) -> Result<Vec<PackageResult>, RepositoryError> {
-        let mut cached = Vec::with_capacity(cpvs.size_hint().0);
+        let mut cached = Vec::with_capacity(cpvs.len());
         let mut missing = Vec::new();
 
         for cpv in cpvs {
-            match self.metadata_cache.get(cpv)? {
+            match self.metadata_cache.get(&cpv)? {
                 Some(metadata) => {
-                    cached.push(Ok(Package::new(
-                        cpv.to_owned(),
-                        self.name.clone(),
-                        metadata,
-                    )));
+                    cached.push(Ok(Package::new(cpv, self.name.clone(), metadata)));
                 }
                 None => missing.push(cpv),
             }
@@ -276,11 +269,9 @@ impl Repository {
         }
     }
 
-    /// Ensures all [`CPV`] that match the given [`Atom`]
-    /// are discovered.
-    ///
-    /// TODO: Handle `*/package` more efficiently.
-    fn ensure_discovered_cpvs(&mut self, atom: &Atom) {
+    /// Updates [`CPVIndex`] and ensures all [`CPV`]
+    /// for the given `atom` are discovered.
+    fn update_cpv_index(&self, atom: &Atom) {
         if self.cpv_index.is_discovered(atom) {
             return;
         }
@@ -301,9 +292,7 @@ impl Repository {
             ))),
         };
 
-        self.cpv_index.insert(cpvs);
-        self.cpv_index.sort();
-        self.cpv_index.mark_discovered(atom);
+        self.cpv_index.update(atom, cpvs);
     }
 
     /// Resolves the repo name and validates it against `profiles/repo_name` and `layout.conf`.
@@ -396,8 +385,6 @@ impl Default for Repository {
 
 #[cfg(test)]
 mod tests {
-    use std::iter;
-
     use super::*;
 
     use super::super::test_support::RepoBuilder;
@@ -417,7 +404,7 @@ mod tests {
             .insert_batch([(&cpv, &metadata)])
             .unwrap();
         let package = repository
-            .resolve_packages(iter::once(&cpv))
+            .resolve_packages(vec![cpv])
             .await
             .unwrap()
             .into_iter()
