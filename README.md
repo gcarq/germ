@@ -14,10 +14,10 @@ Other than that, it is mainly for curious Gentoo users and Rust developers who e
 ## Known issues
 
 - `germ-core` currently expects to find `./bin/ebuild.sh` relative to the working directory.
-- `germ-core` currently uses `anyhow` for error handling, that means there is no way to distinguish between errors for users.
-- Metadata is currently written to the hardcoded `.cache/metadata` path.
-- A valid Portage configuration and system paths are assumed and are currently hardcoded.
+- `germ-core` currently uses `anyhow` in some parts of the public API, which means it is not possible to distinguish between internal and configuration errors.
+- A valid Portage configuration and system paths are assumed, there are still some hardcoded paths.
 - Only Git-based repository synchronization is supported.
+- PMS 9 is accepted, but is currently treated as PMS 8.
 - The `install` command is just a placeholder and doesn't install anything.
 
 ## Capabilities
@@ -28,8 +28,9 @@ Other than that, it is mainly for curious Gentoo users and Rust developers who e
 - repository synchronization (git only)
 - ebuild metadata generation and caching
 - dependency expression parsing
+- USE flag and keyword handling
 - package matching based on atoms
-- reading installed package database (VDB)
+- reading from Portage's virtual package database (VDB)
 
 All of this is experimental and might only work for common configurations. There are still many bugs and unsupported edge cases, especially due to the flexibility Portage offers.
 
@@ -37,12 +38,11 @@ All of this is experimental and might only work for common configurations. There
 
 Smaller improvements and ideas are collected in [TODO.md](TODO.md).
 
-- proper `USE_EXPAND` and keyword handling
-- dependency resolution
-- download and build package sources
-- binary package handling
-- package installation and removal
-- PMS 9 support
+- Dependency resolution
+- Download and build package sources
+- Binary package handling
+- Package installation and removal
+- Proper PMS 9 support
 
 ## Quick Start
 
@@ -63,15 +63,17 @@ Usage: germ [OPTIONS] <COMMAND>
 
 Commands:
   info      Provides information about the system, useful for troubleshooting
-  install   Install a package
+  install   Install a package (this is just a placeholder!)
   gencache  Generate metadata cache for ebuild repositories
   sync      Sync repositories
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-  -v, --verbose...  Increase verbosity
-  -h, --help        Print help
-  -V, --version     Print version
+  -v, --verbose...          Increase verbosity
+      --jobs <N>            Maximum number of ebuilds to execute concurrently [default: number of CPU cores]
+      --config-root <PATH>  Root path to configuration files [default: /]
+  -h, --help                Print help
+  -V, --version             Print version
 ```
 
 ## Testing
