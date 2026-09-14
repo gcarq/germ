@@ -2,6 +2,7 @@ use std::{num::NonZeroUsize, path::PathBuf, thread};
 
 const PORTAGE_CONF_PATH: &str = "etc/portage";
 const DEFAULT_PORTAGE_CONF_PATH: &str = "usr/share/portage/config";
+const VDB_PATH: &str = "var/db/pkg";
 
 /// Runtime configuration shared by repository operations.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,6 +37,11 @@ impl SysConf {
     /// usually `/usr/share/portage/config`.
     pub fn default_portage_conf(&self) -> PathBuf {
         self.config_root.join(DEFAULT_PORTAGE_CONF_PATH)
+    }
+
+    /// Returns the path to VDB.
+    pub fn vdb_path(&self) -> PathBuf {
+        self.config_root.join(VDB_PATH)
     }
 
     /// Returns the maximum number of isolated ebuild requests

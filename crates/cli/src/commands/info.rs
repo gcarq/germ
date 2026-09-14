@@ -24,14 +24,14 @@ pub fn info(atom: Option<&Atom>, sysconf: &Arc<SysConf>) -> anyhow::Result<()> {
         .vars()
         .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect::<Vec<_>>();
-    env.sort_by(|a, b| a.0.cmp(b.0));
+    env.sort();
     for (key, value) in env {
         println!("{key}=\"{value}\"");
     }
 
     let Some(atom) = atom else { return Ok(()) };
 
-    let mut vdb = Vdb::from_path("/var/db/pkg").context("unable to read VDB")?;
+    let mut vdb = Vdb::from_path(sysconf.vdb_path()).context("unable to read VDB")?;
     let packages = vdb
         .find_by_atom(atom)
         .with_context(|| format!("unable to find installed packages matching {atom}"))?;
