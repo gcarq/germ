@@ -1,4 +1,4 @@
-use crate::makenv::{EnvValue, MakeEnv};
+use crate::makenv::{EnvValue, EnvVarName, MakeEnv};
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::UseFlag;
 use anyhow::{Context, bail};
@@ -12,17 +12,22 @@ enum UseExpandKind {
 /// Maps USE expansion groups to their expansion kind (prefixed or unprefixed).
 #[derive(Clone, Debug, Default)]
 pub struct UseExpandConfig {
-    groups: FxHashMap<Box<str>, UseExpandKind>,
+    groups: FxHashMap<EnvVarName, UseExpandKind>,
     /// Implicit groups get injected into `IUSE_IMPLICIT`.
-    implicit_groups: FxHashSet<Box<str>>,
+    implicit_groups: FxHashSet<EnvVarName>,
 }
 
 impl UseExpandConfig {
     /// Builds the expansion config from the effective [`MakeEnv`].
     pub fn from_makenv(makenv: &MakeEnv) -> anyhow::Result<Self> {
         let mut config = Self::default();
-        config.add_groups(makenv.get("USE_EXPAND"), UseExpandKind::Prefixed)?;
         config.add_groups(
+            "USE_EXPAND",
+            makenv.get("USE_EXPAND"),
+            UseExpandKind::Prefixed,
+        )?;
+        config.add_groups(
+            "USE_EXPAND_UNPREFIXED",
             makenv.get("USE_EXPAND_UNPREFIXED"),
             UseExpandKind::Unprefixed,
         )?;
@@ -30,32 +35,32 @@ impl UseExpandConfig {
             .get("USE_EXPAND_IMPLICIT")
             .into_iter()
             .flat_map(EnvValue::iter)
-            .map(Into::into)
-            .collect();
+            .map(|name| EnvVarName::new(name).context("invalid USE_EXPAND_IMPLICIT group"))
+            .collect::<anyhow::Result<_>>()?;
         Ok(config)
     }
 
     /// Resolves a USE group value into its corresponding USE flag.
-    pub fn resolve_flag(&self, group: &str, value: &UseFlag) -> anyhow::Result<UseFlag> {
+    pub fn resolve_flag(&self, group: &EnvVarName, value: &UseFlag) -> anyhow::Result<UseFlag> {
         match self.groups.get(group) {
-            Some(kind) => expand_value(*kind, group, value.as_str()),
+            Some(kind) => expand_value(*kind, group.as_str(), value.as_str()),
             None => bail!("unknown USE expansion group '{group}'"),
         }
     }
 
     /// Returns the USE expand group names.
-    pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.groups.keys().map(AsRef::as_ref)
+    pub fn names(&self) -> impl Iterator<Item = &EnvVarName> {
+        self.groups.keys()
     }
 
     /// Materializes all groups into expanded desired USE assignments.
     pub fn materialize(&self, makenv: &MakeEnv) -> anyhow::Result<Vec<(UseFlag, bool)>> {
         let mut assignments = Vec::new();
         for (name, kind) in &self.groups {
-            let Some(value) = makenv.get(name) else {
+            let Some(value) = makenv.get(name.as_str()) else {
                 continue;
             };
-            let flags = expand_env_value(value, *kind, name)
+            let flags = expand_env_value(value, *kind, name.as_str())
                 .with_context(|| format!("invalid USE expand value for {name}"))?;
             assignments.extend(flags);
         }
@@ -77,8 +82,8 @@ impl UseExpandConfig {
             };
 
             for value in values.iter() {
-                let flag =
-                    expand_value(*kind, name, value).with_context(|| format!("invalid {vars}"))?;
+                let flag = expand_value(*kind, name.as_str(), value)
+                    .with_context(|| format!("invalid {vars}"))?;
                 flags.insert(flag);
             }
         }
@@ -86,19 +91,25 @@ impl UseExpandConfig {
     }
 
     /// Adds the use expand groups from the given [`EnvValue`] to the config.
-    fn add_groups(&mut self, values: Option<&EnvValue>, kind: UseExpandKind) -> anyhow::Result<()> {
+    fn add_groups(
+        &mut self,
+        var: &str,
+        values: Option<&EnvValue>,
+        kind: UseExpandKind,
+    ) -> anyhow::Result<()> {
         let Some(values) = values else {
             return Ok(());
         };
 
         for group in values.iter() {
-            if let Some(existing) = self.groups.get(group) {
+            let name = EnvVarName::new(group).with_context(|| format!("invalid {var} group"))?;
+            if let Some(existing) = self.groups.get(&name) {
                 if *existing != kind {
-                    bail!("USE expansion group '{group}' is present in both USE_EXPAND namespaces");
+                    bail!("USE expansion group '{name}' is present in both USE_EXPAND namespaces");
                 }
                 continue;
             }
-            self.groups.insert(group.into(), kind);
+            self.groups.insert(name, kind);
         }
         Ok(())
     }

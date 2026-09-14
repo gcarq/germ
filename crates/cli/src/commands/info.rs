@@ -21,8 +21,8 @@ pub fn info(atom: Option<&Atom>, sysconf: &Arc<SysConf>) -> anyhow::Result<()> {
 
     let mut env = conf
         .makenv()
-        .iter()
-        .map(|(key, value)| (key, value.to_string()))
+        .vars()
+        .map(|(name, value)| (name.as_str(), value.to_string()))
         .collect::<Vec<_>>();
     env.sort_by(|a, b| a.0.cmp(b.0));
     for (key, value) in env {

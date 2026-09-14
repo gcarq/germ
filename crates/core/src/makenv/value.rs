@@ -13,30 +13,13 @@ static VAR_EXPAND_RE: LazyLock<Regex> =
 pub struct EnvValue(Vec<Box<str>>);
 
 impl EnvValue {
-    pub fn new<'a>(value: impl Into<&'a str>) -> Self {
-        Self(
-            value
-                .into()
-                .split_ascii_whitespace()
-                .map(Into::into)
-                .collect(),
-        )
-    }
-
-    /// Expands and returns a string by substituting variables from the given `context`.
-    /// The passed context must be in the original order.
-    /// TODO: Add env.d to context for expansion.
-    #[must_use = "this returns the expanded value as a new allocation"]
-    pub fn expand(&self, context: &[(Box<str>, EnvValue)]) -> anyhow::Result<Self> {
-        self.expand_with(|var| {
-            context
-                .iter()
-                .rev()
-                .find_map(|(ctx_var, ctx_value)| (var == ctx_var.as_ref()).then_some(ctx_value))
-        })
+    pub fn new(value: &str) -> Self {
+        Self(value.split_ascii_whitespace().map(Into::into).collect())
     }
 
     /// Expands and returns a string by substituting variables from the given `lookup` function.
+    ///
+    /// TODO: Add env.d to context for expansion.
     pub fn expand_with<'ctx, F>(&self, lookup: F) -> anyhow::Result<Self>
     where
         F: Fn(&str) -> Option<&'ctx EnvValue>,
@@ -100,16 +83,6 @@ impl EnvValue {
     }
 }
 
-impl IntoIterator for EnvValue {
-    type Item = Box<str>;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    /// Consumes self and returns an iter over the inner values.
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
 impl fmt::Display for EnvValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0.join(" "))
@@ -122,14 +95,18 @@ mod tests {
 
     #[test]
     fn test_env_value_expand() {
-        let context = vec![
-            ("VAR1".into(), EnvValue::new("value1")),
-            ("VAR2".into(), EnvValue::new("should not be used")),
-            ("VAR2".into(), EnvValue::new("value2")),
-        ];
+        let var1 = EnvValue::new("value1");
+        let var2 = EnvValue::new("value2");
         let value = EnvValue::new("${VAR1} $VAR2 ${VAR3}");
         assert_eq!(
-            value.expand(&context).unwrap().to_string(),
+            value
+                .expand_with(|name| match name {
+                    "VAR1" => Some(&var1),
+                    "VAR2" => Some(&var2),
+                    _ => None,
+                })
+                .unwrap()
+                .to_string(),
             "value1 value2 ${VAR3}"
         );
     }
@@ -140,11 +117,5 @@ mod tests {
         let mut child = EnvValue::new("blas -accessibility");
         child.inherit(&parent);
         assert_eq!(child.to_string(), "asm blas");
-    }
-
-    #[test]
-    fn test_env_value_display() {
-        let value = EnvValue::new("value1 value2");
-        assert_eq!(value.to_string(), "value1 value2");
     }
 }

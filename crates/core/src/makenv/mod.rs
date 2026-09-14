@@ -1,3 +1,4 @@
+mod name;
 mod stack;
 mod value;
 
@@ -5,9 +6,8 @@ use crate::files::content_from_path;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::UseExpandConfig;
 use crate::utils::{self, Inherit};
-use anyhow::{Context, bail};
+pub use name::EnvVarName;
 pub use stack::MakeEnvStack;
-use std::ops::Deref;
 use std::path::Path;
 pub use value::EnvValue;
 
@@ -32,36 +32,27 @@ const INCREMENTAL_VARS: [&str; 14] = [
 
 /// Holds all variable names that must be considered incremental.
 #[derive(Default)]
-struct IncrementalVars(FxHashSet<Box<str>>);
+struct IncrementalVars(FxHashSet<EnvVarName>);
 
 impl IncrementalVars {
     /// Collects incremental vars from effective USE expansion groups in `layers`.
-    pub fn from_makenv_layers(layers: &[&MakeEnv]) -> anyhow::Result<Self> {
+    fn from_layers(layers: &[&MakeEnv]) -> anyhow::Result<Self> {
         let provisional = MakeEnv::fold(layers, &Self::default())?;
         let expand = UseExpandConfig::from_makenv(&provisional)?;
-        Ok(Self::from(expand.names()))
-    }
-
-    /// Collects the given incremental variable `names`.
-    pub fn from<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
-        let mut vars = FxHashSet::default();
-        for name in names {
-            let mut value = EnvValue::new(name);
-            value.normalize();
-            vars.extend(value);
-        }
-        Self(vars)
+        Ok(Self(expand.names().cloned().collect()))
     }
 
     /// Returns `true` if the given `name` is an incremental variable.
-    fn contains(&self, name: &str) -> bool {
-        INCREMENTAL_VARS.contains(&name) || self.0.contains(name)
+    fn contains(&self, name: &EnvVarName) -> bool {
+        INCREMENTAL_VARS.contains(&name.as_str()) || self.0.contains(name)
     }
 }
 
-/// Holds env vars from either one or multiple folded make files.
+/// Holds the make variables of one or multiple folded make files.
 #[derive(Default, Clone)]
-pub struct MakeEnv(FxHashMap<Box<str>, EnvValue>);
+pub struct MakeEnv {
+    vars: FxHashMap<EnvVarName, EnvValue>,
+}
 
 impl MakeEnv {
     pub fn from_path(path: &Path, recursive: bool, optional: bool) -> anyhow::Result<Self> {
@@ -72,35 +63,36 @@ impl MakeEnv {
     pub fn from_content(content: &str) -> anyhow::Result<Self> {
         let mut vars = utils::shlex_split(content)?
             .into_iter()
-            .map(|(key, value)| {
-                if key
-                    .as_bytes()
-                    .first()
-                    .context("variable name cannot be empty")?
-                    .is_ascii_alphabetic()
-                {
-                    Ok((key.into_boxed_str(), EnvValue::new(value.as_str())))
-                } else {
-                    bail!("invalid variable name: {key}")
-                }
-            })
+            .map(|(key, value)| Ok((EnvVarName::new(key)?, EnvValue::new(value.as_str()))))
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         for i in 0..vars.len() {
-            vars[i].1 = vars[i].1.expand(&vars[..i])?;
+            vars[i].1 = vars[i].1.expand_with(|name| {
+                vars[..i]
+                    .iter()
+                    .rev()
+                    .find_map(|(candidate, value)| (name == candidate.as_str()).then_some(value))
+            })?;
         }
 
-        Ok(Self(vars.into_iter().collect()))
+        Ok(Self {
+            vars: vars.into_iter().collect(),
+        })
     }
 
-    /// Consumes self and returns the inner map.
-    pub fn into_inner(self) -> FxHashMap<Box<str>, EnvValue> {
-        self.0
+    /// Returns the [`EnvValue`] for the given `name`.
+    pub fn get(&self, name: &str) -> Option<&EnvValue> {
+        self.vars.get(name)
+    }
+
+    /// Returns an iterator over the name and value of all make variables.
+    pub fn vars(&self) -> impl Iterator<Item = (&EnvVarName, &EnvValue)> {
+        self.vars.iter()
     }
 
     /// Folds ordered layers using their effective USE expansion namespace.
     pub(crate) fn fold_with_use_expand(layers: &[&Self]) -> anyhow::Result<Self> {
-        let vars = IncrementalVars::from_makenv_layers(layers)?;
+        let vars = IncrementalVars::from_layers(layers)?;
         Self::fold(layers, &vars)
     }
 
@@ -115,7 +107,7 @@ impl MakeEnv {
 
     /// Expands local variable references using values from `parent`.
     fn expand_from(&mut self, parent: &MakeEnv) -> anyhow::Result<()> {
-        for value in self.0.values_mut() {
+        for value in self.vars.values_mut() {
             *value = value.expand_with(|var| parent.get(var))?;
         }
         Ok(())
@@ -125,24 +117,24 @@ impl MakeEnv {
     fn inherit_vars(&mut self, parent: &MakeEnv, vars: &IncrementalVars) -> anyhow::Result<()> {
         self.expand_from(parent)?;
 
-        for (key, parent_value) in parent.iter() {
-            match self.0.get_mut(key) {
-                Some(value) if vars.contains(key) => {
+        for (name, parent_value) in parent.vars() {
+            match self.vars.get_mut(name) {
+                Some(value) if vars.contains(name) => {
                     value.inherit(parent_value);
                 }
                 Some(_) => {}
                 None => {
                     let mut value = parent_value.clone();
-                    if vars.contains(key) {
+                    if vars.contains(name) {
                         value.normalize();
                     }
-                    self.0.insert(key.clone(), value);
+                    self.vars.insert(name.clone(), value);
                 }
             }
         }
 
-        for (key, value) in &mut self.0 {
-            if vars.contains(key) && !parent.contains_key(key) {
+        for (name, value) in &mut self.vars {
+            if vars.contains(name) && !parent.vars.contains_key(name) {
                 value.normalize();
             }
         }
@@ -153,14 +145,6 @@ impl MakeEnv {
 impl Inherit for MakeEnv {
     fn inherit_from(&mut self, parent: &MakeEnv) -> anyhow::Result<()> {
         self.inherit_vars(parent, &IncrementalVars::default())
-    }
-}
-
-impl Deref for MakeEnv {
-    type Target = FxHashMap<Box<str>, EnvValue>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -199,16 +183,29 @@ enable_year2038="no"
     }
 
     #[test]
-    fn test_makenv_expand_from() -> anyhow::Result<()> {
-        let parent = MakeEnv::from_content("USE=foo")?;
-        let mut child = MakeEnv::from_content("USE=\"${USE} -foo\"")?;
-        child.expand_from(&parent)?;
+    fn test_makenv_vars() {
+        let makenv = MakeEnv::from_content("ARCH=amd64 USE=foo").unwrap();
+        let mut vars = makenv
+            .vars()
+            .map(|(name, value)| (name.as_str(), value.to_string()))
+            .collect::<Vec<_>>();
+        vars.sort();
+        assert_eq!(
+            vars,
+            [("ARCH", "amd64".to_owned()), ("USE", "foo".to_owned())]
+        );
+    }
+
+    #[test]
+    fn test_makenv_expand_from() {
+        let parent = MakeEnv::from_content("USE=foo").unwrap();
+        let mut child = MakeEnv::from_content("USE=\"${USE} -foo\"").unwrap();
+        child.expand_from(&parent).unwrap();
 
         assert_eq!(
             child.get("USE").map(ToString::to_string),
             Some("foo -foo".into())
         );
-        Ok(())
     }
 
     #[test]

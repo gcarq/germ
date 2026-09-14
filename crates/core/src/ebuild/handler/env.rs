@@ -188,35 +188,29 @@ impl EbuildEnv {
         let bash_version = ebuild.eapi.supported_bash_version().to_owned();
 
         let mut env = makenv
-            .iter()
-            .filter_map(|(name, value)| {
-                Self::filter_var(name).then_some((name.to_string(), value.to_string()))
-            })
+            .vars()
+            .filter(|(name, _)| Self::filter_var(name.as_str()))
+            .map(|(name, value)| (name.as_str(), value.to_string()))
             .chain([
-                ("PORTAGE_ECLASS_LOCATIONS".to_owned(), repo_paths),
-                ("BASH_COMPAT".to_owned(), bash_version),
+                ("PORTAGE_ECLASS_LOCATIONS", repo_paths),
+                ("BASH_COMPAT", bash_version),
                 // Force invalid paths for bashrc and bash_env to avoid sourcing user files.
-                ("BASHRC".to_owned(), "/dev/null".to_owned()),
-                ("BASH_ENV".to_owned(), "/dev/null".to_owned()),
+                ("BASHRC", "/dev/null".to_owned()),
+                ("BASH_ENV", "/dev/null".to_owned()),
                 // TODO: add support for enabling debug mode
-                ("EBUILD_DEBUG".to_owned(), "0".to_owned()),
+                ("EBUILD_DEBUG", "0".to_owned()),
                 // Ebuild variables, see PMS 11.1
-                ("P".to_owned(), ebuild.cpv.p()),
-                ("PF".to_owned(), ebuild.cpv.pf()),
-                ("PN".to_owned(), ebuild.cpv.pn().to_owned()),
-                (
-                    "CATEGORY".to_owned(),
-                    ebuild.cpv.category().as_ref().to_owned(),
-                ),
-                ("PV".to_owned(), ebuild.cpv.pv()),
-                ("PR".to_owned(), ebuild.cpv.pr()),
-                ("PVR".to_owned(), ebuild.cpv.pvr()),
-                (
-                    "EBUILD".to_owned(),
-                    ebuild.path.to_str().unwrap().to_owned(),
-                ),
-                ("EBUILD_PHASE".to_owned(), phase.to_string()),
+                ("P", ebuild.cpv.p()),
+                ("PF", ebuild.cpv.pf()),
+                ("PN", ebuild.cpv.pn().to_owned()),
+                ("CATEGORY", ebuild.cpv.category().as_ref().to_owned()),
+                ("PV", ebuild.cpv.pv()),
+                ("PR", ebuild.cpv.pr()),
+                ("PVR", ebuild.cpv.pvr()),
+                ("EBUILD", ebuild.path.to_str().unwrap().to_owned()),
+                ("EBUILD_PHASE", phase.to_string()),
             ])
+            .map(|(name, value)| (name.to_owned(), value))
             .collect::<FxHashMap<String, String>>();
 
         if let Some(env_unset) = makenv.get("ENV_UNSET") {

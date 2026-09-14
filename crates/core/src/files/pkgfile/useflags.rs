@@ -1,6 +1,7 @@
 use super::{AtomPolicies, AtomPolicy};
 use crate::deps::atom::Atom;
 use crate::files::entry::{Entry, Precedence};
+use crate::makenv::EnvVarName;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::{UseExpandConfig, UseFlag};
 use crate::utils::Inherit;
@@ -47,7 +48,7 @@ impl Inherit for PackageUseRecords {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum PackageUseTarget {
     Flag(UseFlag),
-    Expand { group: Box<str>, value: UseFlag },
+    Expand { group: EnvVarName, value: UseFlag },
 }
 
 /// Represents a reset operation for USE flags, which can either reset all flags
@@ -55,7 +56,7 @@ enum PackageUseTarget {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum UseReset {
     All,
-    Group(Box<str>),
+    Group(EnvVarName),
 }
 
 impl UseReset {
@@ -66,7 +67,7 @@ impl UseReset {
                 PackageUseTarget::Expand {
                     group: target_group,
                     ..
-                } => group.as_ref() == target_group.as_ref(),
+                } => group == target_group,
                 _ => false,
             },
         }
@@ -117,13 +118,13 @@ impl AtomPolicy for UseSpec {
             bail!("invalid package.use definition");
         }
         let mut spec = Self::default();
-        let mut cur_group: Option<Box<str>> = None;
+        let mut cur_group: Option<EnvVarName> = None;
 
         for flag in value.split_whitespace() {
             if let Some(group) = flag.strip_suffix(':')
-                && is_expand_name(group)
+                && let Ok(group) = EnvVarName::new(group)
             {
-                cur_group = Some(group.into());
+                cur_group = Some(group);
                 continue;
             }
 
@@ -196,16 +197,6 @@ impl UseFlags {
     }
 }
 
-/// Checks if the given `name` is a valid package USE expansion group name.
-fn is_expand_name(name: &str) -> bool {
-    match name.as_bytes().split_first() {
-        Some((first, rest)) if first.is_ascii_alphabetic() => {
-            rest.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'_')
-        }
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,9 +208,9 @@ mod tests {
             Ok(Self::Flag(UseFlag::new(value)?))
         }
 
-        fn expand(group: impl Into<Box<str>>, value: impl Into<Box<str>>) -> anyhow::Result<Self> {
+        fn expand(group: &str, value: impl Into<Box<str>>) -> anyhow::Result<Self> {
             Ok(Self::Expand {
-                group: group.into(),
+                group: EnvVarName::new(group)?,
                 value: UseFlag::new(value)?,
             })
         }
@@ -326,7 +317,7 @@ mod tests {
         );
         assert!(
             spec.resets
-                .contains(&UseReset::Group("LLVM_TARGETS".into()))
+                .contains(&UseReset::Group(EnvVarName::new("LLVM_TARGETS")?))
         );
         Ok(())
     }
@@ -400,16 +391,6 @@ mod tests {
                 Precedence::Profile(0)
             )?)
         );
-        Ok(())
-    }
-
-    #[test]
-    fn test_resolve_rejects_overlapping_groups() -> anyhow::Result<()> {
-        let makenv = MakeEnv::from_content(
-            "USE_EXPAND=\"ARCH\"
-                USE_EXPAND_UNPREFIXED=\"ARCH\"",
-        )?;
-        assert!(UseExpandConfig::from_makenv(&makenv).is_err());
         Ok(())
     }
 

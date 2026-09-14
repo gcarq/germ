@@ -22,7 +22,7 @@ pub struct MakeEnvStack {
 impl MakeEnvStack {
     /// Expands global, profile, and user make config layers.
     pub fn new(global: MakeEnv, profile: MakeEnv, user: MakeEnv) -> anyhow::Result<Self> {
-        let vars = IncrementalVars::from_makenv_layers(&[&global, &profile, &user])?;
+        let vars = IncrementalVars::from_layers(&[&global, &profile, &user])?;
         let inherited = MakeEnv::fold(&[&global, &profile], &vars)?;
         let mut user = user;
         user.expand_from(&inherited)?;
