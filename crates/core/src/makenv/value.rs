@@ -10,11 +10,17 @@ static VAR_EXPAND_RE: LazyLock<Regex> =
 /// Represents a variable value in portage configuration files.
 /// It supports simple shell-like expansion in the form "${VAR}" or "$VAR".
 #[derive(Clone, Default)]
-pub struct EnvValue(Vec<Box<str>>);
+pub struct EnvValue(Box<str>);
 
 impl EnvValue {
     pub fn new(value: &str) -> Self {
-        Self(value.split_ascii_whitespace().map(Into::into).collect())
+        Self(
+            value
+                .split_ascii_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .into(),
+        )
     }
 
     /// Expands and returns a string by substituting variables from the given `lookup` function.
@@ -24,14 +30,12 @@ impl EnvValue {
     where
         F: Fn(&str) -> Option<&'ctx EnvValue>,
     {
-        if !self.0.iter().any(|value| value.contains('$')) {
+        if !self.0.contains('$') {
             return Ok(self.clone());
         }
 
-        let value = self.0.join(" ");
-        let mut new_value = value.clone();
-
-        for cap in VAR_EXPAND_RE.captures_iter(&value) {
+        let mut new_value = self.0.clone();
+        for cap in VAR_EXPAND_RE.captures_iter(&self.as_str()) {
             let cap = cap?;
             let var = cap
                 .name("var")
@@ -42,15 +46,15 @@ impl EnvValue {
                 .ok_or_else(|| anyhow!("variable expansion is missing an expression"))?
                 .as_str();
             if let Some(ctx_value) = lookup(var) {
-                new_value = new_value.replace(expr, &ctx_value.to_string());
+                new_value = new_value.replace(expr, ctx_value.as_str()).into();
             }
         }
-        Ok(Self::new(new_value.as_str()))
+        Ok(Self::new(&new_value))
     }
 
     /// Returns an iter over the inner values.
     pub fn iter(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().map(AsRef::as_ref)
+        self.0.split_ascii_whitespace()
     }
 
     /// Normalize using incremental semantics.
@@ -63,12 +67,16 @@ impl EnvValue {
         self.0 = Self::merge_values(parent.iter().chain(self.iter()));
     }
 
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     /// Merges the given iterator of values using incremental semantics.
     ///
     /// Incremental semantics means that `-*` clears all previous values
     /// while `-foo` clears previous values that match `foo`,
     /// however `-foo` is not retained in the final result.
-    fn merge_values<'a>(iter: impl Iterator<Item = &'a str>) -> Vec<Box<str>> {
+    fn merge_values<'a>(iter: impl Iterator<Item = &'a str>) -> Box<str> {
         let mut values: Vec<Box<str>> = Vec::new();
         for value in iter {
             if value == "-*" {
@@ -79,13 +87,13 @@ impl EnvValue {
                 values.push(value.into());
             }
         }
-        values
+        values.join(" ").into()
     }
 }
 
 impl fmt::Display for EnvValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0.join(" "))
+        f.write_str(self.as_str())
     }
 }
 
