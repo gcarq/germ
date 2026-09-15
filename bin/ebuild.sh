@@ -103,10 +103,10 @@ if [[ ${EBUILD_PHASE} == depend ]]; then
 		done
 
 		# Give a nicer error message in case someone is confused
-		adddeny() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME}" ; }
-		addpredict() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME}" ; }
-		addread() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME}" ; }
-		addwrite() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME}" ; }
+		adddeny() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME[0]}" ; }
+		addpredict() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME[0]}" ; }
+		addread() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME[0]}" ; }
+		addwrite() { die "External commands disallowed while sourcing ebuild: ${FUNCNAME[0]}" ; }
 
 		# Disallow any tampering
 		readonly SANDBOX_{ALLOW,ACTIVE,DENY,DEBUG,ON,PREDICT,READ,WRITE}
