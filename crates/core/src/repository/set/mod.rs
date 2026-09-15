@@ -705,8 +705,8 @@ mod tests {
     #[test]
     fn test_priority_order() -> anyhow::Result<()> {
         let reposet = repo_set([
-            RepoBuilder::new("fallback").repos_conf_property("priority", "10"),
-            RepoBuilder::new("preferred").repos_conf_property("priority", "-10"),
+            RepoBuilder::new("fallback").repos_conf_property("priority", "-10"),
+            RepoBuilder::new("preferred").repos_conf_property("priority", "10"),
         ])?;
 
         let names = reposet

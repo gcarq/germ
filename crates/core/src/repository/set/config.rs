@@ -4,8 +4,8 @@ use crate::utils;
 use anyhow::{Context, anyhow, bail};
 use ini::Ini;
 use log::{debug, warn};
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{cmp, fs};
 
 // List of properties in repos.conf that are currently not supported.
 const UNSUPPORTED_CONF_PROPERTIES: &[&str] = &["aliases", "eclass-overrides", "force"];
@@ -37,7 +37,7 @@ impl RepoSetConfig {
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
 
-        repo_confs.sort_unstable_by_key(|conf| conf.priority);
+        repo_confs.sort_by_key(|conf| cmp::Reverse(conf.priority));
 
         Ok(Self { repo_confs })
     }
@@ -209,8 +209,8 @@ mod tests {
         let config = RepoSetConfig::load(&repos_conf)?;
 
         assert_eq!(config.repo_confs.len(), 2);
-        assert_eq!(config.repo_confs[0].name.as_str(), "gentoo");
-        assert_eq!(config.repo_confs[1].name.as_str(), "guru");
+        assert_eq!(config.repo_confs[0].name.as_str(), "guru");
+        assert_eq!(config.repo_confs[1].name.as_str(), "gentoo");
         Ok(())
     }
 }
