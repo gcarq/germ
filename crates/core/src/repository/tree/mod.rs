@@ -207,23 +207,23 @@ impl Repository {
         &self,
         cpvs: Vec<CPV>,
     ) -> Result<Vec<PackageResult>, RepositoryError> {
-        let mut cached = Vec::with_capacity(cpvs.len());
+        let mut result = (0..cpvs.len()).map(|_| None).collect::<Vec<_>>();
         let mut missing = Vec::new();
 
-        for cpv in cpvs {
+        for (idx, cpv) in cpvs.into_iter().enumerate() {
             match self.metadata_cache.get(&cpv)? {
                 Some(metadata) => {
-                    cached.push(Ok(Package::new(cpv, self.name.clone(), metadata)));
+                    result[idx] = Some(Ok(Package::new(cpv, self.name.clone(), metadata)));
                 }
-                None => missing.push(cpv),
+                None => missing.push((cpv, idx)),
             }
         }
 
         let resolved = stream::iter(missing)
-            .map(|cpv| async move {
+            .map(|(cpv, idx)| async move {
                 match self.resolve_package(cpv).await {
-                    Ok(pkg) => Ok(Ok(pkg)),
-                    Err(error) => error.promote().map(Err),
+                    Ok(pkg) => Ok((idx, Ok(pkg))),
+                    Err(error) => error.promote().map(|error| (idx, Err(error))),
                 }
             })
             .buffer_unordered(self.sysconf.ebuild_jobs())
@@ -233,12 +233,20 @@ impl Repository {
         self.metadata_cache.insert_batch(
             resolved
                 .iter()
-                .filter_map(|result| result.as_ref().ok())
+                .filter_map(|(_, result)| result.as_ref().ok())
                 .map(|pkg| (pkg.cpv(), pkg.metadata())),
         )?;
 
-        cached.extend(resolved);
-        Ok(cached)
+        for (idx, package) in resolved {
+            result[idx] = Some(package);
+        }
+
+        result
+            .into_iter()
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| {
+                RepositoryError::Internal(anyhow!("package resolution omitted an input CPV"))
+            })
     }
 
     /// Collects all known eclasses in the repo.
@@ -412,6 +420,37 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(package.metadata(), &metadata);
+    }
+
+    #[tokio::test]
+    async fn test_repository_preserves_input_order() {
+        let repository = RepoBuilder::new("repo")
+            .ebuild("app-misc", "invalid-first", "1", "EAPI=6")
+            .ebuild("app-misc", "invalid-last", "1", "EAPI=abc")
+            .finalize()
+            .unwrap();
+        let invalid_first = cpv("app-misc", "invalid-first", "1");
+        let cached = cpv("app-misc", "cached", "1");
+        let invalid_last = cpv("app-misc", "invalid-last", "1");
+        repository
+            .metadata_cache
+            .insert_batch([(&cached, &PackageMetadata::default())])
+            .unwrap();
+
+        let resolved = repository
+            .resolve_packages(vec![
+                invalid_first.clone(),
+                cached.clone(),
+                invalid_last.clone(),
+            ])
+            .await
+            .unwrap();
+        let cpvs = resolved
+            .into_iter()
+            .map(|res| res.ok().map(|pkg| pkg.cpv().fqn().to_owned()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(cpvs, vec![None, Some(cached.fqn().to_owned()), None]);
     }
 
     #[test]

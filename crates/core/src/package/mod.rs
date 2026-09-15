@@ -74,7 +74,7 @@ impl PackageView for Package {
 
 impl fmt::Display for Package {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.cpv)
+        write!(f, "{}::{}", self.cpv, self.repo)
     }
 }
 
@@ -141,5 +141,17 @@ mod tests {
         );
         assert_package_view_matches_atoms(&package);
         assert_eq!(package.qualified_name(), "sys-devel/gcc");
+    }
+
+    #[test]
+    fn test_package_display() {
+        let package = Package::new(
+            cpv("dev-lang", "rust", "1.98.1"),
+            "gentoo".parse().unwrap(),
+            PackageMetadata {
+                ..Default::default()
+            },
+        );
+        assert_eq!(package.to_string(), "dev-lang/rust-1.98.1::gentoo");
     }
 }

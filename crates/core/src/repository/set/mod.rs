@@ -9,6 +9,7 @@ use super::RepoName;
 use super::tree::{Repository, RepositoryError};
 use crate::SysConf;
 use crate::deps::atom::Atom;
+use crate::package::PackageView;
 use crate::policy::pkgmask::RepositorySource;
 use crate::profile::Profile;
 use crate::repository::Arch;
@@ -21,7 +22,7 @@ use indexmap::IndexMap;
 use log::{debug, error, warn};
 use std::path::Path;
 use std::sync::Arc;
-use std::{fs, io};
+use std::{cmp::Ordering, fs, io};
 
 /// Resolves and handles all available [`Repository`] instances.
 ///
@@ -40,6 +41,7 @@ pub struct RepoSet {
 #[derive(Debug)]
 struct RepositoryEntry {
     repository: Option<Repository>,
+    priority: i32,
     sync_handler: Option<Box<dyn SyncHandler>>,
 }
 
@@ -73,8 +75,8 @@ impl RepoSet {
         Ok(set)
     }
 
-    /// Eagerly resolves and returns all packages that match the given `atom`.
-    /// TODO: Order the returned packages by version
+    /// Eagerly resolves and returns all packages that match the given `atom`,
+    /// ordered by desc version and repository priority.
     pub async fn find_packages(&self, atom: &Atom) -> Result<Vec<PackageResult>, RepoSetError> {
         let mut results = Vec::new();
 
@@ -84,13 +86,14 @@ impl RepoSet {
         };
 
         for repo in repos {
-            let name = repo.name().clone();
             results.extend(
                 repo.find_packages(atom)
                     .await
-                    .map_err(|err| RepoSetError::repo_failure(&name, err))?,
+                    .map_err(|err| RepoSetError::repo_failure(repo.name(), err))?,
             );
         }
+
+        results.sort_by(|left, right| self.compare_pkg_results(left, right));
         Ok(results)
     }
 
@@ -132,29 +135,25 @@ impl RepoSet {
 
     /// Returns an iterator over all available repos ordered by priority.
     pub fn iter(&self) -> impl Iterator<Item = &Repository> {
-        self.entries
-            .values()
-            .filter_map(|entry| entry.repository.as_ref())
+        self.entries.values().filter_map(|e| e.repository.as_ref())
     }
 
     /// Returns a mutable iterator over all available repos ordered by priority.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Repository> {
         self.entries
             .values_mut()
-            .filter_map(|entry| entry.repository.as_mut())
+            .filter_map(|e| e.repository.as_mut())
     }
 
     /// Returns an iterator that drains all available repos ordered by priority.
     pub fn drain(self) -> impl Iterator<Item = Repository> {
-        self.entries
-            .into_values()
-            .filter_map(|entry| entry.repository)
+        self.entries.into_values().filter_map(|e| e.repository)
     }
 
     pub fn len(&self) -> usize {
         self.entries
             .iter()
-            .filter(|(_, entry)| entry.repository.is_some())
+            .filter(|(_, e)| e.repository.is_some())
             .count()
     }
 
@@ -198,6 +197,20 @@ impl RepoSet {
         Ok(source)
     }
 
+    /// Compares the given [`PackageResult`] by version and repo priority.
+    fn compare_pkg_results(&self, left: &PackageResult, right: &PackageResult) -> Ordering {
+        match (left, right) {
+            (Ok(left), Ok(right)) => right.cpv().cmp(left.cpv()).then_with(|| {
+                let left_prio = self.entries.get(left.repo()).map_or(0, |e| e.priority);
+                let right_prio = self.entries.get(right.repo()).map_or(0, |e| e.priority);
+                right_prio.cmp(&left_prio)
+            }),
+            (Ok(_), Err(_)) => Ordering::Less,
+            (Err(_), Ok(_)) => Ordering::Greater,
+            (Err(_), Err(_)) => Ordering::Equal,
+        }
+    }
+
     /// Reloads all repository data from disk.
     fn reload_from_disk(&mut self) -> Result<(), RepoSetError> {
         let mut entries = IndexMap::default();
@@ -213,6 +226,7 @@ impl RepoSet {
                 config.name.clone(),
                 RepositoryEntry {
                     repository: None,
+                    priority: config.priority,
                     sync_handler,
                 },
             );
