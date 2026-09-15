@@ -153,7 +153,7 @@ impl MetadataCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::cpv;
+    use crate::test_support::{cpv, package_metadata};
 
     #[test]
     fn test_metadata_cache_get_missing_table() {
@@ -172,10 +172,7 @@ mod tests {
     fn test_metadata_cache_persists_metadata() {
         let temp = tempfile::tempdir().unwrap();
         let cpv = cpv("app-misc", "foo", "1");
-        let metadata = PackageMetadata {
-            description: "cached metadata".into(),
-            ..Default::default()
-        };
+        let metadata = package_metadata(&[("DESCRIPTION", "cached metadata")]);
 
         let cache = MetadataCache::new(temp.path());
         cache.insert_batch([(&cpv, &metadata)]).unwrap();
@@ -193,7 +190,7 @@ mod tests {
 
         let mut cache = MetadataCache::new(temp.path());
         cache
-            .insert_batch([(&cpv, &PackageMetadata::default())])
+            .insert_batch([(&cpv, &package_metadata(&[]))])
             .unwrap();
         cache.recreate().unwrap();
 
@@ -210,8 +207,8 @@ mod tests {
         let mut cache = MetadataCache::new(temp.path());
         cache
             .insert_batch([
-                (&known, &PackageMetadata::default()),
-                (&unknown, &PackageMetadata::default()),
+                (&known, &package_metadata(&[])),
+                (&unknown, &package_metadata(&[])),
             ])
             .unwrap();
         cache.retain([&known]).unwrap();
@@ -233,7 +230,7 @@ mod tests {
         let cache = MetadataCache::new(temp.path());
         let cpv = cpv("app-misc", "foo", "1");
         cache
-            .insert_batch([(&cpv, &PackageMetadata::default())])
+            .insert_batch([(&cpv, &package_metadata(&[]))])
             .unwrap();
         cache.remove(&cpv).unwrap();
 

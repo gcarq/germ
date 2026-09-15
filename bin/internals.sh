@@ -58,14 +58,12 @@ __send_metadata() {
     metadata_keys=(
         DEPEND RDEPEND SLOT SRC_URI RESTRICT HOMEPAGE LICENSE
         DESCRIPTION KEYWORDS INHERITED IUSE REQUIRED_USE PDEPEND BDEPEND
-        EAPI PROPERTIES DEFINED_PHASES IDEPEND INHERIT
+        EAPI PROPERTIES DEFINED_PHASES IDEPEND
     )
 
     if ! ___eapi_has_IDEPEND; then
         unset IDEPEND
     fi
-
-    INHERIT=${PORTAGE_EXPLICIT_INHERIT}
 
     # Send metadata as single-line KEY=value pairs
     for key in "${metadata_keys[@]}"; do

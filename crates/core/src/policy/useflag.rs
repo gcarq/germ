@@ -89,7 +89,7 @@ impl UsePolicy {
         stable_in_use: bool,
     ) -> anyhow::Result<bool> {
         let use_state = self.effective_for(pkg, stable_in_use);
-        let tree = pkg.metadata().required_use.view();
+        let tree = pkg.metadata().required_use().view();
         // TODO: This currently only checks the required USE flags to satisfy the expression,
         // inactive branches can contain unreferenced USE flags which might not be PMS compatible.
         try_all(tree.roots(), |n| {
@@ -105,7 +105,7 @@ impl UsePolicy {
     ) -> EffectiveUse<'a> {
         let available = pkg
             .metadata()
-            .iuse
+            .iuse()
             .iter()
             .map(IUseEntry::flag)
             .chain(self.iuse_implicit.iter())
@@ -141,7 +141,7 @@ impl UsePolicy {
             .or_else(|| self.base_use.state(flag))
             .or_else(|| {
                 pkg.metadata()
-                    .iuse
+                    .iuse()
                     .iter()
                     .find(|entry| entry.flag() == flag)
                     .and_then(|entry| entry.state().map(IUseState::as_bool))
@@ -307,8 +307,7 @@ mod tests {
     use crate::files::entry::Precedence;
     use crate::makenv::{MakeEnv, MakeEnvStack};
     use crate::package::Package;
-    use crate::package::metadata::PackageMetadata;
-    use crate::test_support::cpv;
+    use crate::test_support::{cpv, package_metadata};
 
     fn use_state(
         makenv: &str,
@@ -333,13 +332,7 @@ mod tests {
         let package = Package::new(
             cpv("dev-lang", "rust", "1.0"),
             "gentoo".parse()?,
-            PackageMetadata {
-                iuse: iuse
-                    .split_whitespace()
-                    .map(str::parse)
-                    .collect::<anyhow::Result<_>>()?,
-                ..Default::default()
-            },
+            package_metadata(&[("IUSE", iuse)]),
         );
         Ok(policy
             .effective_for(&package, false)

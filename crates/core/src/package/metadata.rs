@@ -1,259 +1,279 @@
 use crate::deps::atom::Atom;
-use crate::deps::{DepExpression, ExpressionKind};
+use crate::deps::{DepExpression, ExpressionItem, ExpressionKind};
 use crate::eapi::Eapi;
 use crate::keyword::Keyword;
 use crate::package::slot::PackageSlot;
 use crate::repository::Eclass;
 use crate::types::FxHashMap;
 use crate::useflag::{IUseEntry, UseFlag};
-use anyhow::{anyhow, bail};
 use rkyv::{Archive, Deserialize, Serialize};
+use std::borrow::Cow;
+use std::fmt;
 use std::str::FromStr;
-use std::{fmt, fs, io, path::Path};
 use thiserror::Error;
 
-/// Errors returned when constructing package metadata from ebuild output.
+/// Identifies metadata variable names.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum MetaVar {
+    Eapi,
+    Description,
+    Homepage,
+    SrcUri,
+    License,
+    Properties,
+    Keywords,
+    Inherited,
+    Restrict,
+    DefinedPhases,
+    IUse,
+    RequiredUse,
+    Slot,
+    Depend,
+    BDepend,
+    IDepend,
+    PDepend,
+    RDepend,
+}
+
+impl MetaVar {
+    /// All metadata variables, in the order they are read from a metadata source.
+    pub const ALL: [Self; 18] = [
+        Self::Eapi,
+        Self::Description,
+        Self::Homepage,
+        Self::SrcUri,
+        Self::License,
+        Self::Properties,
+        Self::Keywords,
+        Self::Inherited,
+        Self::Restrict,
+        Self::DefinedPhases,
+        Self::IUse,
+        Self::RequiredUse,
+        Self::Slot,
+        Self::Depend,
+        Self::BDepend,
+        Self::IDepend,
+        Self::PDepend,
+        Self::RDepend,
+    ];
+
+    /// Returns the name this variable is stored under in a metadata source.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Eapi => "EAPI",
+            Self::Description => "DESCRIPTION",
+            Self::Homepage => "HOMEPAGE",
+            Self::SrcUri => "SRC_URI",
+            Self::License => "LICENSE",
+            Self::Properties => "PROPERTIES",
+            Self::Keywords => "KEYWORDS",
+            Self::Inherited => "INHERITED",
+            Self::Restrict => "RESTRICT",
+            Self::DefinedPhases => "DEFINED_PHASES",
+            Self::IUse => "IUSE",
+            Self::RequiredUse => "REQUIRED_USE",
+            Self::Slot => "SLOT",
+            Self::Depend => "DEPEND",
+            Self::BDepend => "BDEPEND",
+            Self::IDepend => "IDEPEND",
+            Self::PDepend => "PDEPEND",
+            Self::RDepend => "RDEPEND",
+        }
+    }
+}
+
+impl fmt::Display for MetaVar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+/// Errors returned when parsing package metadata variables.
 #[derive(Debug, Error)]
 pub enum PackageMetadataError {
     #[error("required metadata variable '{0}' is empty")]
-    Empty(&'static str),
+    Empty(MetaVar),
 
     #[error("required metadata variable '{0}' is missing")]
-    Missing(&'static str),
+    Missing(MetaVar),
 
-    #[error("invalid value for metadata variable '{field}'")]
+    #[error("metadata EAPI '{found}' does not match the sourced EAPI '{expected}'")]
+    EapiMismatch { expected: Eapi, found: Eapi },
+
+    #[error("invalid value for metadata variable '{var}'")]
     Invalid {
-        field: &'static str,
+        var: MetaVar,
         #[source]
         source: anyhow::Error,
     },
 }
 
-/// Holds all metadata of a [`Package`].
+/// Holds validated metadata of a package.
 /// TODO: parse eclasses
-#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Clone, Default, Debug)]
+#[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Clone, Debug)]
 pub struct PackageMetadata {
-    pub eapi: Eapi,
-    pub description: String,
+    eapi: Eapi,
+    description: String,
     // TODO: should be parsed as DepExpression
-    pub homepage: Vec<String>,
+    homepage: Vec<String>,
     // TODO: should be parsed as DepExpression
-    pub src_uri: Vec<String>,
-    // TODO: enforce valid license identifiers
-    // and this should be parsed as DepExpression
-    pub license: Vec<String>,
-    pub properties: Vec<String>,
-    pub keywords: Vec<Keyword>,
-    pub inherit: Vec<String>,
+    src_uri: Vec<String>,
+    // TODO: enforce valid license identifiers and parse as DepExpression
+    license: Vec<String>,
+    properties: Vec<String>,
+    keywords: Vec<Keyword>,
+    inherit: Vec<String>,
     // TODO: use a string instead of UseFlag
-    pub restrict: DepExpression<UseFlag>,
-    pub defined_phases: Vec<String>,
-    pub iuse: Vec<IUseEntry>,
-    pub required_use: DepExpression<UseFlag>,
-    pub slot: PackageSlot,
-    pub depend: DepExpression<Atom>,
-    pub bdepend: DepExpression<Atom>,
-    pub idepend: DepExpression<Atom>,
-    pub pdepend: DepExpression<Atom>,
-    pub rdepend: DepExpression<Atom>,
-    pub eclasses: Vec<Eclass>,
+    restrict: DepExpression<UseFlag>,
+    defined_phases: Vec<String>,
+    iuse: Vec<IUseEntry>,
+    required_use: DepExpression<UseFlag>,
+    slot: PackageSlot,
+    depend: DepExpression<Atom>,
+    bdepend: DepExpression<Atom>,
+    idepend: DepExpression<Atom>,
+    pdepend: DepExpression<Atom>,
+    rdepend: DepExpression<Atom>,
+    eclasses: Vec<Eclass>,
 }
 
 impl PackageMetadata {
-    /// Builds package metadata from the given `map` and validates it against `eapi`.
+    pub const fn eapi(&self) -> Eapi {
+        self.eapi
+    }
+
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    pub fn homepage(&self) -> &[String] {
+        &self.homepage
+    }
+
+    pub fn src_uri(&self) -> &[String] {
+        &self.src_uri
+    }
+
+    pub fn license(&self) -> &[String] {
+        &self.license
+    }
+
+    pub fn properties(&self) -> &[String] {
+        &self.properties
+    }
+
+    pub fn keywords(&self) -> &[Keyword] {
+        &self.keywords
+    }
+
+    pub fn inherit(&self) -> &[String] {
+        &self.inherit
+    }
+
+    pub const fn restrict(&self) -> &DepExpression<UseFlag> {
+        &self.restrict
+    }
+
+    pub fn defined_phases(&self) -> &[String] {
+        &self.defined_phases
+    }
+
+    pub fn iuse(&self) -> &[IUseEntry] {
+        &self.iuse
+    }
+
+    pub const fn required_use(&self) -> &DepExpression<UseFlag> {
+        &self.required_use
+    }
+
+    pub const fn slot(&self) -> &PackageSlot {
+        &self.slot
+    }
+
+    pub const fn depend(&self) -> &DepExpression<Atom> {
+        &self.depend
+    }
+
+    pub const fn bdepend(&self) -> &DepExpression<Atom> {
+        &self.bdepend
+    }
+
+    pub const fn idepend(&self) -> &DepExpression<Atom> {
+        &self.idepend
+    }
+
+    pub const fn pdepend(&self) -> &DepExpression<Atom> {
+        &self.pdepend
+    }
+
+    pub const fn rdepend(&self) -> &DepExpression<Atom> {
+        &self.rdepend
+    }
+
+    pub fn eclasses(&self) -> &[Eclass] {
+        &self.eclasses
+    }
+
+    /// Builds validated metadata from the given raw `variables`.
     ///
     /// Returns a [`PackageMetadataError`] if a required variable is missing or invalid.
-    pub fn from_map(
-        map: &FxHashMap<&str, &str>,
-        eapi: &Eapi,
+    /// When `sourced_eapi` is given, the parsed EAPI must match it, see PMS 7.3.1.
+    pub(crate) fn from_raw(
+        vars: &RawPackageMetadata<'_>,
+        sourced_eapi: Option<Eapi>,
     ) -> Result<Self, PackageMetadataError> {
-        let metadata = Self::default()
-            .eapi(map.get("EAPI").copied().unwrap_or(""))
-            .map_err(|err| invalid("EAPI", err))?;
-
-        // The parsed EAPI must the sourced EAPI, see PMS 7.3.1
-        if eapi != &metadata.eapi {
-            return Err(invalid(
-                "EAPI",
-                anyhow!("expected '{eapi}', found '{}'", metadata.eapi),
-            ));
-        }
-
-        let metadata = metadata
-            .description(map.get("DESCRIPTION").copied())?
-            .homepage(map.get("HOMEPAGE").copied().unwrap_or(""))
-            .map_err(|err| invalid("HOMEPAGE", err))?
-            .src_uri(map.get("SRC_URI").copied().unwrap_or(""))
-            .map_err(|err| invalid("SRC_URI", err))?
-            .license(map.get("LICENSE").copied().unwrap_or(""))
-            .map_err(|err| invalid("LICENSE", err))?
-            .properties(map.get("PROPERTIES").copied().unwrap_or(""))
-            .map_err(|err| invalid("PROPERTIES", err))?
-            .keywords(map.get("KEYWORDS").copied().unwrap_or(""))
-            .map_err(|err| invalid("KEYWORDS", err))?
-            .inherit(map.get("INHERIT").copied().unwrap_or(""))
-            .map_err(|err| invalid("INHERIT", err))?
-            .restrict(map.get("RESTRICT").copied().unwrap_or(""))
-            .map_err(|err| invalid("RESTRICT", err))?
-            .defined_phases(map.get("DEFINED_PHASES").copied().unwrap_or(""))
-            .map_err(|err| invalid("DEFINED_PHASES", err))?
-            .iuse(map.get("IUSE").copied().unwrap_or(""))
-            .map_err(|err| invalid("IUSE", err))?
-            .required_use(map.get("REQUIRED_USE").copied().unwrap_or(""))
-            .map_err(|err| invalid("REQUIRED_USE", err))?
-            .slot(map.get("SLOT").copied())?
-            .depend(map.get("DEPEND").copied().unwrap_or(""))
-            .map_err(|err| invalid("DEPEND", err))?
-            .bdepend(map.get("BDEPEND").copied().unwrap_or(""))
-            .map_err(|err| invalid("BDEPEND", err))?
-            .idepend(map.get("IDEPEND").copied().unwrap_or(""))
-            .map_err(|err| invalid("IDEPEND", err))?
-            .pdepend(map.get("PDEPEND").copied().unwrap_or(""))
-            .map_err(|err| invalid("PDEPEND", err))?
-            .rdepend(map.get("RDEPEND").copied().unwrap_or(""))
-            .map_err(|err| invalid("RDEPEND", err))?;
-        Ok(metadata)
-    }
-
-    /// Builds [`PackageMetadata`] from the given VDB package `path`.
-    pub fn from_vdb_path(path: &Path) -> anyhow::Result<Self> {
-        fn read_meta(path: &Path) -> anyhow::Result<String> {
-            match fs::read_to_string(path) {
-                Ok(content) => Ok(content),
-                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(String::new()),
-                Err(e) => bail!("failed to read metadata from '{}': {e}", path.display()),
-            }
-        }
-
-        let metadata = Self::default()
-            .eapi(read_meta(&path.join("EAPI"))?.trim())?
-            .description(Some(read_meta(&path.join("DESCRIPTION"))?.trim()))?
-            .homepage(read_meta(&path.join("HOMEPAGE"))?.trim())?
-            .license(read_meta(&path.join("LICENSE"))?.trim())?
-            .properties(read_meta(&path.join("PROPERTIES"))?.trim())?
-            .keywords(read_meta(&path.join("KEYWORDS"))?.trim())?
-            .inherit(read_meta(&path.join("INHERIT"))?.trim())?
-            .restrict(read_meta(&path.join("RESTRICT"))?.trim())?
-            .defined_phases(read_meta(&path.join("DEFINED_PHASES"))?.trim())?
-            .iuse(read_meta(&path.join("IUSE"))?.trim())?
-            .required_use(read_meta(&path.join("REQUIRED_USE"))?.trim())?
-            .slot(Some(read_meta(&path.join("SLOT"))?.trim()))?
-            .depend(read_meta(&path.join("DEPEND"))?.trim())?;
-
-        metadata
-            .bdepend(read_meta(&path.join("BDEPEND"))?.trim())?
-            .idepend(read_meta(&path.join("IDEPEND"))?.trim())?
-            .pdepend(read_meta(&path.join("PDEPEND"))?.trim())?
-            .rdepend(read_meta(&path.join("RDEPEND"))?.trim())
-    }
-
-    pub fn eapi(mut self, value: &str) -> anyhow::Result<Self> {
-        self.eapi = match value.is_empty() {
-            true => Eapi::Zero,
-            false => value.parse()?,
+        let eapi = match optional(vars.get(MetaVar::Eapi)) {
+            "" => Eapi::Zero,
+            value => Eapi::new(value).map_err(|err| invalid(MetaVar::Eapi, err.into()))?,
         };
-        Ok(self)
-    }
 
-    pub fn description(mut self, value: Option<&str>) -> Result<Self, PackageMetadataError> {
-        let value = required("DESCRIPTION", value)?;
-        if value.is_empty() {
-            return Err(PackageMetadataError::Empty("DESCRIPTION"));
+        // The parsed EAPI must match the sourced EAPI, see PMS 7.3.1
+        if let Some(sourced_eapi) = sourced_eapi
+            && sourced_eapi != eapi
+        {
+            return Err(PackageMetadataError::EapiMismatch {
+                expected: sourced_eapi,
+                found: eapi,
+            });
         }
-        self.description = value.to_string();
-        Ok(self)
-    }
 
-    pub fn homepage(mut self, value: &str) -> anyhow::Result<Self> {
-        self.homepage = Self::parse_value(value)?;
-        Ok(self)
-    }
-
-    pub fn src_uri(mut self, value: &str) -> anyhow::Result<Self> {
-        self.src_uri = Self::parse_value(value)?;
-        Ok(self)
-    }
-
-    pub fn license(mut self, value: &str) -> anyhow::Result<Self> {
-        self.license = Self::parse_value(value)?;
-        Ok(self)
-    }
-
-    pub fn properties(mut self, value: &str) -> anyhow::Result<Self> {
-        self.properties = Self::parse_value(value)?;
-        Ok(self)
-    }
-
-    pub fn keywords(mut self, value: &str) -> anyhow::Result<Self> {
-        self.keywords = Self::parse_value(value)?;
-        Ok(self)
-    }
-
-    pub fn inherit(mut self, value: &str) -> anyhow::Result<Self> {
-        self.inherit = Self::parse_value(value)?;
-        Ok(self)
-    }
-
-    pub fn restrict(mut self, value: &str) -> anyhow::Result<Self> {
-        self.restrict = DepExpression::parse(self.eapi, ExpressionKind::Restrict, value)?;
-        Ok(self)
-    }
-
-    pub fn defined_phases(mut self, value: &str) -> anyhow::Result<Self> {
-        self.defined_phases = Self::parse_value(value)?;
-        Ok(self)
-    }
-
-    pub fn iuse(mut self, value: &str) -> anyhow::Result<Self> {
-        self.iuse = Self::parse_value(value)?;
-        Ok(self)
-    }
-
-    pub fn required_use(mut self, value: &str) -> anyhow::Result<Self> {
-        self.required_use = DepExpression::parse(self.eapi, ExpressionKind::RequiredUse, value)?;
-        Ok(self)
-    }
-
-    pub fn slot(mut self, value: Option<&str>) -> Result<Self, PackageMetadataError> {
-        let value = required("SLOT", value)?;
-        if value.is_empty() {
-            return Err(PackageMetadataError::Empty("SLOT"));
-        }
-        self.slot = value.parse().map_err(|err| invalid("SLOT", err))?;
-        Ok(self)
-    }
-
-    pub fn depend(mut self, value: &str) -> anyhow::Result<Self> {
-        self.depend = DepExpression::parse(self.eapi, ExpressionKind::Dependency, value)?;
-        Ok(self)
-    }
-
-    pub fn bdepend(mut self, value: &str) -> anyhow::Result<Self> {
-        if self.eapi.supports_bdepend() {
-            self.bdepend = DepExpression::parse(self.eapi, ExpressionKind::Dependency, value)?;
-        }
-        Ok(self)
-    }
-
-    pub fn idepend(mut self, value: &str) -> anyhow::Result<Self> {
-        if self.eapi.supports_idepend() {
-            self.idepend = DepExpression::parse(self.eapi, ExpressionKind::Dependency, value)?;
-        }
-        Ok(self)
-    }
-
-    pub fn pdepend(mut self, value: &str) -> anyhow::Result<Self> {
-        self.pdepend = DepExpression::parse(self.eapi, ExpressionKind::Dependency, value)?;
-        Ok(self)
-    }
-
-    pub fn rdepend(mut self, value: &str) -> anyhow::Result<Self> {
-        self.rdepend = DepExpression::parse(self.eapi, ExpressionKind::Dependency, value)?;
-        Ok(self)
-    }
-
-    fn parse_value<T: FromStr>(value: &str) -> Result<Vec<T>, T::Err> {
-        value.split_whitespace().map(str::parse::<T>).collect()
+        Ok(Self {
+            eapi,
+            description: vars.required(MetaVar::Description)?.to_owned(),
+            homepage: vars.words(MetaVar::Homepage)?,
+            src_uri: vars.words(MetaVar::SrcUri)?,
+            license: vars.words(MetaVar::License)?,
+            properties: vars.words(MetaVar::Properties)?,
+            keywords: vars.words(MetaVar::Keywords)?,
+            inherit: vars.words(MetaVar::Inherited)?,
+            restrict: vars.expression(eapi, ExpressionKind::Restrict, MetaVar::Restrict)?,
+            defined_phases: vars.words(MetaVar::DefinedPhases)?,
+            iuse: vars.words(MetaVar::IUse)?,
+            required_use: vars.expression(
+                eapi,
+                ExpressionKind::RequiredUse,
+                MetaVar::RequiredUse,
+            )?,
+            slot: vars
+                .required(MetaVar::Slot)?
+                .parse()
+                .map_err(|err| invalid(MetaVar::Slot, err))?,
+            depend: vars.expression(eapi, ExpressionKind::Dependency, MetaVar::Depend)?,
+            bdepend: eapi
+                .supports_bdepend()
+                .then(|| vars.expression(eapi, ExpressionKind::Dependency, MetaVar::BDepend))
+                .transpose()?
+                .unwrap_or_default(),
+            idepend: eapi
+                .supports_idepend()
+                .then(|| vars.expression(eapi, ExpressionKind::Dependency, MetaVar::IDepend))
+                .transpose()?
+                .unwrap_or_default(),
+            pdepend: vars.expression(eapi, ExpressionKind::Dependency, MetaVar::PDepend)?,
+            rdepend: vars.expression(eapi, ExpressionKind::Dependency, MetaVar::RDepend)?,
+            eclasses: Vec::new(),
+        })
     }
 }
 
@@ -266,7 +286,7 @@ impl fmt::Display for PackageMetadata {
         writeln!(f, "EAPI={}", self.eapi)?;
         writeln!(f, "HOMEPAGE={}", self.homepage.join(" "))?;
         writeln!(f, "IDEPEND={}", self.idepend)?;
-        writeln!(f, "INHERIT={}", self.inherit.join(" "))?;
+        writeln!(f, "INHERITED={}", self.inherit.join(" "))?;
         writeln!(
             f,
             "IUSE={}",
@@ -299,75 +319,138 @@ impl fmt::Display for PackageMetadata {
     }
 }
 
-/// Returns the required metadata value or an error if it is missing.
-fn required<'a>(
-    field: &'static str,
-    value: Option<&'a str>,
-) -> Result<&'a str, PackageMetadataError> {
-    value.ok_or(PackageMetadataError::Missing(field))
+/// Raw metadata variables collected from a package metadata source.
+#[derive(Debug)]
+pub(crate) struct RawPackageMetadata<'a> {
+    values: FxHashMap<Cow<'a, str>, Cow<'a, str>>,
 }
 
-/// Helper function to create an [`PackageMetadataError::Invalid`]`.
-const fn invalid(field: &'static str, source: anyhow::Error) -> PackageMetadataError {
-    PackageMetadataError::Invalid { field, source }
+impl<'a> RawPackageMetadata<'a> {
+    /// Returns the value stored for the given metadata `var`, if any.
+    fn get(&self, var: MetaVar) -> Option<&str> {
+        self.values.get(var.name()).map(AsRef::as_ref)
+    }
+
+    /// Returns the trimmed value of `var`, which must be present and non-empty.
+    fn required(&self, var: MetaVar) -> Result<&str, PackageMetadataError> {
+        let value = self
+            .get(var)
+            .ok_or(PackageMetadataError::Missing(var))?
+            .trim();
+        if value.is_empty() {
+            return Err(PackageMetadataError::Empty(var));
+        }
+        Ok(value)
+    }
+
+    /// Parses the value of `var` as a whitespace-separated list.
+    fn words<T>(&self, var: MetaVar) -> Result<Vec<T>, PackageMetadataError>
+    where
+        T: FromStr,
+        T::Err: Into<anyhow::Error>,
+    {
+        self.get(var)
+            .unwrap_or_default()
+            .split_whitespace()
+            .map(|value| T::from_str(value).map_err(|err| invalid(var, err.into())))
+            .collect()
+    }
+
+    /// Parses the value of `var` as a dependency expression of the given `kind`.
+    fn expression<T: ExpressionItem>(
+        &self,
+        eapi: Eapi,
+        kind: ExpressionKind,
+        var: MetaVar,
+    ) -> Result<DepExpression<T>, PackageMetadataError> {
+        DepExpression::parse(eapi, kind, optional(self.get(var))).map_err(|err| invalid(var, err))
+    }
+}
+
+impl<'a, K, V> FromIterator<(K, V)> for RawPackageMetadata<'a>
+where
+    K: Into<Cow<'a, str>>,
+    V: Into<Cow<'a, str>>,
+{
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
+        let values = iter
+            .into_iter()
+            .map(|(key, value)| (key.into(), value.into()))
+            .collect();
+        Self { values }
+    }
+}
+
+fn optional(value: Option<&str>) -> &str {
+    value.unwrap_or_default().trim()
+}
+
+const fn invalid(var: MetaVar, source: anyhow::Error) -> PackageMetadataError {
+    PackageMetadataError::Invalid { var, source }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn metadata_map() -> FxHashMap<&'static str, &'static str> {
-        [
-            "DEPEND=",
-            "RDEPEND= \tpython_single_target_python3_11? ( \t\t\tdev-lang/python:3.11 \t\t)",
-            "SLOT=0/0",
-            "SRC_URI=https://localhost/a https://localhost/b",
-            "RESTRICT=",
-            "HOMEPAGE=https://localhost",
-            "LICENSE=GPL-3",
-            "PROPERTIES=live test_network",
-            "DESCRIPTION=Example python package",
-            "KEYWORDS=amd64 ~arm64",
-            "INHERITED= toolchain-funcs bash-completion-r1 eapi9-ver edo linux-info systemd",
-            "IUSE=examples +ipv6",
-            "REQUIRED_USE=^^ ( python_single_target_python3_11 )",
-            "PDEPEND=",
-            "BDEPEND= \tpython_single_target_python3_11? ( \t dev-python/setuptools \t )",
-            "EAPI=8",
-            "DEFINED_PHASES=",
-            "IDEPEND=dev-python/installer",
-            "INHERIT= bash-completion-r1 eapi9-ver edo linux-info systemd",
-        ]
-        .iter()
-        .filter_map(|d| d.split_once('='))
-        .collect()
+    fn raw(variables: &[(&'static str, &'static str)]) -> RawPackageMetadata<'static> {
+        variables.iter().copied().collect()
+    }
+
+    fn raw_metadata() -> RawPackageMetadata<'static> {
+        raw(&[
+            ("DEPEND", ""),
+            (
+                "RDEPEND",
+                " \tpython_single_target_python3_11? ( \t\t\tdev-lang/python:3.11 \t\t)",
+            ),
+            ("SLOT", "0/0"),
+            ("SRC_URI", "https://localhost/a https://localhost/b"),
+            ("RESTRICT", ""),
+            ("HOMEPAGE", "https://localhost"),
+            ("LICENSE", "GPL-3"),
+            ("PROPERTIES", "live test_network"),
+            ("DESCRIPTION", "Example python package"),
+            ("KEYWORDS", "amd64 ~arm64"),
+            ("IUSE", "examples +ipv6"),
+            ("REQUIRED_USE", "^^ ( python_single_target_python3_11 )"),
+            ("PDEPEND", ""),
+            (
+                "BDEPEND",
+                " \tpython_single_target_python3_11? ( \t dev-python/setuptools \t )",
+            ),
+            ("EAPI", "8"),
+            ("DEFINED_PHASES", ""),
+            ("IDEPEND", "dev-python/installer"),
+            (
+                "INHERITED",
+                " bash-completion-r1 eapi9-ver edo linux-info systemd",
+            ),
+        ])
     }
 
     #[test]
-    fn test_metadata_from_map_ok() {
-        let metadata = PackageMetadata::from_map(&metadata_map(), &Eapi::Eight);
-        assert!(metadata.is_ok(), "metadata should be parsed successfully");
-
-        let metadata = metadata.unwrap();
-        assert_eq!(metadata.eapi, Eapi::Eight);
-        assert_eq!(metadata.description, "Example python package");
-        assert_eq!(metadata.homepage, vec!["https://localhost"]);
+    fn test_metadata_from_raw_ok() {
+        let metadata = PackageMetadata::from_raw(&raw_metadata(), None).unwrap();
+        assert_eq!(metadata.eapi(), Eapi::Eight);
+        assert_eq!(metadata.description(), "Example python package");
+        assert_eq!(metadata.homepage(), ["https://localhost"]);
         assert_eq!(
-            metadata.src_uri,
-            vec!["https://localhost/a", "https://localhost/b"]
+            metadata.src_uri(),
+            ["https://localhost/a", "https://localhost/b"]
         );
-        assert_eq!(metadata.license, vec!["GPL-3"]);
-        assert_eq!(metadata.properties, vec!["live", "test_network"]);
+        assert_eq!(metadata.license(), ["GPL-3"]);
+        assert_eq!(metadata.properties(), ["live", "test_network"]);
         assert_eq!(
-            metadata.keywords,
-            vec![
+            metadata.keywords(),
+            &[
                 Keyword::Stable("amd64".parse().unwrap()),
                 Keyword::Testing("arm64".parse().unwrap())
             ]
         );
         assert_eq!(
-            metadata.inherit,
-            vec![
+            metadata.inherit(),
+            &[
                 "bash-completion-r1",
                 "eapi9-ver",
                 "edo",
@@ -375,80 +458,111 @@ mod tests {
                 "systemd"
             ]
         );
-        assert_eq!(metadata.restrict.to_string(), "");
-        assert_eq!(metadata.defined_phases.len(), 0);
+        assert_eq!(metadata.restrict().to_string(), "");
+        assert!(metadata.defined_phases().is_empty());
         assert_eq!(
-            metadata.iuse,
-            vec!["examples".parse().unwrap(), "+ipv6".parse().unwrap()]
+            metadata.iuse(),
+            &["examples".parse().unwrap(), "+ipv6".parse().unwrap()]
         );
         assert_eq!(
-            metadata.required_use.to_string(),
+            metadata.required_use().to_string(),
             "^^ ( python_single_target_python3_11 )"
         );
-        assert_eq!(metadata.slot, "0/0".parse().unwrap());
-        assert_eq!(metadata.depend.to_string(), "");
+        assert_eq!(metadata.slot().to_string(), "0/0");
+        assert_eq!(metadata.depend().to_string(), "");
         assert_eq!(
-            metadata.bdepend.to_string(),
+            metadata.bdepend().to_string(),
             "python_single_target_python3_11? ( dev-python/setuptools )"
         );
-        assert_eq!(metadata.idepend.to_string(), "dev-python/installer");
-        assert_eq!(metadata.pdepend.to_string(), "");
+        assert_eq!(metadata.idepend().to_string(), "dev-python/installer");
+        assert_eq!(metadata.pdepend().to_string(), "");
         assert_eq!(
-            metadata.rdepend.to_string(),
+            metadata.rdepend().to_string(),
             "python_single_target_python3_11? ( dev-lang/python:3.11 )"
         );
     }
 
     #[test]
-    fn test_metadata_from_map_eapi_7() {
-        let mut data = metadata_map();
-        data.insert("EAPI", "7");
-        data.insert("IDEPEND", "(");
-        let metadata = PackageMetadata::from_map(&data, &Eapi::Seven).unwrap();
-
-        assert_eq!(
-            metadata.bdepend.to_string(),
-            "python_single_target_python3_11? ( dev-python/setuptools )"
-        );
-        assert_eq!(metadata.idepend.to_string(), "");
-    }
-
-    #[test]
-    fn test_metadata_from_map_missing() {
-        let mut data = metadata_map();
-        data.remove("SLOT");
+    fn test_metadata_from_raw_eapi_mismatch() {
+        let variables = raw(&[
+            ("EAPI", "7"),
+            ("DESCRIPTION", "Test package"),
+            ("SLOT", "0"),
+        ]);
         assert!(matches!(
-            PackageMetadata::from_map(&data, &Eapi::Eight).unwrap_err(),
-            PackageMetadataError::Missing("SLOT")
+            PackageMetadata::from_raw(&variables, Some(Eapi::Eight)),
+            Err(PackageMetadataError::EapiMismatch {
+                expected: Eapi::Eight,
+                found: Eapi::Seven
+            })
         ));
     }
 
     #[test]
-    fn test_metadata_from_map_empty() {
-        for field in ["DESCRIPTION", "SLOT"] {
-            let mut data = metadata_map();
-            data.insert(field, "");
-            assert!(matches!(
-                PackageMetadata::from_map(&data, &Eapi::Eight).unwrap_err(),
-                PackageMetadataError::Empty(name) if name == field
-            ));
-        }
+    fn test_metadata_raw_eapi_7() {
+        let variables = raw(&[
+            ("EAPI", "7"),
+            ("DESCRIPTION", "Test package"),
+            ("SLOT", "0"),
+            ("BDEPEND", "dev-python/setuptools"),
+            ("IDEPEND", "("),
+        ]);
+        let metadata = PackageMetadata::from_raw(&variables, None).unwrap();
+        assert_eq!(metadata.bdepend().to_string(), "dev-python/setuptools");
+        assert_eq!(metadata.idepend().to_string(), "");
     }
 
     #[test]
-    fn test_metadata_from_map_invalid() {
-        let mut data = metadata_map();
-        data.insert("SLOT", "invalid/slot/value");
+    fn test_metadata_raw_missing() {
+        let variables = raw(&[("EAPI", "8"), ("DESCRIPTION", "Test package")]);
         assert!(matches!(
-            PackageMetadata::from_map(&data, &Eapi::Eight).unwrap_err(),
-            PackageMetadataError::Invalid { field: "SLOT", .. }
+            PackageMetadata::from_raw(&variables, None),
+            Err(PackageMetadataError::Missing(MetaVar::Slot))
+        ));
+    }
+
+    #[test]
+    fn test_metadata_raw_empty() {
+        let description = raw(&[("EAPI", "8"), ("DESCRIPTION", ""), ("SLOT", "0")]);
+        assert!(matches!(
+            PackageMetadata::from_raw(&description, None),
+            Err(PackageMetadataError::Empty(MetaVar::Description))
         ));
 
-        let mut data = metadata_map();
-        data.insert("IUSE", "foo?");
+        let slot = raw(&[("EAPI", "8"), ("DESCRIPTION", "Test package"), ("SLOT", "")]);
         assert!(matches!(
-            PackageMetadata::from_map(&data, &Eapi::Eight).unwrap_err(),
-            PackageMetadataError::Invalid { field: "IUSE", .. }
+            PackageMetadata::from_raw(&slot, None),
+            Err(PackageMetadataError::Empty(MetaVar::Slot))
+        ));
+    }
+
+    #[test]
+    fn test_metadata_raw_invalid() {
+        let slot = raw(&[
+            ("EAPI", "8"),
+            ("DESCRIPTION", "Test package"),
+            ("SLOT", "invalid/slot/value"),
+        ]);
+        assert!(matches!(
+            PackageMetadata::from_raw(&slot, None),
+            Err(PackageMetadataError::Invalid {
+                var: MetaVar::Slot,
+                ..
+            })
+        ));
+
+        let iuse = raw(&[
+            ("EAPI", "8"),
+            ("DESCRIPTION", "Test package"),
+            ("SLOT", "0"),
+            ("IUSE", "foo?"),
+        ]);
+        assert!(matches!(
+            PackageMetadata::from_raw(&iuse, None),
+            Err(PackageMetadataError::Invalid {
+                var: MetaVar::IUse,
+                ..
+            })
         ));
     }
 }

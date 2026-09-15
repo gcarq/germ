@@ -23,24 +23,9 @@ pub enum Eapi {
 }
 
 impl Eapi {
-    /// Creates a new instance from the EAPI file at the given `path`.
-    ///
-    /// Returns `Eapi::default()` if no eapi file exists.
-    pub fn from_eapi_file(path: &Path) -> anyhow::Result<Self> {
-        if !path.exists() {
-            return Ok(Eapi::default());
-        }
-        Ok(fs::read_to_string(path)
-            .with_context(|| format!("unable to read eapi file {}", path.display()))?
-            .lines()
-            .next()
-            .ok_or_else(|| anyhow!("empty eapi file {}", path.display()))?
-            .parse()?)
-    }
-
     /// Creates a new instance from the given EAPI `version`.
     /// Returns an [`EapiError`] if the version is not recognized.
-    fn new(version: &str) -> Result<Self, EapiError> {
+    pub fn new(version: &str) -> Result<Self, EapiError> {
         let version = match version {
             "0" => Self::Zero,
             "1" => Self::One,
@@ -55,6 +40,21 @@ impl Eapi {
             value => return Err(EapiError::Unrecognized(value.to_owned())),
         };
         Ok(version)
+    }
+
+    /// Creates a new instance from the EAPI file at the given `path`.
+    ///
+    /// Returns `Eapi::default()` if no eapi file exists.
+    pub fn from_eapi_file(path: &Path) -> anyhow::Result<Self> {
+        if !path.exists() {
+            return Ok(Eapi::default());
+        }
+        Ok(fs::read_to_string(path)
+            .with_context(|| format!("unable to read eapi file {}", path.display()))?
+            .lines()
+            .next()
+            .ok_or_else(|| anyhow!("empty eapi file {}", path.display()))?
+            .parse()?)
     }
 
     /// Returns `true` if this EAPI is supported for ebuilds.

@@ -53,7 +53,7 @@ fn print_useflags(package: &InstalledPackage) {
     let mut enabled = Vec::new();
     let mut disabled = Vec::new();
 
-    for entry in &package.metadata().iuse {
+    for entry in package.metadata().iuse() {
         let flag = entry.flag();
         if package.enabled_useflags().contains(flag) {
             enabled.push(flag);

@@ -32,7 +32,7 @@ pub trait PackageView {
         // TODO: evaluate `:=` and `:SLOT=` against the slot/sub-slot saved from
         // `DEPEND` match when resolving runtime dependencies.
         if let Some(slot) = atom.slot()
-            && !slot.matches(&self.metadata().slot)
+            && !slot.matches(self.metadata().slot())
         {
             return false;
         }
@@ -84,7 +84,7 @@ impl fmt::Display for Package {
 mod tests {
     use super::*;
 
-    use crate::test_support::cpv;
+    use crate::test_support::{cpv, package_metadata};
     use crate::vdb::package::InstalledPackage;
 
     fn assert_package_view_matches_atoms<P: PackageView>(package: &P) {
@@ -122,14 +122,7 @@ mod tests {
     fn test_package_view_matches_repository_package() {
         let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
         let repo = "gentoo".parse().unwrap();
-        let package = Package::new(
-            cpv,
-            repo,
-            PackageMetadata {
-                slot: "15".parse().unwrap(),
-                ..Default::default()
-            },
-        );
+        let package = Package::new(cpv, repo, package_metadata(&[("SLOT", "15")]));
         assert_package_view_matches_atoms(&package);
         assert_eq!(package.qualified_name(), "sys-devel/gcc");
     }
@@ -139,10 +132,7 @@ mod tests {
         let package = InstalledPackage::from_parts(
             cpv("sys-devel", "gcc", "15.2.1_p20251122-r1"),
             "gentoo".parse().unwrap(),
-            PackageMetadata {
-                slot: "15".parse().unwrap(),
-                ..Default::default()
-            },
+            package_metadata(&[("SLOT", "15")]),
             Vec::default(),
         );
         assert_package_view_matches_atoms(&package);
@@ -154,9 +144,7 @@ mod tests {
         let package = Package::new(
             cpv("dev-lang", "rust", "1.98.1"),
             "gentoo".parse().unwrap(),
-            PackageMetadata {
-                ..Default::default()
-            },
+            package_metadata(&[]),
         );
         assert_eq!(package.to_string(), "dev-lang/rust-1.98.1::gentoo");
     }

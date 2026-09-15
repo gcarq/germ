@@ -99,9 +99,8 @@ mod tests {
     use super::*;
     use crate::files::entry::Precedence;
     use crate::package::Package;
-    use crate::package::metadata::PackageMetadata;
     use crate::repository::RepoName;
-    use crate::test_support::cpv;
+    use crate::test_support::{cpv, package_metadata};
 
     #[test]
     fn test_is_masked() -> anyhow::Result<()> {
@@ -125,22 +124,22 @@ mod tests {
         let rust_unmasked = Package::new(
             cpv("dev-lang", "rust", "1.50-r2"),
             repo.clone(),
-            PackageMetadata::default(),
+            package_metadata(&[]),
         );
         let rust_masked = Package::new(
             cpv("dev-lang", "rust", "1.60-r1"),
             repo.clone(),
-            PackageMetadata::default(),
+            package_metadata(&[]),
         );
         let vim = Package::new(
             cpv("app-editors", "vim", "8.2"),
             repo.clone(),
-            PackageMetadata::default(),
+            package_metadata(&[]),
         );
         let nano = Package::new(
             cpv("app-editors", "nano", "5.0"),
             repo,
-            PackageMetadata::default(),
+            package_metadata(&[]),
         );
 
         assert!(!masks.is_masked(&rust_unmasked));

@@ -38,7 +38,7 @@ impl EffectiveKeywords {
 
     /// Evaluates whether the given [`PackageView`] is accepted for the effective keywords.
     pub fn evaluate<P: PackageView>(&self, pkg: &P) -> KeywordEvalResult {
-        if !self.keywords_accepted(pkg, &pkg.metadata().keywords) {
+        if !self.keywords_accepted(pkg, pkg.metadata().keywords()) {
             return KeywordEvalResult::new(false, false);
         }
 
@@ -48,7 +48,7 @@ impl EffectiveKeywords {
         //             being prevented due to the KEYWORDS setting.
         let testing_only = pkg
             .metadata()
-            .keywords
+            .keywords()
             .iter()
             .map(|keyword| match keyword {
                 Keyword::Stable(arch) => Keyword::Testing(arch.clone()),
@@ -151,8 +151,7 @@ mod tests {
     use super::*;
     use crate::files::entry::Precedence;
     use crate::package::Package;
-    use crate::package::metadata::PackageMetadata;
-    use crate::test_support::cpv;
+    use crate::test_support::{cpv, package_metadata};
     use crate::utils::Inherit;
     use crate::vdb::package::InstalledPackage;
 
@@ -171,14 +170,10 @@ mod tests {
         Package::new(
             cpv("dev-lang", "rust", "1.0"),
             "gentoo".parse().unwrap(),
-            PackageMetadata {
-                keywords: keywords
-                    .into_iter()
-                    .map(str::parse)
-                    .collect::<anyhow::Result<_>>()
-                    .unwrap(),
-                ..Default::default()
-            },
+            package_metadata(&[(
+                "KEYWORDS",
+                &keywords.into_iter().collect::<Vec<_>>().join(" "),
+            )]),
         )
     }
 
@@ -300,10 +295,7 @@ mod tests {
         let pkg = InstalledPackage::from_parts(
             cpv("dev-lang", "rust", "1.0"),
             "gentoo".parse().unwrap(),
-            PackageMetadata {
-                keywords: vec!["amd64".parse().unwrap()],
-                ..Default::default()
-            },
+            package_metadata(&[("KEYWORDS", "amd64")]),
             Vec::default(),
         );
         assert_eq!(policy.evaluate(&pkg), KeywordEvalResult::new(true, true));

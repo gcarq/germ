@@ -6,9 +6,8 @@ use crate::ebuild::handler::error::MetadataGenerationError;
 use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
 use crate::makenv::MakeEnv;
 use crate::package::cpv::CPV;
-use crate::package::metadata::PackageMetadata;
+use crate::package::metadata::{PackageMetadata, RawPackageMetadata};
 use crate::repository::Repository;
-use crate::types::FxHashMap;
 use crate::utils::is_blank_or_comment;
 
 use anyhow::anyhow;
@@ -90,15 +89,15 @@ impl<'r> Ebuild<'r> {
         let handler = EbuildPhaseHandler::new(self, EbuildPhase::Depend, &MakeEnv::default())?;
 
         let data = handler.spawn().await?;
-        let data = data
+        let vars = data
             .iter()
             .map(|line| match line.split_once('=') {
-                Some((key, value)) => Ok((key.trim(), value.trim())),
+                Some((key, value)) => Ok((key.trim(), value)),
                 None => Err(anyhow!("invalid metadata line: {line}")),
             })
-            .collect::<Result<FxHashMap<_, _>, _>>();
+            .collect::<anyhow::Result<RawPackageMetadata<'_>>>()?;
 
-        Ok(PackageMetadata::from_map(&data?, &self.eapi)?)
+        Ok(PackageMetadata::from_raw(&vars, Some(self.eapi))?)
     }
 
     /// Parses the EAPI from the ebuild file at the given `path`.
