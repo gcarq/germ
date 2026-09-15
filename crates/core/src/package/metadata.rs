@@ -320,7 +320,7 @@ mod tests {
         [
             "DEPEND=",
             "RDEPEND= \tpython_single_target_python3_11? ( \t\t\tdev-lang/python:3.11 \t\t)",
-            "SLOT=0",
+            "SLOT=0/0",
             "SRC_URI=https://localhost/a https://localhost/b",
             "RESTRICT=",
             "HOMEPAGE=https://localhost",
@@ -385,7 +385,7 @@ mod tests {
             metadata.required_use.to_string(),
             "^^ ( python_single_target_python3_11 )"
         );
-        assert_eq!(metadata.slot, PackageSlot::Eq("0".into()));
+        assert_eq!(metadata.slot, "0/0".parse().unwrap());
         assert_eq!(metadata.depend.to_string(), "");
         assert_eq!(
             metadata.bdepend.to_string(),

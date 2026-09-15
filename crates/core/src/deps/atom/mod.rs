@@ -1,11 +1,15 @@
+mod constraints;
+
+pub use constraints::SlotConstraint;
+
 use crate::grammar::{CATEGORY, PACKAGE, REPOSITORY, REVISION, VERSION, VERSION_SUFFIXES};
 use crate::package::cpv::CPV;
 use crate::package::names::{CatName, PkgName};
-use crate::package::slot::PackageSlot;
-use crate::package::version::{PackageVersion, matches_wildcard};
+use crate::package::version::PackageVersion;
 use crate::repository::RepoName;
 use crate::useflag::UseDep;
 use anyhow::{Context, anyhow, bail};
+use constraints::VersionConstraint;
 use fancy_regex::{Captures, Regex};
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt::{self, Write};
@@ -56,7 +60,7 @@ static ATOM_RE: LazyLock<Regex> = LazyLock::new(|| {
 )]
 pub struct Atom {
     kind: AtomKind,
-    slot: Option<PackageSlot>,
+    slot: Option<SlotConstraint>,
     repo: Option<RepoName>,
     use_deps: Vec<UseDep>,
 }
@@ -109,7 +113,7 @@ impl Atom {
     }
 
     /// Returns the slot restriction, if any.
-    pub const fn slot(&self) -> Option<&PackageSlot> {
+    pub const fn slot(&self) -> Option<&SlotConstraint> {
         self.slot.as_ref()
     }
 
@@ -309,62 +313,6 @@ impl Default for AtomKind {
             category: None,
             package: None,
         }
-    }
-}
-
-/// Defines how a versioned [`Atom`] matches a [`PackageVersion`].
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-enum VersionConstraint {
-    Equal(PackageVersion),
-    EqualWildcard(PackageVersion),
-    Approximate(PackageVersion),
-    Greater(PackageVersion),
-    GreaterEqual(PackageVersion),
-    Less(PackageVersion),
-    LessEqual(PackageVersion),
-}
-
-impl VersionConstraint {
-    /// Returns `true` if the given `candidate` version matches.
-    fn matches(&self, candidate: &PackageVersion) -> bool {
-        match self {
-            Self::Equal(version) => candidate == version,
-            Self::EqualWildcard(version) => matches_wildcard(version, candidate),
-            Self::Approximate(version) => candidate.matches_approximate(version),
-            Self::Greater(version) => candidate > version,
-            Self::GreaterEqual(version) => candidate >= version,
-            Self::Less(version) => candidate < version,
-            Self::LessEqual(version) => candidate <= version,
-        }
-    }
-
-    /// Returns the operator as `&str`.
-    const fn operator(&self) -> &str {
-        match self {
-            Self::Equal(_) | Self::EqualWildcard(_) => "=",
-            Self::Approximate(_) => "~",
-            Self::Greater(_) => ">",
-            Self::GreaterEqual(_) => ">=",
-            Self::Less(_) => "<",
-            Self::LessEqual(_) => "<=",
-        }
-    }
-
-    /// Returns the inner [`PackageVersion`].
-    const fn version(&self) -> &PackageVersion {
-        match self {
-            Self::Equal(version)
-            | Self::EqualWildcard(version)
-            | Self::Approximate(version)
-            | Self::Greater(version)
-            | Self::GreaterEqual(version)
-            | Self::Less(version)
-            | Self::LessEqual(version) => version,
-        }
-    }
-
-    const fn is_wildcard(&self) -> bool {
-        matches!(self, Self::EqualWildcard(_))
     }
 }
 

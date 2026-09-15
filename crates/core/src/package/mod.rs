@@ -29,8 +29,10 @@ pub trait PackageView {
         {
             return false;
         }
+        // TODO: evaluate `:=` and `:SLOT=` against the slot/sub-slot saved from
+        // `DEPEND` match when resolving runtime dependencies.
         if let Some(slot) = atom.slot()
-            && slot != &self.metadata().slot
+            && !slot.matches(&self.metadata().slot)
         {
             return false;
         }
@@ -81,7 +83,7 @@ impl fmt::Display for Package {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::package::slot::PackageSlot;
+
     use crate::test_support::cpv;
     use crate::vdb::package::InstalledPackage;
 
@@ -92,7 +94,10 @@ mod tests {
             "=sys-devel/gcc-15*",
             "sys-devel/gcc:15",
             "sys-devel/gcc:15=",
+            "sys-devel/gcc:15/15",
+            "sys-devel/gcc:15/15=",
             "sys-devel/gcc:*",
+            "sys-devel/gcc:=",
         ] {
             let atom = Atom::new(atom).unwrap();
             assert!(package.matches_atom(&atom), "{atom} should match");
@@ -106,6 +111,7 @@ mod tests {
             "sys-devel/gcc:14",
             "sys-devel/gcc:14=",
             "sys-devel/gcc:15/0",
+            "sys-devel/gcc:15/0=",
         ] {
             let atom = Atom::new(atom).unwrap();
             assert!(!package.matches_atom(&atom), "{atom} shouldn't match");
@@ -120,7 +126,7 @@ mod tests {
             cpv,
             repo,
             PackageMetadata {
-                slot: PackageSlot::Eq("15".into()),
+                slot: "15".parse().unwrap(),
                 ..Default::default()
             },
         );
@@ -134,7 +140,7 @@ mod tests {
             cpv("sys-devel", "gcc", "15.2.1_p20251122-r1"),
             "gentoo".parse().unwrap(),
             PackageMetadata {
-                slot: PackageSlot::Eq("15".into()),
+                slot: "15".parse().unwrap(),
                 ..Default::default()
             },
             Vec::default(),
