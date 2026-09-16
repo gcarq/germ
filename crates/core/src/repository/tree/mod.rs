@@ -223,30 +223,29 @@ impl Repository {
             .map(|(cpv, idx)| async move {
                 match self.resolve_package(cpv).await {
                     Ok(pkg) => Ok((idx, Ok(pkg))),
-                    Err(error) => error.promote().map(|error| (idx, Err(error))),
+                    Err(err) => err.promote().map(|err| (idx, Err(err))),
                 }
             })
             .buffer_unordered(self.sysconf.ebuild_jobs())
             .try_collect::<Vec<_>>()
             .await?;
 
-        self.metadata_cache.insert_batch(
-            resolved
-                .iter()
-                .filter_map(|(_, result)| result.as_ref().ok())
-                .map(|pkg| (pkg.cpv(), pkg.metadata())),
-        )?;
-
-        for (idx, package) in resolved {
-            result[idx] = Some(package);
+        if !resolved.is_empty() {
+            self.metadata_cache.insert_batch(
+                resolved
+                    .iter()
+                    .filter_map(|(_, res)| res.as_ref().ok())
+                    .map(|pkg| (pkg.cpv(), pkg.metadata())),
+            )?;
+            for (idx, pkg) in resolved {
+                result[idx] = Some(pkg);
+            }
         }
 
         result
             .into_iter()
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| {
-                RepositoryError::Internal(anyhow!("package resolution omitted an input CPV"))
-            })
+            .collect::<Option<_>>()
+            .ok_or_else(|| RepositoryError::Internal(anyhow!("package resolution omitted an CPV")))
     }
 
     /// Collects all known eclasses in the repo.
