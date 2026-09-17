@@ -8,7 +8,7 @@ use self::sync::{SyncHandler, build_sync_handler};
 use super::RepoName;
 use super::tree::{Repository, RepositoryError};
 use crate::SysConf;
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::package::PackageView;
 use crate::policy::pkgmask::RepositorySource;
 use crate::profile::Profile;

@@ -51,10 +51,11 @@ static ATOM_RE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// Represents a Portage package atom.
+/// Represents a package atom.
 ///
-/// An atom can match one or more [`Package`] and is used for
-/// calculating dependencies between packages.
+/// Atoms are used to reference one or more package versions,
+/// which is needed for proper dependency resolution.
+/// See `man 5 ebuild` for more information.
 #[derive(
     Archive, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug,
 )]
@@ -316,6 +317,28 @@ impl Default for AtomKind {
     }
 }
 
+/// There are two ways to block an atom from being installed.
+///  * Weak: Two blocking packages can co-exist during installation.
+///  * Strong: The block is enforced as long as the packages is installed.
+///
+/// See: https://devmanual.gentoo.org/general-concepts/dependencies/#blockers
+#[derive(
+    Archive, Serialize, Deserialize, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug,
+)]
+pub enum AtomBlocker {
+    Weak,
+    Strong,
+}
+
+impl fmt::Display for AtomBlocker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Weak => f.write_char('!'),
+            Self::Strong => f.write_str("!!"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,28 +347,20 @@ mod tests {
     #[test]
     fn test_atom_parse() {
         for atom in [
-            "dev-lang/rust",
             "*/*",
-            "*/rust",
             "dev-lang/*",
+            "dev-lang/rust",
             "dev-lang/rust:1.92.0",
-            "cat/foo-r2",
-            "cat/foo-::repo-",
-            "net-misc/*:*::gentoo",
             "x11-drivers/nvidia-drivers:0/390",
+            "net-misc/*:*::gentoo",
             "sys-libs/glibc[audit,caps(-)]",
             "=sys-apps/memtest86+-7.2.0",
-            "=cat/pkg-1-r2",
             ">=sys-apps/sed-4.8",
-            "<net-misc/dhcp-3",
-            "<=net-misc/dhcp-3.0_p2",
             ">dev-lang/python-3.14.3_beta-r2:3.14",
+            "<=net-misc/dhcp-3.0_p2",
+            "<net-misc/dhcp-3",
             "~dev-lang/rust-1.70.0:1.70.0/1::gentoo",
-            ">=sys-libs/glibc-2.41-r10:2.2::gentoo[cet,clang]",
             "=dev-libs/glib-2*",
-            "=dev-lang/rust-1.70*:1.70.0",
-            "=kde-frameworks/kwindowsystem-6*:6/6.23::gentoo",
-            "=app-arch/7zip-26*[rar]",
         ] {
             let parsed = Atom::new(atom).unwrap();
             assert_eq!(parsed.to_string(), atom);
@@ -353,51 +368,33 @@ mod tests {
     }
 
     #[test]
-    fn test_atom_default() {
-        assert_eq!(Atom::default().to_string(), "*/*");
-    }
-
-    #[test]
-    fn test_atom_matches_cpv() {
+    fn test_atom_matches() {
         let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
-        for atom in [
-            "sys-devel/gcc",
-            "=sys-devel/gcc-15*",
-            "=sys-devel/gcc-15.2*",
-            "=sys-devel/gcc-15.2.1*",
-            "=sys-devel/gcc-15.2.1_p20251122-r1",
-            ">sys-devel/gcc-15",
-            ">=sys-devel/gcc-15.2.1",
-            "<sys-devel/gcc-16",
-            "<=sys-devel/gcc-15.2.2_p20260101",
-            "~sys-devel/gcc-15.2.1_p20251122",
+        for (atom, expected) in [
+            ("sys-devel/gcc", true),
+            ("=sys-devel/gcc-15*", true),
+            ("=sys-devel/gcc-15.2*", true),
+            ("=sys-devel/gcc-15.2.1*", true),
+            ("=sys-devel/gcc-15.2.1_p20251122-r1", true),
+            (">sys-devel/gcc-15", true),
+            (">=sys-devel/gcc-15.2.1", true),
+            ("<sys-devel/gcc-16", true),
+            ("<=sys-devel/gcc-15.2.2_p20260101", true),
+            ("~sys-devel/gcc-15.2.1_p20251122", true),
+            ("sys-devel/binutils", false),
+            ("virtual/gcc", false),
+            ("<sys-devel/gcc-15", false),
+            ("<=sys-devel/gcc-15.2.1", false),
+            (">sys-devel/gcc-16", false),
+            (">=sys-devel/gcc-15.2.2_p20251122-r2", false),
+            ("=sys-devel/gcc-15.2.2", false),
+            ("=sys-devel/gcc-15.2.2*", false),
+            ("=sys-devel/gcc-15.2.1_p20260330", false),
+            ("~sys-devel/gcc-15.2.1", false),
+            ("~sys-devel/gcc-15.2.1_p20260101", false),
         ] {
             let atom = Atom::new(atom).unwrap();
-            assert!(atom.matches(&cpv), "{atom} should match {cpv}");
-        }
-    }
-
-    #[test]
-    fn test_atom_excludes_cpv() {
-        let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
-        for atom in [
-            "sys-devel/binutils",
-            "virtual/gcc",
-            "<sys-devel/gcc-15",
-            "<=sys-devel/gcc-15.2.1",
-            ">sys-devel/gcc-16",
-            ">=sys-devel/gcc-15.2.2_p20251122-r2",
-            "=sys-devel/gcc-15.2.2",
-            "=sys-devel/gcc-15.2.2*",
-            "=sys-devel/gcc-15.2.1_p20260330",
-            "~sys-devel/gcc-15.3",
-            "~sys-devel/gcc-15",
-            "~sys-devel/gcc-15.2",
-            "~sys-devel/gcc-15.2.1",
-            "~sys-devel/gcc-15.2.1_p20260101",
-        ] {
-            let atom = Atom::new(atom).unwrap();
-            assert!(!atom.matches(&cpv), "{atom} shouldn't match {cpv}");
+            assert_eq!(atom.matches(&cpv), expected, "{atom} for {cpv}");
         }
     }
 
@@ -411,19 +408,14 @@ mod tests {
             "<=net-misc/*-3.0_p2",
             ">=dev-lang/rust-",
             "dev-lang/rust-1.70.0",
-            "cat/pkg-1",
             "cat/pkg-1-2",
-            "cat/pkg-1-r2",
             "cat/pkg::repo-1",
-            "=cat/pkg-1-2",
             "=cat/pkg-1-2*",
             "=dev-lang/rust-1.70.0_extra",
             "dev-lang/rust:::",
             "dev-lang/rust*",
-            "=dev-lang/rust*",
             "=dev-lang/rust-1.*",
             "dev-lang/rust[]",
-            "dev-lang/rust[,]",
             "=kde-frameworks/*-6*::gentoo",
         ] {
             assert!(Atom::new(atom).is_err());

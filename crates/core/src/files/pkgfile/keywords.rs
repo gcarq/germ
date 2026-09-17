@@ -1,7 +1,7 @@
 use std::{mem, path::Path};
 
 use super::{AtomPolicies, AtomPolicy};
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::files::entry::{Entry, EntryValue, Precedence};
 use crate::keyword::KeywordSelector;
 use crate::utils::Inherit;

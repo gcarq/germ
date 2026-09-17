@@ -42,8 +42,6 @@ pub enum Expression<'a, T: ExpressionItem> {
         negated: bool,
         nodes: ExpressionNodes<'a, T>,
     },
-    Not(ExpressionNode<'a, T>),
-    Forbidden(ExpressionNode<'a, T>),
 }
 
 impl<T: ExpressionItem> fmt::Display for Expression<'_, T> {
@@ -62,8 +60,6 @@ impl<T: ExpressionItem> fmt::Display for Expression<'_, T> {
                 true => write!(f, "!{flag}? ( {nodes} )"),
                 false => write!(f, "{flag}? ( {nodes} )"),
             },
-            Expression::Not(node) => write!(f, "!{node}"),
-            Expression::Forbidden(node) => write!(f, "!!{node}"),
         }
     }
 }
@@ -96,8 +92,6 @@ impl<'a, T: ExpressionItem> ExpressionNode<'a, T> {
                 negated: *negated,
                 nodes: ExpressionNodes::new(self.tree, nodes),
             },
-            ArenaEntry::Not(node) => Expression::Not(Self::new(self.tree, *node)),
-            ArenaEntry::Forbidden(node) => Expression::Forbidden(Self::new(self.tree, *node)),
         }
     }
 
@@ -163,13 +157,20 @@ impl<T: ExpressionItem> ExpressionArena<T> {
 #[cfg(test)]
 mod tests {
     use super::super::parser::ExpressionParser;
-    use crate::useflag::UseFlag;
+    use crate::deps::{AtomDep, RequiredUseFlag};
 
     #[test]
-    fn test_display_nested() {
+    fn test_display() {
         let input = "|| ( cli gui ) gui? ( ^^ ( X wayland ) X? ( ?? ( gles2 opengl ) !minimal? ( || ( vulkan vaapi ) ) ) )";
-        let arena = ExpressionParser::<UseFlag>::parse(input).unwrap();
+        let arena = ExpressionParser::<RequiredUseFlag>::parse(input).unwrap();
+        assert_eq!(arena.view().to_string(), input);
 
+        let input = "!foo !bar? ( !baz )";
+        let arena = ExpressionParser::<RequiredUseFlag>::parse(input).unwrap();
+        assert_eq!(arena.view().to_string(), input);
+
+        let input = "!!cat/pkg !cat/other";
+        let arena = ExpressionParser::<AtomDep>::parse(input).unwrap();
         assert_eq!(arena.view().to_string(), input);
     }
 }

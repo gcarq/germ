@@ -12,10 +12,13 @@ pub use layout::{Layout, LayoutError};
 pub use package::{PackageResolutionError, PackageResult};
 pub use profiles::{Arch, Arches, ProfileError};
 
-use self::package::CPVIndex;
+use self::package::discovery::{
+    resolve_from_category_path, resolve_from_pkg_path, resolve_from_repo_path,
+};
+use self::package::{CPVIndex, cache::MetadataCache};
 use self::profiles::ProfileDescriptions;
 use crate::SysConf;
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::eapi::Eapi;
 use crate::ebuild::Ebuild;
 use crate::files::{PackageEntries, entry::Precedence};
@@ -23,10 +26,6 @@ use crate::package::PackageView;
 use crate::package::names::CatName;
 use crate::package::{Package, cpv::CPV};
 use crate::repository::RepoName;
-use crate::repository::tree::package::cache::MetadataCache;
-use crate::repository::tree::package::discovery::{
-    resolve_from_category_path, resolve_from_pkg_path, resolve_from_repo_path,
-};
 use crate::types::FxHashSet;
 use crate::utils::{Inherit, is_blank_or_comment};
 use anyhow::{Context, anyhow};

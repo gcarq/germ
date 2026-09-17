@@ -4,11 +4,10 @@ pub mod names;
 pub mod slot;
 pub mod version;
 
-use crate::deps::atom::Atom;
-use crate::package::cpv::CPV;
 use crate::repository::RepoName;
+use crate::{atom::Atom, package::cpv::CPV};
 use metadata::PackageMetadata;
-use std::fmt;
+use std::{fmt, hash};
 
 /// Provides a trait for [`Package`] and [`InstalledPackage`] used for common operations
 /// like comparison and atom matching.
@@ -74,6 +73,21 @@ impl PackageView for Package {
     }
 }
 
+impl Eq for Package {}
+
+impl PartialEq for Package {
+    fn eq(&self, other: &Self) -> bool {
+        self.cpv == other.cpv && self.repo == other.repo
+    }
+}
+
+impl hash::Hash for Package {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.cpv.hash(state);
+        self.repo.hash(state);
+    }
+}
+
 impl fmt::Display for Package {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}::{}", self.cpv, self.repo)
@@ -119,24 +133,26 @@ mod tests {
     }
 
     #[test]
-    fn test_package_view_matches_repository_package() {
+    fn test_package_view_matches() {
         let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
-        let repo = "gentoo".parse().unwrap();
-        let package = Package::new(cpv, repo, package_metadata(&[("SLOT", "15")]));
-        assert_package_view_matches_atoms(&package);
-        assert_eq!(package.qualified_name(), "sys-devel/gcc");
-    }
+        let repo: RepoName = "gentoo".parse().unwrap();
 
-    #[test]
-    fn test_package_view_matches_installed_package() {
-        let package = InstalledPackage::from_parts(
-            cpv("sys-devel", "gcc", "15.2.1_p20251122-r1"),
-            "gentoo".parse().unwrap(),
+        let package = Package::new(
+            cpv.clone(),
+            repo.clone(),
             package_metadata(&[("SLOT", "15")]),
-            Vec::default(),
         );
         assert_package_view_matches_atoms(&package);
         assert_eq!(package.qualified_name(), "sys-devel/gcc");
+
+        let installed = InstalledPackage::from_parts(
+            cpv,
+            repo,
+            package_metadata(&[("SLOT", "15")]),
+            Vec::default(),
+        );
+        assert_package_view_matches_atoms(&installed);
+        assert_eq!(installed.qualified_name(), "sys-devel/gcc");
     }
 
     #[test]

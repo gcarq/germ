@@ -1,6 +1,6 @@
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::package::cpv::CPV;
 use crate::package::names::{CatName, PkgName};
 use crate::types::{FxHashMap, FxHashSet};

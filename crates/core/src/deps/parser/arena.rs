@@ -22,9 +22,6 @@ pub enum ArenaEntry<T: ExpressionItem> {
         negated: bool,
         nodes: Range<u32>,
     },
-
-    Not(ExpressionId),
-    Forbidden(ExpressionId),
 }
 
 impl<T: ExpressionItem> ArenaEntry<T> {
@@ -36,8 +33,6 @@ impl<T: ExpressionItem> ArenaEntry<T> {
             Self::ExactlyOneOf(_) => "exactly-one-of",
             Self::AtMostOneOf(_) => "at-most-one-of",
             Self::Use { .. } => "USE-conditional",
-            Self::Not(_) => "negation",
-            Self::Forbidden(_) => "strong-blocker",
         }
     }
 }
@@ -125,23 +120,12 @@ impl<T: ExpressionItem> ExpressionArena<T> {
         }
 
         match expression {
-            ArenaEntry::Item(_) | ArenaEntry::Forbidden(_) => Ok(()),
+            ArenaEntry::Item(_) => Ok(()),
             ArenaEntry::AllOf(nodes)
             | ArenaEntry::AnyOf(nodes)
             | ArenaEntry::ExactlyOneOf(nodes)
             | ArenaEntry::AtMostOneOf(nodes)
             | ArenaEntry::Use { nodes, .. } => self.validate_range(nodes, kind),
-            ArenaEntry::Not(node) => self.validate_negation(*node, kind),
-        }
-    }
-
-    fn validate_negation(&self, node: ExpressionId, kind: ExpressionKind) -> anyhow::Result<()> {
-        match self.get_expression(&node) {
-            ArenaEntry::Item(_) => match kind {
-                ExpressionKind::Dependency | ExpressionKind::RequiredUse => Ok(()),
-                _ => bail!("negation is not valid in {kind} expressions"),
-            },
-            _ => bail!("negation must apply to an item"),
         }
     }
 }

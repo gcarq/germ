@@ -1,5 +1,5 @@
 use super::{AtomPolicies, AtomPolicy};
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::files::entry::{Entry, Precedence};
 use crate::makenv::EnvVarName;
 use crate::types::{FxHashMap, FxHashSet};

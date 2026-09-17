@@ -12,7 +12,7 @@ use crate::commands::install::install;
 use anyhow::Context;
 use clap::Subcommand;
 use germ_core::SysConf;
-use germ_core::deps::atom::Atom;
+use germ_core::atom::Atom;
 use germ_core::repository::RepoSet;
 
 #[derive(Subcommand)]

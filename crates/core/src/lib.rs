@@ -1,5 +1,6 @@
 #![cfg_attr(test, allow(clippy::similar_names))]
 
+pub mod atom;
 pub mod conf;
 pub mod consts;
 pub mod deps;
@@ -13,6 +14,7 @@ pub mod package;
 pub mod policy;
 mod profile;
 pub mod repository;
+pub mod resolver;
 pub mod useflag;
 pub use conf::system::SysConf;
 #[cfg(test)]

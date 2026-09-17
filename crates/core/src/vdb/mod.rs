@@ -1,6 +1,6 @@
 pub mod package;
 
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::grammar::{PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
 use crate::package::names::CatName;
 use crate::package::version::PackageVersion;
@@ -46,8 +46,17 @@ impl Vdb {
         })
     }
 
+    /// Returns `true` if a package that matches `atom` is installed.
+    pub fn is_installed(&mut self, atom: &Atom) -> anyhow::Result<bool> {
+        self.find_by_atom(atom)
+            .map(|mut iter| iter.next().is_some())
+    }
+
     /// Returns all packages matching the given `atom`.
-    pub fn find_by_atom(&mut self, atom: &Atom) -> anyhow::Result<Vec<&InstalledPackage>> {
+    pub fn find_by_atom<'a, 'atom>(
+        &'a mut self,
+        atom: &'atom Atom,
+    ) -> anyhow::Result<impl Iterator<Item = &'a InstalledPackage> + use<'a, 'atom>> {
         match atom.category() {
             Some(cat) => {
                 self.load_from_category(cat)
@@ -63,9 +72,7 @@ impl Vdb {
             Some(cat) => Either::Left(self.packages.get(cat).into_iter().flatten()),
             None => Either::Right(self.packages.values().flatten()),
         };
-        Ok(iter
-            .filter(|pkg| pkg.matches_atom(atom))
-            .collect::<Vec<_>>())
+        Ok(iter.filter(|pkg| pkg.matches_atom(atom)))
     }
 
     /// Resolves all installed packages from the VDB root path.
@@ -209,11 +216,9 @@ mod tests {
             ("*/foo", vec!["dev-libs/foo-1", "app-editors/foo-3"]),
         ];
         for (atom, expected) in tests {
-            let packages = vdb.find_by_atom(&Atom::new(atom).unwrap()).unwrap();
-            let actual = packages
-                .iter()
-                .map(|package| package.cpv().fqn())
-                .collect::<Vec<_>>();
+            let atom = Atom::new(atom).unwrap();
+            let pkgs = vdb.find_by_atom(&atom).unwrap();
+            let actual = pkgs.map(|pkg| pkg.cpv().fqn()).collect::<Vec<_>>();
             assert_eq!(actual, expected);
         }
     }
@@ -223,10 +228,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut vdb = Vdb::from_path(temp.path().to_path_buf()).unwrap();
 
-        let packages = vdb
-            .find_by_atom(&Atom::new("dev-libs/foo").unwrap())
-            .unwrap();
-        assert!(packages.is_empty());
+        assert!(
+            vdb.find_by_atom(&Atom::new("dev-libs/foo").unwrap())
+                .unwrap()
+                .next()
+                .is_none()
+        );
     }
 
     #[test]
@@ -235,7 +242,8 @@ mod tests {
         fs::create_dir_all(temp.path().join("dev-libs").join("foo-1")).unwrap();
         let mut vdb = Vdb::from_path(temp.path().to_path_buf()).unwrap();
 
-        let result = vdb.find_by_atom(&Atom::new("dev-libs/foo").unwrap());
+        let atom = Atom::new("dev-libs/foo").unwrap();
+        let result = vdb.find_by_atom(&atom);
         assert!(result.is_err());
     }
 }

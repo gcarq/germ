@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use crate::deps::ExpressionItem;
 use crate::deps::expression::{Expression, ExpressionNodes, ExpressionTree};
 use crate::useflag::UseFlag;
-use TestExpression::{AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Forbidden, Item, Not, Use};
+use TestExpression::{AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Item, Use};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum TestExpression<T> {
@@ -17,8 +17,6 @@ pub enum TestExpression<T> {
         negated: bool,
         nodes: Vec<Self>,
     },
-    Not(Box<Self>),
-    Forbidden(Box<Self>),
 }
 
 /// Asserts the given `tree` against `expected`.
@@ -61,12 +59,6 @@ fn assert_expression<T: ExpressionItem + Debug + PartialEq>(
             assert_eq!(actual_flag, expected_flag);
             assert_eq!(actual_negated, *expected_negated);
             assert_nodes(actual_nodes, expected_nodes);
-        }
-        (Expression::Not(actual), Not(expected)) => {
-            assert_expression(actual.expression(), expected);
-        }
-        (Expression::Forbidden(actual), Forbidden(expected)) => {
-            assert_expression(actual.expression(), expected);
         }
         _ => panic!("expression variants differ"),
     }

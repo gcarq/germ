@@ -7,7 +7,7 @@ pub(crate) use useflags::{PackageUseRecords, UseFlags};
 use anyhow::Context;
 use std::path::Path;
 
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::files::{content_from_path, entry::Precedence};
 use crate::utils::{Inherit, strip_line_comment};
 use indexmap::IndexMap;

@@ -1,5 +1,6 @@
 use crate::package::names::{CatName, PkgName};
 use crate::package::version::PackageVersion;
+use core::hash;
 use std::{cmp::Ordering, fmt};
 
 /// Represents a simplified form of a package only with its category, name and version.
@@ -84,13 +85,13 @@ impl CPV {
     }
 }
 
+impl Eq for CPV {}
+
 impl PartialEq for CPV {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
-
-impl Eq for CPV {}
 
 impl Ord for CPV {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -108,6 +109,14 @@ impl PartialOrd for CPV {
     }
 }
 
+impl hash::Hash for CPV {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.category.hash(state);
+        self.package.hash(state);
+        self.version.hash(state);
+    }
+}
+
 impl fmt::Display for CPV {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.fqn)
@@ -119,27 +128,22 @@ mod tests {
     use crate::test_support::cpv;
 
     #[test]
-    fn test_cpv_explicit_r0_formatting() {
-        let cpv = cpv("dev-libs", "pkg", "1.0-r0");
+    fn test_cpv_format() {
+        let vim = cpv("app-editors", "vim", "7.0.174-r1");
+        assert_eq!(vim.to_string(), "app-editors/vim-7.0.174-r1");
+        assert_eq!(vim.fqn(), "app-editors/vim-7.0.174-r1");
+        assert_eq!(vim.qualified_name(), "app-editors/vim");
+        assert_eq!(vim.p(), "vim-7.0.174");
+        assert_eq!(vim.pf(), "vim-7.0.174-r1");
+        assert_eq!(vim.pn(), "vim");
+        assert_eq!(vim.pv(), "7.0.174");
+        assert_eq!(vim.pr(), "r1");
+        assert_eq!(vim.pvr(), "7.0.174-r1");
 
-        assert_eq!(cpv.fqn(), "dev-libs/pkg-1.0-r0");
-        assert_eq!(cpv.to_string(), "dev-libs/pkg-1.0-r0");
-        assert_eq!(cpv.pf(), "pkg-1.0-r0");
-        assert_eq!(cpv.pvr(), "1.0-r0");
-        assert_eq!(cpv.pr(), "r0");
-    }
-
-    #[test]
-    fn test_package_fmt() {
-        let cpv = cpv("app-editors", "vim", "7.0.174-r1");
-        assert_eq!(cpv.to_string(), "app-editors/vim-7.0.174-r1");
-        assert_eq!(cpv.fqn(), "app-editors/vim-7.0.174-r1");
-        assert_eq!(cpv.qualified_name(), "app-editors/vim");
-        assert_eq!(cpv.p(), "vim-7.0.174");
-        assert_eq!(cpv.pf(), "vim-7.0.174-r1");
-        assert_eq!(cpv.pn(), "vim");
-        assert_eq!(cpv.pv(), "7.0.174");
-        assert_eq!(cpv.pr(), "r1");
-        assert_eq!(cpv.pvr(), "7.0.174-r1");
+        // Should contain explicit r0
+        let explicit_r0 = cpv("dev-libs", "pkg", "1.0-r0");
+        assert_eq!(explicit_r0.fqn(), "dev-libs/pkg-1.0-r0");
+        assert_eq!(explicit_r0.pf(), "pkg-1.0-r0");
+        assert_eq!(explicit_r0.pr(), "r0");
     }
 }

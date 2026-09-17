@@ -1,8 +1,8 @@
 use anyhow::Context;
 use colored::Colorize;
 use germ_core::SysConf;
+use germ_core::atom::Atom;
 use germ_core::conf::portage::PortageConf;
-use germ_core::deps::atom::Atom;
 use germ_core::package::PackageView;
 use germ_core::repository::RepoSet;
 use germ_core::vdb::{Vdb, package::InstalledPackage};

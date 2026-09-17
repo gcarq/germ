@@ -1,4 +1,5 @@
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
+use crate::deps::RequiredUseFlag;
 use crate::deps::expression::{Expression, ExpressionNode};
 use crate::files::pkgfile::{PackageUseRecords, UseFlags};
 use crate::files::{UseEntries, entry::Entry};
@@ -82,27 +83,32 @@ impl UsePolicy {
         })
     }
 
-    /// Returns `true` if all required USE flags are satisfied for the given [`PackageView`].
-    pub fn required_use_satisfied<P: PackageView>(
-        &self,
-        pkg: &P,
-        stable_in_use: bool,
-    ) -> anyhow::Result<bool> {
-        let use_state = self.effective_for(pkg, stable_in_use);
-        let tree = pkg.metadata().required_use().view();
-        // TODO: This currently only checks the required USE flags to satisfy the expression,
-        // inactive branches can contain unreferenced USE flags which might not be PMS compatible.
-        try_all(tree.roots(), |n| {
-            eval_expression(n.expression(), &use_state)
-        })
-    }
-
-    /// Returns the effective USE state for the given [`PackageView`].
-    fn effective_for<'a, P: PackageView>(
+    /// Evaluates the required USE flags and returns a tuple containing its [`EffectiveUse`]
+    /// and whether the required USE flags are satisfied.
+    pub fn evaluate<'a, P>(
         &'a self,
         pkg: &'a P,
         stable_in_use: bool,
-    ) -> EffectiveUse<'a> {
+    ) -> anyhow::Result<(EffectiveUse<'a>, bool)>
+    where
+        P: PackageView,
+    {
+        let effective_use = self.effective_for(pkg, stable_in_use);
+        let tree = pkg.metadata().required_use().view();
+        // TODO: This currently only checks the required USE flags to satisfy the expression,
+        // inactive branches can contain unreferenced USE flags which might not be PMS compatible.
+        let required_use_satisfied = try_all(tree.roots(), |n| {
+            eval_expression(n.expression(), &effective_use)
+        })?;
+
+        Ok((effective_use, required_use_satisfied))
+    }
+
+    /// Returns the effective USE state for the given [`PackageView`].
+    fn effective_for<'a, P>(&'a self, pkg: &'a P, stable_in_use: bool) -> EffectiveUse<'a>
+    where
+        P: PackageView,
+    {
         let available = pkg
             .metadata()
             .iuse()
@@ -225,7 +231,8 @@ impl PackageUse {
 }
 
 /// Final USE state of one package.
-struct EffectiveUse<'a> {
+#[derive(Debug, Clone)]
+pub struct EffectiveUse<'a> {
     /// All flags that can exist for the package.
     /// This corresponds to `IUSE_EFFECTIVE`.
     available: FxHashSet<&'a UseFlag>,
@@ -236,11 +243,17 @@ struct EffectiveUse<'a> {
 impl<'a> EffectiveUse<'a> {
     /// Returns `true` if the given `flag` is enabled, `false` otherwise.
     /// `Err` is returned if the flag is not available.
-    fn is_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
+    pub fn is_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
         match self.state(flag) {
             Some(enabled) => Ok(enabled),
             None => bail!("flag {flag} is not available"),
         }
+    }
+
+    /// Returns `true` if the given `flag` is disabled, `false` otherwise.
+    /// `Err` is returned if the flag is not available.
+    pub fn is_disabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
+        Ok(!self.is_enabled(flag)?)
     }
 
     /// Returns the effective state of the given `flag`.
@@ -257,11 +270,14 @@ impl<'a> EffectiveUse<'a> {
 /// Evaluates `expr` that is part of `REQUIRED_USE` to determine whether
 /// the USE flags are satisfied for the given `state`.
 fn eval_expression<'a>(
-    expr: Expression<'a, UseFlag>,
+    expr: Expression<'a, RequiredUseFlag>,
     state: &EffectiveUse,
 ) -> anyhow::Result<bool> {
     let result = match expr {
-        Expression::Item(flag) => state.is_enabled(flag)?,
+        Expression::Item(flag) => match flag.is_negated() {
+            true => state.is_disabled(flag.inner())?,
+            false => state.is_enabled(flag.inner())?,
+        },
         Expression::AllOf(nodes) => try_all(nodes, |n| eval_expression(n.expression(), state))?,
         Expression::AnyOf(nodes) => try_any(nodes, |n| eval_expression(n.expression(), state))?,
         Expression::ExactlyOneOf(nodes) => eval_up_to_two(nodes, state)? == 1,
@@ -274,8 +290,6 @@ fn eval_expression<'a>(
             true => true,
             false => try_all(nodes, |n| eval_expression(n.expression(), state))?,
         },
-        Expression::Not(node) => !eval_expression(node.expression(), state)?,
-        _ => unreachable!(),
     };
     Ok(result)
 }
@@ -285,7 +299,7 @@ fn eval_expression<'a>(
 /// Breaks early if more than two nodes are satisfied.
 fn eval_up_to_two<'a, I>(nodes: I, state: &EffectiveUse) -> anyhow::Result<u8>
 where
-    I: IntoIterator<Item = ExpressionNode<'a, UseFlag>>,
+    I: IntoIterator<Item = ExpressionNode<'a, RequiredUseFlag>>,
 {
     let mut count = 0;
     for node in nodes.into_iter() {
@@ -369,8 +383,11 @@ mod tests {
         let bar = UseFlag::new("bar")?;
         let available = FxHashSet::from_iter([&foo, &bar]);
         for (input, foo_state, bar_state, expected) in cases {
-            let expr =
-                DepExpression::<UseFlag>::parse(Eapi::Eight, ExpressionKind::RequiredUse, input)?;
+            let expr = DepExpression::<RequiredUseFlag>::parse(
+                Eapi::Eight,
+                ExpressionKind::RequiredUse,
+                input,
+            )?;
             let state = EffectiveUse {
                 available: available.clone(),
                 enabled: [(&foo, foo_state), (&bar, bar_state)]

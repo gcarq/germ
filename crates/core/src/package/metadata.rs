@@ -1,11 +1,10 @@
-use crate::deps::atom::Atom;
-use crate::deps::{DepExpression, ExpressionItem, ExpressionKind};
+use crate::deps::{AtomDep, DepExpression, ExpressionItem, ExpressionKind, RequiredUseFlag};
 use crate::eapi::Eapi;
 use crate::keyword::Keyword;
 use crate::package::slot::PackageSlot;
 use crate::repository::Eclass;
 use crate::types::FxHashMap;
-use crate::useflag::{IUseEntry, UseFlag};
+use crate::useflag::IUseEntry;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fmt;
@@ -124,17 +123,17 @@ pub struct PackageMetadata {
     properties: Vec<String>,
     keywords: Vec<Keyword>,
     inherit: Vec<String>,
-    // TODO: use a string instead of UseFlag
-    restrict: DepExpression<UseFlag>,
+    // TODO: Use something like DepExpression<String>
+    restrict: String,
     defined_phases: Vec<String>,
     iuse: Vec<IUseEntry>,
-    required_use: DepExpression<UseFlag>,
+    required_use: DepExpression<RequiredUseFlag>,
     slot: PackageSlot,
-    depend: DepExpression<Atom>,
-    bdepend: DepExpression<Atom>,
-    idepend: DepExpression<Atom>,
-    pdepend: DepExpression<Atom>,
-    rdepend: DepExpression<Atom>,
+    depend: DepExpression<AtomDep>,
+    bdepend: DepExpression<AtomDep>,
+    idepend: DepExpression<AtomDep>,
+    pdepend: DepExpression<AtomDep>,
+    rdepend: DepExpression<AtomDep>,
     eclasses: Vec<Eclass>,
 }
 
@@ -171,7 +170,7 @@ impl PackageMetadata {
         &self.inherit
     }
 
-    pub const fn restrict(&self) -> &DepExpression<UseFlag> {
+    pub const fn restrict(&self) -> &String {
         &self.restrict
     }
 
@@ -183,7 +182,7 @@ impl PackageMetadata {
         &self.iuse
     }
 
-    pub const fn required_use(&self) -> &DepExpression<UseFlag> {
+    pub const fn required_use(&self) -> &DepExpression<RequiredUseFlag> {
         &self.required_use
     }
 
@@ -191,23 +190,23 @@ impl PackageMetadata {
         &self.slot
     }
 
-    pub const fn depend(&self) -> &DepExpression<Atom> {
+    pub const fn depend(&self) -> &DepExpression<AtomDep> {
         &self.depend
     }
 
-    pub const fn bdepend(&self) -> &DepExpression<Atom> {
+    pub const fn bdepend(&self) -> &DepExpression<AtomDep> {
         &self.bdepend
     }
 
-    pub const fn idepend(&self) -> &DepExpression<Atom> {
+    pub const fn idepend(&self) -> &DepExpression<AtomDep> {
         &self.idepend
     }
 
-    pub const fn pdepend(&self) -> &DepExpression<Atom> {
+    pub const fn pdepend(&self) -> &DepExpression<AtomDep> {
         &self.pdepend
     }
 
-    pub const fn rdepend(&self) -> &DepExpression<Atom> {
+    pub const fn rdepend(&self) -> &DepExpression<AtomDep> {
         &self.rdepend
     }
 
@@ -247,7 +246,11 @@ impl PackageMetadata {
             properties: vars.words(MetaVar::Properties)?,
             keywords: vars.words(MetaVar::Keywords)?,
             inherit: vars.words(MetaVar::Inherited)?,
-            restrict: vars.expression(eapi, ExpressionKind::Restrict, MetaVar::Restrict)?,
+            restrict: vars
+                .get(MetaVar::Restrict)
+                .unwrap_or_default()
+                .trim()
+                .to_owned(),
             defined_phases: vars.words(MetaVar::DefinedPhases)?,
             iuse: vars.words(MetaVar::IUse)?,
             required_use: vars.expression(
@@ -458,7 +461,7 @@ mod tests {
                 "systemd"
             ]
         );
-        assert_eq!(metadata.restrict().to_string(), "");
+        assert_eq!(metadata.restrict(), "");
         assert!(metadata.defined_phases().is_empty());
         assert_eq!(
             metadata.iuse(),
@@ -480,26 +483,8 @@ mod tests {
             metadata.rdepend().to_string(),
             "python_single_target_python3_11? ( dev-lang/python:3.11 )"
         );
-    }
 
-    #[test]
-    fn test_metadata_from_raw_eapi_mismatch() {
-        let variables = raw(&[
-            ("EAPI", "7"),
-            ("DESCRIPTION", "Test package"),
-            ("SLOT", "0"),
-        ]);
-        assert!(matches!(
-            PackageMetadata::from_raw(&variables, Some(Eapi::Eight)),
-            Err(PackageMetadataError::EapiMismatch {
-                expected: Eapi::Eight,
-                found: Eapi::Seven
-            })
-        ));
-    }
-
-    #[test]
-    fn test_metadata_raw_eapi_7() {
+        // EAPI 7 does not support IDEPEND, so its value should be ignored.
         let variables = raw(&[
             ("EAPI", "7"),
             ("DESCRIPTION", "Test package"),
@@ -513,52 +498,59 @@ mod tests {
     }
 
     #[test]
-    fn test_metadata_raw_missing() {
+    fn test_metadata_from_raw_error() {
+        let variables = raw(&[
+            ("EAPI", "7"),
+            ("DESCRIPTION", "Test package"),
+            ("SLOT", "0"),
+        ]);
+        assert!(matches!(
+            PackageMetadata::from_raw(&variables, Some(Eapi::Eight)),
+            Err(PackageMetadataError::EapiMismatch {
+                expected: Eapi::Eight,
+                found: Eapi::Seven
+            })
+        ));
+
         let variables = raw(&[("EAPI", "8"), ("DESCRIPTION", "Test package")]);
         assert!(matches!(
             PackageMetadata::from_raw(&variables, None),
             Err(PackageMetadataError::Missing(MetaVar::Slot))
         ));
-    }
 
-    #[test]
-    fn test_metadata_raw_empty() {
-        let description = raw(&[("EAPI", "8"), ("DESCRIPTION", ""), ("SLOT", "0")]);
+        let variables = raw(&[("EAPI", "8"), ("DESCRIPTION", ""), ("SLOT", "0")]);
         assert!(matches!(
-            PackageMetadata::from_raw(&description, None),
+            PackageMetadata::from_raw(&variables, None),
             Err(PackageMetadataError::Empty(MetaVar::Description))
         ));
 
-        let slot = raw(&[("EAPI", "8"), ("DESCRIPTION", "Test package"), ("SLOT", "")]);
+        let variables = raw(&[("EAPI", "8"), ("DESCRIPTION", "Test package"), ("SLOT", "")]);
         assert!(matches!(
-            PackageMetadata::from_raw(&slot, None),
+            PackageMetadata::from_raw(&variables, None),
             Err(PackageMetadataError::Empty(MetaVar::Slot))
         ));
-    }
 
-    #[test]
-    fn test_metadata_raw_invalid() {
-        let slot = raw(&[
+        let variables = raw(&[
             ("EAPI", "8"),
             ("DESCRIPTION", "Test package"),
             ("SLOT", "invalid/slot/value"),
         ]);
         assert!(matches!(
-            PackageMetadata::from_raw(&slot, None),
+            PackageMetadata::from_raw(&variables, None),
             Err(PackageMetadataError::Invalid {
                 var: MetaVar::Slot,
                 ..
             })
         ));
 
-        let iuse = raw(&[
+        let variables = raw(&[
             ("EAPI", "8"),
             ("DESCRIPTION", "Test package"),
             ("SLOT", "0"),
             ("IUSE", "foo?"),
         ]);
         assert!(matches!(
-            PackageMetadata::from_raw(&iuse, None),
+            PackageMetadata::from_raw(&variables, None),
             Err(PackageMetadataError::Invalid {
                 var: MetaVar::IUse,
                 ..

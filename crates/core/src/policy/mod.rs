@@ -4,8 +4,19 @@ pub mod useflag;
 
 use anyhow::Context;
 
-use self::{keyword::EffectiveKeywords, pkgmask::PackageMasks, useflag::UsePolicy};
+use self::keyword::EffectiveKeywords;
+use self::pkgmask::PackageMasks;
+use self::useflag::{EffectiveUse, UsePolicy};
 use crate::package::PackageView;
+
+/// Defines the outcome of the package evaluation against the policies.
+#[derive(Debug, Clone)]
+pub enum PolicyResult<'a> {
+    Accepted(EffectiveUse<'a>),
+    Masked,
+    MissingKeyword,
+    RequiredUseUnsatisfied,
+}
 
 /// Represents the effective package policy, which is a combination of keywords,
 /// USE flags and package masks.
@@ -28,13 +39,26 @@ impl PackagePolicy {
         }
     }
 
-    /// Evaluates whether the given package is a valid candidate.
-    pub fn evaluate<P: PackageView>(&self, pkg: &P) -> anyhow::Result<bool> {
+    /// Evaluates a package and returns the result as [`PolicyResult`].
+    pub fn evaluate<'a, P>(&'a self, pkg: &'a P) -> anyhow::Result<PolicyResult<'a>>
+    where
+        P: PackageView,
+    {
         let keyword = self.keywords.evaluate(pkg);
-        let use_satisfied = self
+        let (effective_use, use_satisfied) = self
             .usepolicy
-            .required_use_satisfied(pkg, keyword.stable_in_use)
+            .evaluate(pkg, keyword.stable_in_use)
             .context("failed to evaluate required USE flags")?;
-        Ok(keyword.accepted && !self.pkgmasks.is_masked(pkg) && use_satisfied)
+
+        let result = if !keyword.accepted {
+            PolicyResult::MissingKeyword
+        } else if !use_satisfied {
+            PolicyResult::RequiredUseUnsatisfied
+        } else if self.pkgmasks.is_masked(pkg) {
+            PolicyResult::Masked
+        } else {
+            PolicyResult::Accepted(effective_use)
+        };
+        Ok(result)
     }
 }

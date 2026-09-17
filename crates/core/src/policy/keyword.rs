@@ -1,4 +1,4 @@
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::files::entry::Operation;
 use crate::files::pkgfile::{KeywordRule, PackageAcceptKeywords};
 use crate::keyword::{Keyword, KeywordSelector};

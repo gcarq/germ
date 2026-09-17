@@ -1,12 +1,10 @@
-use std::fmt;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::iter::Peekable;
 use std::str::CharIndices;
 
 #[derive(PartialEq, Debug)]
 pub enum Token<'a> {
     Whitespace,
-    Bang,                    // syntax: !
     ExactlyOneOf,            // syntax: ^^
     AnyOf,                   // syntax: ||
     AtMostOneOf,             // syntax: ??
@@ -21,7 +19,6 @@ impl<'a> fmt::Display for Token<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Token::Whitespace => f.write_char(' '),
-            Token::Bang => f.write_char('!'),
             Token::ExactlyOneOf => f.write_str("^^"),
             Token::AnyOf => f.write_str("||"),
             Token::AtMostOneOf => f.write_str("??"),
@@ -63,7 +60,6 @@ impl<'a> Lexer<'a> {
         }
 
         let token = match first {
-            '!' => Token::Bang,
             '(' => Token::LParen,
             ')' => Token::RParen,
             '^' => self.consume_operator(first, Token::ExactlyOneOf),
@@ -138,7 +134,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_lexer_depend_syntax() {
+    fn test_lexer_syntax() {
         let input = r"
             sys-libs/db[foo]
             bar? ( sys-libs/db[baz] )
@@ -148,6 +144,9 @@ mod tests {
             )
             !foo? ( !app-misc/foo )
             !!<dev-perl/Mail-Box-3
+            ^^ ( gnutls openssl )
+            ?? ( mysql mariadb )
+            ssh? ( || ( rdp ( vnc X ) ) )
         ";
         let lexer = Lexer::new(input);
         let tokens = lexer
@@ -166,39 +165,11 @@ mod tests {
                 Token::Ident("=sys-libs/db-5*:5"),
                 Token::Ident("dev-lang/python-exec[python_targets_python3_14(-)]"),
                 Token::RParen,
-                Token::Bang,
-                Token::UseConditional("foo"),
+                Token::UseConditional("!foo"),
                 Token::LParen,
-                Token::Bang,
-                Token::Ident("app-misc/foo"),
+                Token::Ident("!app-misc/foo"),
                 Token::RParen,
-                Token::Bang,
-                Token::Bang,
-                Token::Ident("<dev-perl/Mail-Box-3"),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_lexer_required_use_syntax() {
-        let input = r"
-            || ( wayland X )
-            ^^ ( gnutls openssl )
-            ?? ( mysql mariadb )
-            ssh? ( || ( rdp ( vnc X ) ) )
-        ";
-        let lexer = Lexer::new(input);
-        let tokens = lexer
-            .filter(|token| !matches!(token, &Token::Whitespace))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            tokens,
-            vec![
-                Token::AnyOf,
-                Token::LParen,
-                Token::Ident("wayland"),
-                Token::Ident("X"),
-                Token::RParen,
+                Token::Ident("!!<dev-perl/Mail-Box-3"),
                 Token::ExactlyOneOf,
                 Token::LParen,
                 Token::Ident("gnutls"),
@@ -225,11 +196,10 @@ mod tests {
     }
 
     #[test]
-    fn test_lexer_whitespace() {
+    fn test_lexer_separators() {
         let input = " \tfoo  bar\n";
-        let tokens = Lexer::new(input).collect::<Vec<_>>();
         assert_eq!(
-            tokens,
+            Lexer::new(input).collect::<Vec<_>>(),
             vec![
                 Token::Whitespace,
                 Token::Ident("foo"),
@@ -238,22 +208,10 @@ mod tests {
                 Token::Whitespace,
             ]
         );
-    }
 
-    #[test]
-    fn test_lexer_item_url() {
-        let input = "https://host/path?query!";
+        let input = "foo || bar || ( baz )";
         assert_eq!(
             Lexer::new(input).collect::<Vec<_>>(),
-            vec![Token::Ident(input)]
-        );
-    }
-
-    #[test]
-    fn test_lexer_operator_tokens() {
-        let tokens = Lexer::new("foo || bar || ( baz )").collect::<Vec<_>>();
-        assert_eq!(
-            tokens,
             vec![
                 Token::Ident("foo"),
                 Token::Whitespace,
@@ -269,6 +227,15 @@ mod tests {
                 Token::Whitespace,
                 Token::RParen,
             ]
+        );
+    }
+
+    #[test]
+    fn test_lexer_item_url() {
+        let input = "https://host/path?query!";
+        assert_eq!(
+            Lexer::new(input).collect::<Vec<_>>(),
+            vec![Token::Ident(input)]
         );
     }
 

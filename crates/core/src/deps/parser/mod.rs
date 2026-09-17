@@ -7,7 +7,7 @@ use self::arena::{ArenaEntry, ExpressionArena, ExpressionId};
 use self::lexer::{Lexer, Token};
 use crate::deps::ExpressionItem;
 use crate::useflag::UseFlag;
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use std::ops::Range;
 
 /// A parser for ebuild dependency expressions commonly found in `DEPEND`, `REQUIRED_USE`, etc..
@@ -70,22 +70,7 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
                 self.expect_separated(Token::LParen)?;
                 ArenaEntry::AtMostOneOf(self.parse_group()?)
             }
-            Token::UseConditional(flag) => self.parse_use_conditional(flag, false)?,
-            Token::Bang => match self.lexer.next().ok_or_else(|| anyhow!("unexpected EOF"))? {
-                Token::Whitespace => bail!("expected an adjacent operand after '!'"),
-                Token::Ident(name) => ArenaEntry::Not(self.parse_expression(Token::Ident(name))?),
-                Token::UseConditional(flag) => self.parse_use_conditional(flag, true)?,
-                Token::Bang => match self.lexer.next() {
-                    Some(Token::Ident(name)) => {
-                        ArenaEntry::Forbidden(self.parse_expression(Token::Ident(name))?)
-                    }
-                    Some(t) => bail!("expected identifier, got '{t}'"),
-                    None => bail!("expected identifier, got EOF"),
-                },
-                token => {
-                    bail!("expected identifier or USE conditional after '!', got '{token}'")
-                }
-            },
+            Token::UseConditional(flag) => self.parse_use_conditional(flag)?,
             Token::Whitespace | Token::RParen | Token::Illegal(_) => {
                 bail!("unexpected token '{token}'")
             }
@@ -94,14 +79,14 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     }
 
     /// Parses a USE conditional expression, e.g. `foo? ( bar )` or `!foo? ( bar )`.
-    fn parse_use_conditional(
-        &mut self,
-        flag: &str,
-        negated: bool,
-    ) -> anyhow::Result<ArenaEntry<T>> {
+    fn parse_use_conditional(&mut self, flag: &str) -> anyhow::Result<ArenaEntry<T>> {
         self.expect_separated(Token::LParen)?;
+        let (flag, negated) = match flag.strip_prefix('!') {
+            Some(flag) => (flag, true),
+            None => (flag, false),
+        };
         Ok(ArenaEntry::Use {
-            flag: UseFlag::parse(flag)?,
+            flag: UseFlag::new(flag)?,
             negated,
             nodes: self.parse_group()?,
         })
@@ -168,92 +153,51 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::TestExpression::{
-        AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Forbidden, Not, Use,
-    };
-    use super::test_support::{assert_expr, item};
+    use super::test_support::TestExpression::{AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Use};
+    use super::test_support::{TestExpression, assert_expr, item};
     use super::*;
-    use crate::deps::atom::Atom;
+    use crate::deps::{AtomDep, RequiredUseFlag};
 
     #[test]
-    fn test_parser_group_exactly_one_of() {
-        let input = "^^ ( sys-libs/db app-misc/foo )";
-        let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        assert_expr(
-            expr.view(),
-            &[ExactlyOneOf(vec![
-                item("sys-libs/db"),
-                item("app-misc/foo"),
-            ])],
-        );
-    }
+    fn test_parser_structure() {
+        let cases: [(&str, Vec<TestExpression<AtomDep>>); 6] = [
+            (
+                "( sys-libs/db app-misc/foo )",
+                vec![AllOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
+            ),
+            (
+                "|| ( sys-libs/db app-misc/foo )",
+                vec![AnyOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
+            ),
+            (
+                "^^ ( sys-libs/db app-misc/foo )",
+                vec![ExactlyOneOf(vec![
+                    item("sys-libs/db"),
+                    item("app-misc/foo"),
+                ])],
+            ),
+            (
+                "?? ( sys-libs/db app-misc/foo )",
+                vec![AtMostOneOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
+            ),
+            (
+                "bar? ( sys-libs/db app-misc/foo )",
+                vec![Use {
+                    flag: "bar".parse().unwrap(),
+                    negated: false,
+                    nodes: vec![item("sys-libs/db"), item("app-misc/foo")],
+                }],
+            ),
+            (
+                "media-libs/mesa[gbm(+)] dev-lang/R",
+                vec![item("media-libs/mesa[gbm(+)]"), item("dev-lang/R")],
+            ),
+        ];
 
-    #[test]
-    fn test_parser_group_all_of() {
-        let input = "( sys-libs/db app-misc/foo )";
-        let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        assert_expr(
-            expr.view(),
-            &[AllOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
-        );
-    }
-
-    #[test]
-    fn test_parser_group_any_of() {
-        let input = "|| ( sys-libs/db app-misc/foo )";
-        let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        assert_expr(
-            expr.view(),
-            &[AnyOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
-        );
-    }
-
-    #[test]
-    fn test_parser_group_at_most_one_of() {
-        let input = "?? ( sys-libs/db app-misc/foo )";
-        let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        assert_expr(
-            expr.view(),
-            &[AtMostOneOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
-        );
-    }
-
-    #[test]
-    fn test_parser_use_conditional() {
-        let input = "bar? ( sys-libs/db app-misc/foo )";
-        let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        assert_expr(
-            expr.view(),
-            &[Use {
-                flag: "bar".parse().unwrap(),
-                negated: false,
-                nodes: vec![item("sys-libs/db"), item("app-misc/foo")],
-            }],
-        );
-    }
-
-    #[test]
-    fn test_parser_negation() {
-        let input = "!sys-libs/db";
-        let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        assert_expr(expr.view(), &[Not(item("sys-libs/db").into())]);
-    }
-
-    #[test]
-    fn test_parser_forbidden() {
-        let input = "!!sys-libs/db";
-        let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        assert_expr(expr.view(), &[Forbidden(item("sys-libs/db").into())]);
-    }
-
-    #[test]
-    fn test_parser_item() {
-        let input = "media-libs/mesa[gbm(+)] dev-lang/R";
-        let expr = ExpressionParser::<Atom>::parse(input).unwrap();
-        assert_expr(
-            expr.view(),
-            &[item("media-libs/mesa[gbm(+)]"), item("dev-lang/R")],
-        );
+        for (input, expected) in cases {
+            let expr = ExpressionParser::<AtomDep>::parse(input).unwrap();
+            assert_expr(expr.view(), &expected);
+        }
     }
 
     #[test]
@@ -269,7 +213,7 @@ mod tests {
             !!<dev-perl/Mail-Box-3
         ";
 
-        let expr = ExpressionParser::<Atom>::parse(input).unwrap();
+        let expr = ExpressionParser::<AtomDep>::parse(input).unwrap();
         assert_expr(
             expr.view(),
             &[
@@ -283,9 +227,9 @@ mod tests {
                 Use {
                     flag: "foo".parse().unwrap(),
                     negated: true,
-                    nodes: vec![Not(item("app-misc/foo").into())],
+                    nodes: vec![item("!app-misc/foo")],
                 },
-                Forbidden(item("<dev-perl/Mail-Box-3").into()),
+                item("!!<dev-perl/Mail-Box-3"),
             ],
         );
     }
@@ -296,7 +240,7 @@ mod tests {
             || ( wayland X )
             ssh? ( || ( rdp ( vnc X ) ) )
         ";
-        let expr = ExpressionParser::<UseFlag>::parse(input).unwrap();
+        let expr = ExpressionParser::<RequiredUseFlag>::parse(input).unwrap();
         assert_expr(
             expr.view(),
             &[
@@ -328,7 +272,7 @@ mod tests {
             "!! cat/pkg",
         ] {
             assert!(
-                ExpressionParser::<Atom>::parse(input).is_err(),
+                ExpressionParser::<AtomDep>::parse(input).is_err(),
                 "expected invalid expression: {input}"
             );
         }
@@ -340,7 +284,6 @@ mod tests {
         let test_data = [
             ("bar? sys-libs/db", "expected '(', got 'sys-libs/db'"),
             ("|| sys-libs/db", "expected '(', got 'sys-libs/db'"),
-            ("sys-libs/db)", "'sys-libs/db)' is not a valid atom"),
             (
                 "(sys-libs/db",
                 "expected whitespace after '(', got 'sys-libs/db'",
@@ -348,29 +291,9 @@ mod tests {
             ("bar? ( sys-libs/db", "unexpected EOF while parsing group"),
             ("()", "empty groups are not supported"),
             ("bar? sys-libs/db )", "expected '(', got 'sys-libs/db'"),
-            ("!! ( sys-libs/db ) ", "expected identifier, got ' '"),
-            (
-                "!( sys-libs/db )",
-                "expected identifier or USE conditional after '!', got '('",
-            ),
-            (
-                "!|| ( sys-libs/db )",
-                "expected identifier or USE conditional after '!', got '||'",
-            ),
-            (
-                "!^^ ( sys-libs/db )",
-                "expected identifier or USE conditional after '!', got '^^'",
-            ),
-            (
-                "!?? ( sys-libs/db )",
-                "expected identifier or USE conditional after '!', got '??'",
-            ),
-            ("! cat/pkg", "expected an adjacent operand after '!'"),
-            ("!", "unexpected EOF"),
-            ("!!foo? ( cat/pkg )", "expected identifier, got 'foo'"),
         ];
         for (input, expected_err) in test_data {
-            let err = ExpressionParser::<Atom>::parse(input).unwrap_err();
+            let err = ExpressionParser::<AtomDep>::parse(input).unwrap_err();
             assert_eq!(err.to_string(), expected_err, "failure for input: {input}");
         }
     }

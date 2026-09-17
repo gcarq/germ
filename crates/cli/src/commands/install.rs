@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
+use germ_core::SysConf;
+use germ_core::atom::Atom;
 use germ_core::conf::portage::PortageConf;
-use germ_core::deps::atom::Atom;
-use germ_core::policy::pkgmask::PackageMasks;
+use germ_core::policy::{PackagePolicy, pkgmask::PackageMasks};
 use germ_core::repository::RepoSet;
-use germ_core::{SysConf, policy::PackagePolicy};
-use log::{debug, warn};
-
-use crate::utils::format_error;
+use germ_core::resolver::Resolver;
+use germ_core::vdb::Vdb;
 
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.
 pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
+    let mut vdb = Vdb::from_path(sysconf.vdb_path()).context("unable to read VDB")?;
     let reposet = RepoSet::new(sysconf.clone()).context("unable to build repo set")?;
     let conf = PortageConf::new(&reposet, &sysconf)?;
     let policy = PackagePolicy::new(
@@ -21,27 +21,11 @@ pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
         PackageMasks::new(&reposet.package_mask_source()?, conf.package_mask_source()?)?,
     );
 
-    for pkg in reposet.find_packages(atom).await? {
-        let pkg = match pkg {
-            Ok(pkg) => pkg,
-            Err(err) => {
-                warn!("{}", format_error(&anyhow!(err)));
-                continue;
-            }
-        };
-
-        match policy.evaluate(&pkg) {
-            Ok(true) => {
-                println!("candidate: {pkg}");
-            }
-            Ok(false) => {
-                debug!("skipping {pkg} due to policy");
-            }
-            Err(err) => {
-                warn!("failed to evaluate {pkg}: {}", format_error(&anyhow!(err)));
-            }
-        }
+    match Resolver::new(&mut vdb, &reposet, &policy)
+        .resolve(atom)
+        .await?
+    {
+        true => Ok(()),
+        false => Err(anyhow::anyhow!("unable to resolve {atom}")),
     }
-
-    Ok(())
 }

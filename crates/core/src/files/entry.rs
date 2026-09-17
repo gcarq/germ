@@ -1,4 +1,4 @@
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::useflag::UseFlag;
 use anyhow::bail;
 use std::cmp::Ordering;

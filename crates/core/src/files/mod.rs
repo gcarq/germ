@@ -8,14 +8,13 @@ pub mod entry;
 mod linefile;
 pub mod pkgfile;
 
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::files::entry::SysAtom;
 use crate::useflag::UseFlag;
 use crate::utils;
 use anyhow::{Context, bail};
 use linefile::LineEntries;
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 pub type PackageEntries = LineEntries<Atom>;
 pub type SysPackageEntries = LineEntries<SysAtom>;

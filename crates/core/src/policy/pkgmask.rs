@@ -1,4 +1,4 @@
-use crate::deps::atom::Atom;
+use crate::atom::Atom;
 use crate::files::PackageEntries;
 use crate::files::entry::{Entry, Operation, Precedence};
 use crate::package::PackageView;
