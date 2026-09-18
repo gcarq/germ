@@ -156,9 +156,13 @@ impl UsePolicy {
 
     /// Returns all USE flags that are masked for the given [`PackageView`].
     fn masked_for_pkg<P: PackageView>(&self, pkg: &P, stable_in_use: bool) -> FxHashSet<&UseFlag> {
-        let iter = self.package_use_mask.enabled_for(pkg);
+        let iter = self
+            .use_mask
+            .iter()
+            .chain(self.package_use_mask.enabled_for(pkg));
         match stable_in_use {
             true => iter
+                .chain(self.use_stable_mask.iter())
                 .chain(self.package_use_stable_mask.enabled_for(pkg))
                 .collect(),
             false => iter.collect(),
@@ -167,9 +171,13 @@ impl UsePolicy {
 
     /// Returns all USE flags that are forced for the given [`PackageView`].
     fn forced_for_pkg<P: PackageView>(&self, pkg: &P, stable_in_use: bool) -> FxHashSet<&UseFlag> {
-        let iter = self.package_use_force.enabled_for(pkg);
+        let iter = self
+            .use_force
+            .iter()
+            .chain(self.package_use_force.enabled_for(pkg));
         match stable_in_use {
             true => iter
+                .chain(self.use_stable_force.iter())
                 .chain(self.package_use_stable_force.enabled_for(pkg))
                 .collect(),
             false => iter.collect(),
@@ -401,6 +409,35 @@ mod tests {
 
             assert_eq!(actual, expected, "{input}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_profile_use_constraints() -> anyhow::Result<()> {
+        let elogind = UseFlag::new("elogind")?;
+        let systemd = UseFlag::new("systemd")?;
+        let forced = UseFlag::new("forced")?;
+        let profile = ProfileUseRecords {
+            use_mask: UseEntries::from_content("elogind", Precedence::Profile(0))?,
+            use_force: UseEntries::from_content("forced", Precedence::Profile(0))?,
+            ..Default::default()
+        };
+        let policy = UsePolicy::new(
+            FxHashMap::from_iter([(elogind.clone(), true), (systemd.clone(), true)]),
+            FxHashSet::default(),
+            profile,
+            LocalRecords::default(),
+        )?;
+        let package = Package::new(
+            cpv("sys-libs", "pam", "1.0"),
+            "gentoo".parse()?,
+            package_metadata(&[("IUSE", "elogind systemd forced")]),
+        );
+        let effective = policy.effective_for(&package, false);
+
+        assert_eq!(effective.state(&elogind), Some(false));
+        assert_eq!(effective.state(&systemd), Some(true));
+        assert_eq!(effective.state(&forced), Some(true));
         Ok(())
     }
 
