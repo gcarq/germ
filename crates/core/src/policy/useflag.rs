@@ -6,9 +6,9 @@ use crate::files::{UseEntries, entry::Entry};
 use crate::package::PackageView;
 use crate::profile::ProfileUseRecords;
 use crate::types::{FxHashMap, FxHashSet};
-use crate::useflag::{IUseEntry, IUseState, UseExpandConfig, UseFlag};
+use crate::useflag::{EffectiveUse, IUseEntry, IUseState, UseExpandConfig, UseFlag};
 use crate::utils::{Inherit, try_all, try_any};
-use anyhow::{Context, bail};
+use anyhow::Context;
 
 /// Simple DTO used to build [`UsePolicy`] from user configured USE entries.
 #[derive(Default)]
@@ -20,7 +20,6 @@ pub struct LocalRecords {
 
 /// Immutable runtime policy used to calculate effective
 /// USE flags and evaluate `REQUIRED_USE`.
-#[expect(dead_code)]
 pub struct UsePolicy {
     base_use: UseRules,
     iuse_implicit: FxHashSet<UseFlag>,
@@ -85,11 +84,7 @@ impl UsePolicy {
 
     /// Evaluates the required USE flags and returns a tuple containing its [`EffectiveUse`]
     /// and whether the required USE flags are satisfied.
-    pub fn evaluate<'a, P>(
-        &'a self,
-        pkg: &'a P,
-        stable_in_use: bool,
-    ) -> anyhow::Result<(EffectiveUse<'a>, bool)>
+    pub fn evaluate<P>(&self, pkg: &P, stable_in_use: bool) -> anyhow::Result<(EffectiveUse, bool)>
     where
         P: PackageView,
     {
@@ -105,7 +100,7 @@ impl UsePolicy {
     }
 
     /// Returns the effective USE state for the given [`PackageView`].
-    fn effective_for<'a, P>(&'a self, pkg: &'a P, stable_in_use: bool) -> EffectiveUse<'a>
+    fn effective_for<P>(&self, pkg: &P, stable_in_use: bool) -> EffectiveUse
     where
         P: PackageView,
     {
@@ -115,6 +110,7 @@ impl UsePolicy {
             .iter()
             .map(IUseEntry::flag)
             .chain(self.iuse_implicit.iter())
+            .cloned()
             .collect::<FxHashSet<_>>();
 
         let package_use = self.package_use.entries_for(pkg);
@@ -128,10 +124,10 @@ impl UsePolicy {
                 forced.contains(*flag)
                     || self.desired_state(pkg, &package_use, flag).unwrap_or(false)
             })
-            .copied()
+            .cloned()
             .collect();
 
-        EffectiveUse { available, enabled }
+        EffectiveUse::from_parts(available, enabled)
     }
 
     /// Returns the desired state of `flag` for `pkg`.
@@ -208,6 +204,8 @@ impl PackageUse {
     }
 
     /// Returns package USE entries that apply to the given `pkg`.
+    ///
+    /// The USE policy is matched statically, atom USE deps are not considered.
     fn entries_for<'a, P: PackageView>(
         &'a self,
         pkg: &P,
@@ -235,43 +233,6 @@ impl PackageUse {
             .into_values()
             .filter(|entry| entry.op.as_bool())
             .map(Entry::inner)
-    }
-}
-
-/// Final USE state of one package.
-#[derive(Debug, Clone)]
-pub struct EffectiveUse<'a> {
-    /// All flags that can exist for the package.
-    /// This corresponds to `IUSE_EFFECTIVE`.
-    available: FxHashSet<&'a UseFlag>,
-    /// Available flags that are enabled.
-    enabled: FxHashSet<&'a UseFlag>,
-}
-
-impl<'a> EffectiveUse<'a> {
-    /// Returns `true` if the given `flag` is enabled, `false` otherwise.
-    /// `Err` is returned if the flag is not available.
-    pub fn is_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
-        match self.state(flag) {
-            Some(enabled) => Ok(enabled),
-            None => bail!("flag {flag} is not available"),
-        }
-    }
-
-    /// Returns `true` if the given `flag` is disabled, `false` otherwise.
-    /// `Err` is returned if the flag is not available.
-    pub fn is_disabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
-        Ok(!self.is_enabled(flag)?)
-    }
-
-    /// Returns the effective state of the given `flag`.
-    /// - `Some(true)` if the flag is enabled.
-    /// - `Some(false)` if the flag is disabled.
-    /// - `None` if the flag is not available.
-    fn state(&self, flag: &UseFlag) -> Option<bool> {
-        self.available
-            .contains(flag)
-            .then(|| self.enabled.contains(flag))
     }
 }
 
@@ -329,7 +290,7 @@ mod tests {
     use crate::files::entry::Precedence;
     use crate::makenv::{MakeEnv, MakeEnvStack};
     use crate::package::Package;
-    use crate::test_support::{cpv, package_metadata};
+    use crate::test_support::{cpv, pkg_metadata};
 
     fn use_state(
         makenv: &str,
@@ -354,7 +315,7 @@ mod tests {
         let package = Package::new(
             cpv("dev-lang", "rust", "1.0"),
             "gentoo".parse()?,
-            package_metadata(&[("IUSE", iuse)]),
+            pkg_metadata(&[("IUSE", iuse)]),
         );
         Ok(policy
             .effective_for(&package, false)
@@ -389,20 +350,20 @@ mod tests {
 
         let foo = UseFlag::new("foo")?;
         let bar = UseFlag::new("bar")?;
-        let available = FxHashSet::from_iter([&foo, &bar]);
+        let available = FxHashSet::from_iter([foo.clone(), bar.clone()]);
         for (input, foo_state, bar_state, expected) in cases {
             let expr = DepExpression::<RequiredUseFlag>::parse(
                 Eapi::Eight,
                 ExpressionKind::RequiredUse,
                 input,
             )?;
-            let state = EffectiveUse {
-                available: available.clone(),
-                enabled: [(&foo, foo_state), (&bar, bar_state)]
+            let state = EffectiveUse::from_parts(
+                available.clone(),
+                [(&foo, foo_state), (&bar, bar_state)]
                     .into_iter()
-                    .filter_map(|(flag, enabled)| enabled.then_some(flag))
+                    .filter_map(|(flag, enabled)| enabled.then_some(flag.clone()))
                     .collect(),
-            };
+            );
             let actual = try_all(expr.view().roots(), |n| {
                 eval_expression(n.expression(), &state)
             })?;
@@ -431,7 +392,7 @@ mod tests {
         let package = Package::new(
             cpv("sys-libs", "pam", "1.0"),
             "gentoo".parse()?,
-            package_metadata(&[("IUSE", "elogind systemd forced")]),
+            pkg_metadata(&[("IUSE", "elogind systemd forced")]),
         );
         let effective = policy.effective_for(&package, false);
 

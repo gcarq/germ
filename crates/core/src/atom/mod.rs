@@ -113,6 +113,11 @@ impl Atom {
         self.repo.as_ref()
     }
 
+    /// Returns the USE deps.
+    pub fn use_deps(&self) -> &[UseDep] {
+        &self.use_deps
+    }
+
     /// Returns the slot restriction, if any.
     pub const fn slot(&self) -> Option<&SlotConstraint> {
         self.slot.as_ref()
@@ -330,6 +335,13 @@ pub enum AtomBlocker {
     Strong,
 }
 
+impl AtomBlocker {
+    /// Returns `true` if the blocker is weak.
+    pub const fn is_weak(&self) -> bool {
+        matches!(self, Self::Weak)
+    }
+}
+
 impl fmt::Display for AtomBlocker {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -437,8 +449,8 @@ mod tests {
     #[test]
     fn test_atom_use_deps() {
         let atom = Atom::new("cat/pkg[foo,-bar,!baz?,qux(-)=]").unwrap();
-        assert_eq!(atom.to_string(), "cat/pkg[foo,-bar,!baz?,qux(-)=]");
-        assert!(Atom::new("cat/pkg").unwrap().use_deps.is_empty());
+        assert_eq!(atom.use_deps().len(), 4);
+        assert!(Atom::new("cat/pkg").unwrap().use_deps().is_empty());
 
         for atom in [
             "cat/pkg[]",

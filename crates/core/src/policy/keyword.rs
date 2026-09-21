@@ -151,7 +151,7 @@ mod tests {
     use super::*;
     use crate::files::entry::Precedence;
     use crate::package::Package;
-    use crate::test_support::{cpv, package_metadata};
+    use crate::test_support::{cpv, pkg_metadata, pkg};
     use crate::utils::Inherit;
     use crate::vdb::package::InstalledPackage;
 
@@ -167,13 +167,14 @@ mod tests {
     }
 
     fn package<'a>(keywords: impl IntoIterator<Item = &'a str>) -> Package {
-        Package::new(
-            cpv("dev-lang", "rust", "1.0"),
-            "gentoo".parse().unwrap(),
-            package_metadata(&[(
+        pkg(
+            "dev-lang",
+            "rust",
+            "1.0",
+            &[(
                 "KEYWORDS",
                 &keywords.into_iter().collect::<Vec<_>>().join(" "),
-            )]),
+            )],
         )
     }
 
@@ -295,7 +296,7 @@ mod tests {
         let pkg = InstalledPackage::from_parts(
             cpv("dev-lang", "rust", "1.0"),
             "gentoo".parse().unwrap(),
-            package_metadata(&[("KEYWORDS", "amd64")]),
+            pkg_metadata(&[("KEYWORDS", "amd64")]),
             Vec::default(),
         );
         assert_eq!(policy.evaluate(&pkg), KeywordEvalResult::new(true, true));

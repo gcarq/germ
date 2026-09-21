@@ -1,8 +1,11 @@
 pub mod cpv;
 pub mod metadata;
 pub mod names;
+mod requirement;
 pub mod slot;
 pub mod version;
+
+pub use requirement::AtomRequirement;
 
 use crate::repository::RepoName;
 use crate::{atom::Atom, package::cpv::CPV};
@@ -41,7 +44,7 @@ pub trait PackageView {
 
 /// Represents a package within a [`Repository`] with its category, name, version and additional
 /// metadata required to install it.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Package {
     cpv: CPV,
     repo: RepoName,
@@ -82,7 +85,7 @@ impl PartialEq for Package {
 }
 
 impl hash::Hash for Package {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
         self.cpv.hash(state);
         self.repo.hash(state);
     }
@@ -97,11 +100,10 @@ impl fmt::Display for Package {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::test_support::{cpv, package_metadata};
+    use crate::test_support::{cpv, pkg_metadata, pkg};
     use crate::vdb::package::InstalledPackage;
 
-    fn assert_package_view_matches_atoms<P: PackageView>(package: &P) {
+    fn assert_package_view_matches_atoms<P: PackageView>(pkg: &P) {
         for atom in [
             "sys-devel/gcc",
             "sys-devel/gcc::gentoo",
@@ -114,7 +116,7 @@ mod tests {
             "sys-devel/gcc:=",
         ] {
             let atom = Atom::new(atom).unwrap();
-            assert!(package.matches_atom(&atom), "{atom} should match");
+            assert!(pkg.matches_atom(&atom), "{atom} should match");
         }
 
         for atom in [
@@ -128,7 +130,7 @@ mod tests {
             "sys-devel/gcc:15/0=",
         ] {
             let atom = Atom::new(atom).unwrap();
-            assert!(!package.matches_atom(&atom), "{atom} shouldn't match");
+            assert!(!pkg.matches_atom(&atom), "{atom} shouldn't match");
         }
     }
 
@@ -137,18 +139,18 @@ mod tests {
         let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
         let repo: RepoName = "gentoo".parse().unwrap();
 
-        let package = Package::new(
+        let pkg = Package::new(
             cpv.clone(),
             repo.clone(),
-            package_metadata(&[("SLOT", "15")]),
+            pkg_metadata(&[("SLOT", "15")]),
         );
-        assert_package_view_matches_atoms(&package);
-        assert_eq!(package.qualified_name(), "sys-devel/gcc");
+        assert_package_view_matches_atoms(&pkg);
+        assert_eq!(pkg.qualified_name(), "sys-devel/gcc");
 
         let installed = InstalledPackage::from_parts(
             cpv,
             repo,
-            package_metadata(&[("SLOT", "15")]),
+            pkg_metadata(&[("SLOT", "15")]),
             Vec::default(),
         );
         assert_package_view_matches_atoms(&installed);
@@ -157,11 +159,7 @@ mod tests {
 
     #[test]
     fn test_package_display() {
-        let package = Package::new(
-            cpv("dev-lang", "rust", "1.98.1"),
-            "gentoo".parse().unwrap(),
-            package_metadata(&[]),
-        );
-        assert_eq!(package.to_string(), "dev-lang/rust-1.98.1::gentoo");
+        let pkg = pkg("dev-lang", "rust", "1.98.1", &[]);
+        assert_eq!(pkg.to_string(), "dev-lang/rust-1.98.1::gentoo");
     }
 }

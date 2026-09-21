@@ -6,13 +6,14 @@ use anyhow::Context;
 
 use self::keyword::EffectiveKeywords;
 use self::pkgmask::PackageMasks;
-use self::useflag::{EffectiveUse, UsePolicy};
+use self::useflag::UsePolicy;
 use crate::package::PackageView;
+use crate::useflag::EffectiveUse;
 
 /// Defines the outcome of the package evaluation against the policies.
 #[derive(Debug, Clone)]
-pub enum PolicyResult<'a> {
-    Accepted(EffectiveUse<'a>),
+pub enum PolicyResult {
+    Accepted(EffectiveUse),
     Masked,
     MissingKeyword,
     RequiredUseUnsatisfied,
@@ -40,7 +41,7 @@ impl PackagePolicy {
     }
 
     /// Evaluates a package and returns the result as [`PolicyResult`].
-    pub fn evaluate<'a, P>(&'a self, pkg: &'a P) -> anyhow::Result<PolicyResult<'a>>
+    pub fn evaluate<P>(&self, pkg: &P) -> anyhow::Result<PolicyResult>
     where
         P: PackageView,
     {

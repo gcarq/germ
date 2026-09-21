@@ -6,13 +6,11 @@ use germ_core::atom::Atom;
 use germ_core::conf::portage::PortageConf;
 use germ_core::policy::{PackagePolicy, pkgmask::PackageMasks};
 use germ_core::repository::RepoSet;
-use germ_core::resolver::Resolver;
-use germ_core::vdb::Vdb;
+use germ_core::resolver::{RepoPkgProvider, Resolver};
 
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.
 pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
-    let mut vdb = Vdb::from_path(sysconf.vdb_path()).context("unable to read VDB")?;
     let reposet = RepoSet::new(sysconf.clone()).context("unable to build repo set")?;
     let conf = PortageConf::new(&reposet, &sysconf)?;
     let policy = PackagePolicy::new(
@@ -21,7 +19,7 @@ pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
         PackageMasks::new(&reposet.package_mask_source()?, conf.package_mask_source()?)?,
     );
 
-    match Resolver::new(&mut vdb, &reposet, &policy)
+    match Resolver::new(RepoPkgProvider::new(&reposet, &policy))
         .resolve(atom)
         .await?
     {

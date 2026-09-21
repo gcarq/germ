@@ -1,3 +1,4 @@
+use crate::package::Package;
 use crate::package::cpv::CPV;
 use crate::package::metadata::{PackageMetadata, RawPackageMetadata};
 use crate::package::version::PackageVersion;
@@ -14,8 +15,17 @@ pub fn cpv(category: &str, package: &str, version: &str) -> CPV {
     )
 }
 
+/// Creates a [`Package`] from valid strings for testing.
+pub fn pkg(cat: &str, name: &str, version: &str, metadata: &[(&str, &str)]) -> Package {
+    Package::new(
+        cpv(cat, name, version),
+        "gentoo".parse().unwrap(),
+        pkg_metadata(metadata),
+    )
+}
+
 /// Creates valid package metadata with optional variable overrides.
-pub fn package_metadata(values: &[(&str, &str)]) -> PackageMetadata {
+pub fn pkg_metadata(values: &[(&str, &str)]) -> PackageMetadata {
     let defaults = [
         ("EAPI", "8"),
         ("DESCRIPTION", "Some description"),

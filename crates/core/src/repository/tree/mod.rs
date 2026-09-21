@@ -394,13 +394,13 @@ mod tests {
     use super::*;
 
     use super::super::test_support::RepoBuilder;
-    use crate::test_support::{cpv, package_metadata};
+    use crate::test_support::{cpv, pkg_metadata};
 
     #[tokio::test]
     async fn test_repository_resolves_cached_metadata() {
         let repository = RepoBuilder::new("repo").finalize().unwrap();
         let cpv = cpv("app-misc", "foo", "1");
-        let metadata = package_metadata(&[("DESCRIPTION", "cached metadata")]);
+        let metadata = pkg_metadata(&[("DESCRIPTION", "cached metadata")]);
         repository
             .metadata_cache
             .insert_batch([(&cpv, &metadata)])
@@ -428,7 +428,7 @@ mod tests {
         let invalid_last = cpv("app-misc", "invalid-last", "1");
         repository
             .metadata_cache
-            .insert_batch([(&cached, &package_metadata(&[]))])
+            .insert_batch([(&cached, &pkg_metadata(&[]))])
             .unwrap();
 
         let resolved = repository

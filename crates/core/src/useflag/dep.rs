@@ -1,4 +1,4 @@
-use super::UseFlag;
+use super::{EffectiveUse, UseFlag};
 use anyhow::bail;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
@@ -44,6 +44,13 @@ pub enum UseDepDefault {
     Disabled, // foo(-)
 }
 
+impl UseDepDefault {
+    /// Returns whether this default state is enabled.
+    pub const fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+}
+
 impl fmt::Display for UseDepDefault {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -59,6 +66,35 @@ pub struct UseDep {
     flag: UseFlag,
     kind: UseDepKind,
     default: Option<UseDepDefault>,
+}
+
+impl UseDep {
+    /// Returns whether this dependency is satisfied by the `owner` and `target` package USE states.
+    ///
+    /// TODO: This currently dosn't check whether a USE flag is available for `target`.
+    pub fn is_satisfied_by(
+        &self,
+        owner: &EffectiveUse,
+        target: &EffectiveUse,
+    ) -> anyhow::Result<bool> {
+        let target = target
+            .state(&self.flag)
+            .or_else(|| self.default.map(UseDepDefault::is_enabled));
+
+        let matches = match self.kind {
+            UseDepKind::Enabled => target == Some(true),
+            UseDepKind::Disabled => target == Some(false),
+            UseDepKind::ConditionalEnabled => {
+                target == Some(true) || !owner.is_enabled(&self.flag)?
+            }
+            UseDepKind::ConditionalDisabled => {
+                target == Some(false) || owner.is_enabled(&self.flag)?
+            }
+            UseDepKind::Equal => target == Some(owner.state(&self.flag).unwrap_or(false)),
+            UseDepKind::NotEqual => target == Some(!owner.state(&self.flag).unwrap_or(false)),
+        };
+        Ok(matches)
+    }
 }
 
 impl FromStr for UseDep {
@@ -114,6 +150,57 @@ impl fmt::Display for UseDep {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::useflag::test_support::effective;
+
+    type EffectiveArgs<'a> = (&'a [&'a str], &'a [&'a str]);
+
+    #[test]
+    fn test_use_dep_matching() {
+        // input, (owner_available, owner_enabled), (target_available, target_enabled), expected
+        let cases: [(&str, EffectiveArgs<'_>, EffectiveArgs<'_>, bool); 24] = [
+            ("foo", (&["foo"], &["foo"]), (&["foo"], &["foo"]), true),
+            ("foo", (&["foo"], &["foo"]), (&["foo"], &[]), false),
+            ("foo", (&["foo"], &["foo"]), (&[], &[]), false),
+            ("-foo", (&["foo"], &["foo"]), (&["foo"], &[]), true),
+            ("-foo", (&["foo"], &["foo"]), (&["foo"], &["foo"]), false),
+            ("-foo", (&["foo"], &["foo"]), (&[], &[]), false),
+            ("foo?", (&["foo"], &["foo"]), (&["foo"], &["foo"]), true),
+            ("foo?", (&["foo"], &["foo"]), (&["foo"], &[]), false),
+            ("foo?", (&["foo"], &[]), (&[], &[]), true),
+            ("!foo?", (&["foo"], &[]), (&["foo"], &[]), true),
+            ("!foo?", (&["foo"], &[]), (&["foo"], &["foo"]), false),
+            ("!foo?", (&["foo"], &["foo"]), (&[], &[]), true),
+            ("foo=", (&["foo"], &["foo"]), (&["foo"], &["foo"]), true),
+            ("foo=", (&["foo"], &[]), (&["foo"], &[]), true),
+            ("foo=", (&[], &[]), (&["foo"], &[]), true),
+            ("foo=", (&[], &[]), (&["foo"], &["foo"]), false),
+            ("!foo=", (&["foo"], &["foo"]), (&["foo"], &[]), true),
+            ("!foo=", (&["foo"], &[]), (&["foo"], &["foo"]), true),
+            ("!foo=", (&[], &[]), (&["foo"], &["foo"]), true),
+            ("!foo=", (&[], &[]), (&["foo"], &[]), false),
+            ("foo(+)", (&[], &[]), (&[], &[]), true),
+            ("foo(-)", (&[], &[]), (&[], &[]), false),
+            ("foo(+)=", (&["foo"], &[]), (&[], &[]), false),
+            ("foo(-)=", (&["foo"], &[]), (&[], &[]), true),
+        ];
+
+        for (input, owner, target, expected) in cases {
+            let dep = input.parse::<UseDep>().unwrap();
+            let actual = dep
+                .is_satisfied_by(&effective(owner.0, owner.1), &effective(target.0, target.1))
+                .unwrap();
+            assert_eq!(actual, expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn test_use_dep_conditional_owner() {
+        for input in ["foo?", "!foo?"] {
+            let dep = input.parse::<UseDep>().unwrap();
+            let result = dep.is_satisfied_by(&effective(&[], &[]), &effective(&[], &[]));
+            assert!(result.is_err(), "{input}");
+        }
+    }
 
     #[test]
     fn test_use_dep_valid() {
@@ -122,20 +209,15 @@ mod tests {
             "-foo(-)", "foo(+)?", "foo(-)?", "!foo(+)?", "!foo(-)?", "foo(+)=", "foo(-)=",
             "!foo(+)=", "!foo(-)=",
         ];
-
         for input in inputs {
-            let dependency = input.parse::<UseDep>().unwrap();
-            assert_eq!(dependency.flag, "foo".parse().unwrap());
-            assert_eq!(dependency.to_string(), input);
+            let dep = input.parse::<UseDep>().unwrap();
+            assert_eq!(dep.flag, "foo".parse().unwrap());
+            assert_eq!(dep.to_string(), input);
         }
-    }
 
-    #[test]
-    fn test_use_dep_structure() {
-        let dependency = "!foo(-)?".parse::<UseDep>().unwrap();
-        assert_eq!(dependency.flag, "foo".parse().unwrap());
-        assert_eq!(dependency.kind, UseDepKind::ConditionalDisabled);
-        assert_eq!(dependency.default, Some(UseDepDefault::Disabled));
+        let dep = "!foo(-)?".parse::<UseDep>().unwrap();
+        assert_eq!(dep.kind, UseDepKind::ConditionalDisabled);
+        assert_eq!(dep.default, Some(UseDepDefault::Disabled));
     }
 
     #[test]
@@ -157,10 +239,8 @@ mod tests {
             "foo(+x)",
             "foo bar",
         ] {
-            assert!(
-                input.parse::<UseDep>().is_err(),
-                "{input:?} should be invalid"
-            );
+            let result = input.parse::<UseDep>();
+            assert!(result.is_err(), "{input:?} should be invalid");
         }
     }
 }

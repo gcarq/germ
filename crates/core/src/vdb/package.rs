@@ -102,7 +102,7 @@ impl fmt::Display for InstalledPackage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{cpv, package_metadata};
+    use crate::test_support::{cpv, pkg_metadata};
 
     #[test]
     fn test_installed_package_fmt() {
@@ -110,7 +110,7 @@ mod tests {
         let pkg = InstalledPackage {
             cpv,
             repo: "gentoo".parse().unwrap(),
-            metadata: package_metadata(&[]),
+            metadata: pkg_metadata(&[]),
             useflags: Vec::new(),
         };
         assert_eq!(pkg.to_string(), "app-editors/vim-7.0.174-r1::gentoo");
