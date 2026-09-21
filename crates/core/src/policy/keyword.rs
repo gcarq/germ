@@ -37,7 +37,7 @@ impl EffectiveKeywords {
     }
 
     /// Evaluates whether the given [`PackageView`] is accepted for the effective keywords.
-    pub fn evaluate<P: PackageView>(&self, pkg: &P) -> KeywordEvalResult {
+    pub fn eval<P: PackageView>(&self, pkg: &P) -> KeywordEvalResult {
         if !self.keywords_accepted(pkg, pkg.metadata().keywords()) {
             return KeywordEvalResult::new(false, false);
         }
@@ -151,7 +151,7 @@ mod tests {
     use super::*;
     use crate::files::entry::Precedence;
     use crate::package::Package;
-    use crate::test_support::{cpv, pkg_metadata, pkg};
+    use crate::test_support::{cpv, pkg, pkg_metadata};
     use crate::utils::Inherit;
     use crate::vdb::package::InstalledPackage;
 
@@ -189,7 +189,7 @@ mod tests {
 
         for (keyword, expected) in test_cases {
             let pkg = package([keyword]);
-            assert_eq!(policy.evaluate(&pkg), expected);
+            assert_eq!(policy.eval(&pkg), expected);
         }
     }
 
@@ -207,7 +207,7 @@ mod tests {
         for &(accept_keywords, package_keywords, expected) in test_cases {
             let policy = policy(accept_keywords, "");
             let pkg = package(package_keywords.split_whitespace());
-            assert_eq!(policy.evaluate(&pkg), expected);
+            assert_eq!(policy.eval(&pkg), expected);
         }
     }
 
@@ -215,14 +215,14 @@ mod tests {
     fn test_policy_selector_reject() {
         let policy = policy("amd64", "dev-lang/rust -amd64");
         let pkg = package(["amd64"]);
-        assert_eq!(policy.evaluate(&pkg), KeywordEvalResult::new(false, false));
+        assert_eq!(policy.eval(&pkg), KeywordEvalResult::new(false, false));
     }
 
     #[test]
     fn test_policy_reset_accept() {
         let policy = policy("amd64", "dev-lang/rust -* ~amd64");
         let pkg = package(["~amd64"]);
-        assert_eq!(policy.evaluate(&pkg), KeywordEvalResult::new(true, false));
+        assert_eq!(policy.eval(&pkg), KeywordEvalResult::new(true, false));
     }
 
     #[test]
@@ -236,7 +236,7 @@ mod tests {
         for (accept_keywords, package_keywords, expected) in test_cases {
             let pkg = package([package_keywords]);
             let keywords = policy(accept_keywords, "dev-lang/rust");
-            assert_eq!(keywords.evaluate(&pkg), expected);
+            assert_eq!(keywords.eval(&pkg), expected);
         }
     }
 
@@ -258,7 +258,7 @@ mod tests {
         let pkg = package(["~amd64"]);
         for (package_keywords, expected) in test_cases {
             let keywords = policy("", package_keywords);
-            assert_eq!(keywords.evaluate(&pkg), expected);
+            assert_eq!(keywords.eval(&pkg), expected);
         }
     }
 
@@ -271,7 +271,7 @@ mod tests {
         let policy = EffectiveKeywords::new(Vec::default(), package_accept_keywords);
 
         let pkg = package(["amd64"]);
-        assert_eq!(policy.evaluate(&pkg), KeywordEvalResult::new(false, false));
+        assert_eq!(policy.eval(&pkg), KeywordEvalResult::new(false, false));
         Ok(())
     }
 
@@ -286,7 +286,7 @@ mod tests {
 
         for (package_keywords, expected) in test_cases {
             let pkg = package(package_keywords.split_whitespace());
-            assert_eq!(policy.evaluate(&pkg), expected);
+            assert_eq!(policy.eval(&pkg), expected);
         }
     }
 
@@ -299,21 +299,21 @@ mod tests {
             pkg_metadata(&[("KEYWORDS", "amd64")]),
             Vec::default(),
         );
-        assert_eq!(policy.evaluate(&pkg), KeywordEvalResult::new(true, true));
+        assert_eq!(policy.eval(&pkg), KeywordEvalResult::new(true, true));
     }
 
     #[test]
     fn test_policy_stable_keywords() {
         let keywords = policy("amd64 ~amd64", "");
         let pkg = package(["amd64"]);
-        assert_eq!(keywords.evaluate(&pkg), KeywordEvalResult::new(true, false));
+        assert_eq!(keywords.eval(&pkg), KeywordEvalResult::new(true, false));
 
         let keywords = policy("amd64 ~arm64", "");
         let pkg = package(["amd64", "arm64"]);
-        assert_eq!(keywords.evaluate(&pkg), KeywordEvalResult::new(true, false));
+        assert_eq!(keywords.eval(&pkg), KeywordEvalResult::new(true, false));
 
         let keywords = policy("amd64", "dev-lang/rust ~amd64");
         let pkg = package(["amd64"]);
-        assert_eq!(keywords.evaluate(&pkg), KeywordEvalResult::new(true, false));
+        assert_eq!(keywords.eval(&pkg), KeywordEvalResult::new(true, false));
     }
 }

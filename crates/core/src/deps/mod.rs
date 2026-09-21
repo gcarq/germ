@@ -1,12 +1,14 @@
-pub mod expression;
+pub mod expr;
 mod parser;
 
 use crate::atom::{Atom, AtomBlocker};
-use crate::deps::expression::ExpressionTree;
-use crate::deps::parser::ExpressionParser;
-use crate::deps::parser::arena::{ArenaEntry, ExpressionArena};
+use crate::deps::expr::ExprTree;
+use crate::deps::parser::ExprParser;
+use crate::deps::parser::arena::{ExprArena, ExprEntry};
 use crate::eapi::Eapi;
 use crate::useflag::UseFlag;
+
+pub use expr::ExprEval;
 
 use anyhow::bail;
 use rkyv::{Archive, Deserialize, Serialize};
@@ -15,7 +17,7 @@ use std::str::FromStr;
 
 /// Selects the expression context for validation.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum ExpressionKind {
+pub enum ExprKind {
     Dependency,
     RequiredUse,
     Homepage,
@@ -25,16 +27,16 @@ pub enum ExpressionKind {
     Restrict,
 }
 
-impl ExpressionKind {
+impl ExprKind {
     /// Returns `true` if the given `expression` is valid for this kind.
-    const fn supports_expression<T: ExpressionItem>(self, expression: &ArenaEntry<T>) -> bool {
+    const fn supports_expr<T: ExprItem>(self, expression: &ExprEntry<T>) -> bool {
         match expression {
-            ArenaEntry::Item(_) | ArenaEntry::AllOf(_) => true,
-            ArenaEntry::Use { .. } => true,
-            ArenaEntry::AnyOf(_) => {
+            ExprEntry::Item(_) | ExprEntry::AllOf(_) => true,
+            ExprEntry::Use { .. } => true,
+            ExprEntry::AnyOf(_) => {
                 matches!(self, Self::Dependency | Self::License | Self::RequiredUse)
             }
-            ArenaEntry::ExactlyOneOf(_) | ArenaEntry::AtMostOneOf(_) => {
+            ExprEntry::ExactlyOneOf(_) | ExprEntry::AtMostOneOf(_) => {
                 matches!(self, Self::RequiredUse)
             }
         }
@@ -53,7 +55,7 @@ impl ExpressionKind {
     }
 }
 
-impl fmt::Display for ExpressionKind {
+impl fmt::Display for ExprKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
     }
@@ -61,7 +63,7 @@ impl fmt::Display for ExpressionKind {
 
 /// This trait defines an item that can be used in a dependency expression,
 /// such as [`RequiredUseFlag`] and [`AtomDep`].
-pub trait ExpressionItem: FromStr<Err = anyhow::Error> + fmt::Display {
+pub trait ExprItem: FromStr<Err = anyhow::Error> + fmt::Display {
     fn parse(input: &str) -> anyhow::Result<Self> {
         Self::from_str(input)
     }
@@ -91,7 +93,7 @@ impl AtomDep {
     }
 }
 
-impl ExpressionItem for AtomDep {}
+impl ExprItem for AtomDep {}
 
 impl FromStr for AtomDep {
     type Err = anyhow::Error;
@@ -139,7 +141,7 @@ impl RequiredUseFlag {
     }
 }
 
-impl ExpressionItem for RequiredUseFlag {}
+impl ExprItem for RequiredUseFlag {}
 
 impl FromStr for RequiredUseFlag {
     type Err = anyhow::Error;
@@ -166,18 +168,18 @@ impl fmt::Display for RequiredUseFlag {
 /// Holds a dependency expression parsed into an expression arena.
 /// See PMS 8.2 for the dependency specification format.
 #[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Clone, Debug)]
-pub struct DepExpression<T: ExpressionItem> {
-    arena: ExpressionArena<T>,
+pub struct DepExpr<T: ExprItem> {
+    arena: ExprArena<T>,
 }
 
-impl<T: ExpressionItem> DepExpression<T> {
+impl<T: ExprItem> DepExpr<T> {
     /// Parses the given `input` using the EAPI and metadata expression context.
     ///
     /// # Errors
     ///
     /// Returns an error when the EAPI is not supported, when the input is syntactically invalid,
     /// or when the parsed expression violates the context restrictions.
-    pub fn parse(eapi: Eapi, kind: ExpressionKind, input: &str) -> anyhow::Result<Self> {
+    pub fn parse(eapi: Eapi, kind: ExprKind, input: &str) -> anyhow::Result<Self> {
         if !eapi.is_supported_for_ebuilds() {
             bail!("EAPI {eapi} is not supported for dependency expressions");
         }
@@ -186,27 +188,27 @@ impl<T: ExpressionItem> DepExpression<T> {
             return Ok(Self::default());
         }
 
-        let arena = ExpressionParser::parse(input)?;
+        let arena = ExprParser::parse(input)?;
         arena.validate(kind)?;
         Ok(Self { arena })
     }
 
     /// Returns a view of the expression.
-    pub const fn view(&self) -> ExpressionTree<'_, T> {
+    pub const fn view(&self) -> ExprTree<'_, T> {
         self.arena.view()
     }
 }
 
-impl<T: ExpressionItem> fmt::Display for DepExpression<T> {
+impl<T: ExprItem> fmt::Display for DepExpr<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.view().fmt(f)
     }
 }
 
-impl<T: ExpressionItem> Default for DepExpression<T> {
+impl<T: ExprItem> Default for DepExpr<T> {
     fn default() -> Self {
         Self {
-            arena: ExpressionArena::default(),
+            arena: ExprArena::default(),
         }
     }
 }
@@ -263,8 +265,7 @@ mod tests {
     #[test]
     fn test_parse_empty() {
         let expression =
-            DepExpression::<AtomDep>::parse(Eapi::Seven, ExpressionKind::Dependency, " \t")
-                .unwrap();
+            DepExpr::<AtomDep>::parse(Eapi::Seven, ExprKind::Dependency, " \t").unwrap();
         assert_eq!(expression.to_string(), "");
     }
 
@@ -276,20 +277,20 @@ mod tests {
             ("!!cat/pkg", true),
             ("^^ ( cat/pkg cat/other )", false),
         ] {
-            let result = DepExpression::<AtomDep>::parse(eapi, ExpressionKind::Dependency, input);
+            let result = DepExpr::<AtomDep>::parse(eapi, ExprKind::Dependency, input);
             assert_eq!(result.is_ok(), valid, "dependency: {input}");
         }
 
         for (kind, input, valid) in [
-            (ExpressionKind::RequiredUse, "^^ ( foo bar )", true),
-            (ExpressionKind::RequiredUse, "?? ( foo bar )", true),
-            (ExpressionKind::RequiredUse, "!foo", true),
-            (ExpressionKind::RequiredUse, "!!foo", false),
-            (ExpressionKind::License, "|| ( GPL-2 MIT )", true),
-            (ExpressionKind::Restrict, "( fetch mirror )", true),
-            (ExpressionKind::Restrict, "|| ( fetch mirror )", false),
+            (ExprKind::RequiredUse, "^^ ( foo bar )", true),
+            (ExprKind::RequiredUse, "?? ( foo bar )", true),
+            (ExprKind::RequiredUse, "!foo", true),
+            (ExprKind::RequiredUse, "!!foo", false),
+            (ExprKind::License, "|| ( GPL-2 MIT )", true),
+            (ExprKind::Restrict, "( fetch mirror )", true),
+            (ExprKind::Restrict, "|| ( fetch mirror )", false),
         ] {
-            let result = DepExpression::<RequiredUseFlag>::parse(eapi, kind, input);
+            let result = DepExpr::<RequiredUseFlag>::parse(eapi, kind, input);
             assert_eq!(result.is_ok(), valid, "{kind}: {input}");
         }
     }

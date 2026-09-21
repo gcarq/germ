@@ -41,14 +41,15 @@ impl PackagePolicy {
     }
 
     /// Evaluates a package and returns the result as [`PolicyResult`].
-    pub fn evaluate<P>(&self, pkg: &P) -> anyhow::Result<PolicyResult>
+    pub async fn eval<P>(&self, pkg: &P) -> anyhow::Result<PolicyResult>
     where
-        P: PackageView,
+        P: PackageView + Sync,
     {
-        let keyword = self.keywords.evaluate(pkg);
+        let keyword = self.keywords.eval(pkg);
         let (effective_use, use_satisfied) = self
             .usepolicy
-            .evaluate(pkg, keyword.stable_in_use)
+            .eval(pkg, keyword.stable_in_use)
+            .await
             .context("failed to evaluate required USE flags")?;
 
         let result = if !keyword.accepted {

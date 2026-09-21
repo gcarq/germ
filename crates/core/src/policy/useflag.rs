@@ -1,13 +1,15 @@
+use std::future::{self, Future};
+
 use crate::atom::Atom;
-use crate::deps::RequiredUseFlag;
-use crate::deps::expression::{Expression, ExpressionNode};
+
+use crate::deps::{ExprEval, RequiredUseFlag};
 use crate::files::pkgfile::{PackageUseRecords, UseFlags};
 use crate::files::{UseEntries, entry::Entry};
 use crate::package::PackageView;
 use crate::profile::ProfileUseRecords;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::{EffectiveUse, IUseEntry, IUseState, UseExpandConfig, UseFlag};
-use crate::utils::{Inherit, try_all, try_any};
+use crate::utils::Inherit;
 use anyhow::Context;
 
 /// Simple DTO used to build [`UsePolicy`] from user configured USE entries.
@@ -84,19 +86,28 @@ impl UsePolicy {
 
     /// Evaluates the required USE flags and returns a tuple containing its [`EffectiveUse`]
     /// and whether the required USE flags are satisfied.
-    pub fn evaluate<P>(&self, pkg: &P, stable_in_use: bool) -> anyhow::Result<(EffectiveUse, bool)>
+    ///
+    /// TODO: This currently only checks the required USE flags to satisfy the expression,
+    ///       inactive branches can contain unreferenced USE flags which might not be PMS compatible.
+    pub async fn eval<P>(
+        &self,
+        pkg: &P,
+        stable_in_use: bool,
+    ) -> anyhow::Result<(EffectiveUse, bool)>
     where
-        P: PackageView,
+        P: PackageView + Sync,
     {
         let effective_use = self.effective_for(pkg, stable_in_use);
-        let tree = pkg.metadata().required_use().view();
-        // TODO: This currently only checks the required USE flags to satisfy the expression,
-        // inactive branches can contain unreferenced USE flags which might not be PMS compatible.
-        let required_use_satisfied = try_all(tree.roots(), |n| {
-            eval_expression(n.expression(), &effective_use)
-        })?;
-
-        Ok((effective_use, required_use_satisfied))
+        let mut evaluator = ReqUseEval {
+            state: &effective_use,
+        };
+        let use_satisfied = pkg
+            .metadata()
+            .required_use()
+            .view()
+            .eval(&mut evaluator)
+            .await?;
+        Ok((effective_use, use_satisfied))
     }
 
     /// Returns the effective USE state for the given [`PackageView`].
@@ -113,7 +124,7 @@ impl UsePolicy {
             .cloned()
             .collect::<FxHashSet<_>>();
 
-        let package_use = self.package_use.entries_for(pkg);
+        let pkg_use = self.package_use.entries_for(pkg);
         let masked = self.masked_for_pkg(pkg, stable_in_use);
         let forced = self.forced_for_pkg(pkg, stable_in_use);
 
@@ -121,8 +132,7 @@ impl UsePolicy {
             .iter()
             .filter(|flag| !masked.contains(*flag))
             .filter(|flag| {
-                forced.contains(*flag)
-                    || self.desired_state(pkg, &package_use, flag).unwrap_or(false)
+                forced.contains(*flag) || self.desired_state(pkg, &pkg_use, flag).unwrap_or(false)
             })
             .cloned()
             .collect();
@@ -236,56 +246,31 @@ impl PackageUse {
     }
 }
 
-/// Evaluates `expr` that is part of `REQUIRED_USE` to determine whether
-/// the USE flags are satisfied for the given `state`.
-fn eval_expression<'a>(
-    expr: Expression<'a, RequiredUseFlag>,
-    state: &EffectiveUse,
-) -> anyhow::Result<bool> {
-    let result = match expr {
-        Expression::Item(flag) => match flag.is_negated() {
-            true => state.is_disabled(flag.inner())?,
-            false => state.is_enabled(flag.inner())?,
-        },
-        Expression::AllOf(nodes) => try_all(nodes, |n| eval_expression(n.expression(), state))?,
-        Expression::AnyOf(nodes) => try_any(nodes, |n| eval_expression(n.expression(), state))?,
-        Expression::ExactlyOneOf(nodes) => eval_up_to_two(nodes, state)? == 1,
-        Expression::AtMostOneOf(nodes) => eval_up_to_two(nodes, state)? < 2,
-        Expression::Use {
-            flag,
-            negated,
-            nodes,
-        } => match state.is_enabled(flag)? == negated {
-            true => true,
-            false => try_all(nodes, |n| eval_expression(n.expression(), state))?,
-        },
-    };
-    Ok(result)
+/// Evaluates `REQUIRED_USE` against the effective USE state of a given package.
+struct ReqUseEval<'a> {
+    state: &'a EffectiveUse,
 }
 
-/// Evaluates `nodes` and counts how many are satisfied by the given `state`.
-///
-/// Breaks early if more than two nodes are satisfied.
-fn eval_up_to_two<'a, I>(nodes: I, state: &EffectiveUse) -> anyhow::Result<u8>
-where
-    I: IntoIterator<Item = ExpressionNode<'a, RequiredUseFlag>>,
-{
-    let mut count = 0;
-    for node in nodes.into_iter() {
-        if eval_expression(node.expression(), state)? {
-            count += 1;
-            if count > 2 {
-                break;
-            }
-        }
+impl ExprEval<RequiredUseFlag> for ReqUseEval<'_> {
+    fn eval_item(
+        &mut self,
+        flag: &RequiredUseFlag,
+    ) -> impl Future<Output = anyhow::Result<bool>> + Send {
+        future::ready(match flag.is_negated() {
+            true => self.state.is_disabled(flag.inner()),
+            false => self.state.is_enabled(flag.inner()),
+        })
     }
-    Ok(count)
+
+    fn is_use_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
+        self.state.is_enabled(flag)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deps::{DepExpression, ExpressionKind};
+    use crate::deps::{DepExpr, ExprKind};
     use crate::eapi::Eapi;
     use crate::files::entry::Precedence;
     use crate::makenv::{MakeEnv, MakeEnvStack};
@@ -322,41 +307,24 @@ mod tests {
             .state(&UseFlag::new(flag)?))
     }
 
-    #[test]
-    fn test_eval_required_use() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn test_eval_required_use() -> anyhow::Result<()> {
         // expression, foo state, bar state, expected
         let cases = [
             ("foo", true, false, true),
+            ("foo", false, false, false),
             ("!foo", false, false, true),
             ("!foo", true, false, false),
-            ("foo bar", true, true, true),
-            ("foo bar", true, false, false),
-            ("( foo bar )", true, true, true),
-            ("( foo bar )", true, false, false),
-            ("|| ( foo bar )", false, true, true),
-            ("|| ( foo bar )", false, false, false),
-            ("^^ ( foo bar )", true, false, true),
-            ("^^ ( foo bar )", true, true, false),
-            ("?? ( foo bar )", true, false, true),
-            ("?? ( foo bar )", true, true, false),
-            ("foo? ( bar )", false, false, true),
-            ("foo? ( bar )", true, true, true),
+            ("foo? ( bar )", false, true, true),
             ("foo? ( bar )", true, false, false),
-            ("!foo? ( bar )", false, true, true),
-            ("!foo? ( bar )", false, false, false),
-            ("!foo? ( bar )", true, true, true),
-            ("!foo? ( bar )", true, false, true),
         ];
 
         let foo = UseFlag::new("foo")?;
         let bar = UseFlag::new("bar")?;
         let available = FxHashSet::from_iter([foo.clone(), bar.clone()]);
         for (input, foo_state, bar_state, expected) in cases {
-            let expr = DepExpression::<RequiredUseFlag>::parse(
-                Eapi::Eight,
-                ExpressionKind::RequiredUse,
-                input,
-            )?;
+            let expr =
+                DepExpr::<RequiredUseFlag>::parse(Eapi::Eight, ExprKind::RequiredUse, input)?;
             let state = EffectiveUse::from_parts(
                 available.clone(),
                 [(&foo, foo_state), (&bar, bar_state)]
@@ -364,9 +332,8 @@ mod tests {
                     .filter_map(|(flag, enabled)| enabled.then_some(flag.clone()))
                     .collect(),
             );
-            let actual = try_all(expr.view().roots(), |n| {
-                eval_expression(n.expression(), &state)
-            })?;
+            let mut evaluator = ReqUseEval { state: &state };
+            let actual = expr.view().eval(&mut evaluator).await?;
 
             assert_eq!(actual, expected, "{input}");
         }

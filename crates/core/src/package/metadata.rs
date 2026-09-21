@@ -1,4 +1,4 @@
-use crate::deps::{AtomDep, DepExpression, ExpressionItem, ExpressionKind, RequiredUseFlag};
+use crate::deps::{AtomDep, DepExpr, ExprItem, ExprKind, RequiredUseFlag};
 use crate::eapi::Eapi;
 use crate::keyword::Keyword;
 use crate::package::slot::PackageSlot;
@@ -114,26 +114,26 @@ pub enum PackageMetadataError {
 pub struct PackageMetadata {
     eapi: Eapi,
     description: String,
-    // TODO: should be parsed as DepExpression
+    // TODO: should be parsed as DepExpr
     homepage: Vec<String>,
-    // TODO: should be parsed as DepExpression
+    // TODO: should be parsed as DepExpr
     src_uri: Vec<String>,
-    // TODO: enforce valid license identifiers and parse as DepExpression
+    // TODO: enforce valid license identifiers and parse as DepExpr
     license: Vec<String>,
     properties: Vec<String>,
     keywords: Vec<Keyword>,
     inherit: Vec<String>,
-    // TODO: Use something like DepExpression<String>
+    // TODO: Use something like DepExpr<String>
     restrict: String,
     defined_phases: Vec<String>,
     iuse: Vec<IUseEntry>,
-    required_use: DepExpression<RequiredUseFlag>,
+    required_use: DepExpr<RequiredUseFlag>,
     slot: PackageSlot,
-    depend: DepExpression<AtomDep>,
-    bdepend: DepExpression<AtomDep>,
-    idepend: DepExpression<AtomDep>,
-    pdepend: DepExpression<AtomDep>,
-    rdepend: DepExpression<AtomDep>,
+    depend: DepExpr<AtomDep>,
+    bdepend: DepExpr<AtomDep>,
+    idepend: DepExpr<AtomDep>,
+    pdepend: DepExpr<AtomDep>,
+    rdepend: DepExpr<AtomDep>,
     eclasses: Vec<Eclass>,
 }
 
@@ -182,7 +182,7 @@ impl PackageMetadata {
         &self.iuse
     }
 
-    pub const fn required_use(&self) -> &DepExpression<RequiredUseFlag> {
+    pub const fn required_use(&self) -> &DepExpr<RequiredUseFlag> {
         &self.required_use
     }
 
@@ -190,23 +190,23 @@ impl PackageMetadata {
         &self.slot
     }
 
-    pub const fn depend(&self) -> &DepExpression<AtomDep> {
+    pub const fn depend(&self) -> &DepExpr<AtomDep> {
         &self.depend
     }
 
-    pub const fn bdepend(&self) -> &DepExpression<AtomDep> {
+    pub const fn bdepend(&self) -> &DepExpr<AtomDep> {
         &self.bdepend
     }
 
-    pub const fn idepend(&self) -> &DepExpression<AtomDep> {
+    pub const fn idepend(&self) -> &DepExpr<AtomDep> {
         &self.idepend
     }
 
-    pub const fn pdepend(&self) -> &DepExpression<AtomDep> {
+    pub const fn pdepend(&self) -> &DepExpr<AtomDep> {
         &self.pdepend
     }
 
-    pub const fn rdepend(&self) -> &DepExpression<AtomDep> {
+    pub const fn rdepend(&self) -> &DepExpr<AtomDep> {
         &self.rdepend
     }
 
@@ -253,28 +253,24 @@ impl PackageMetadata {
                 .to_owned(),
             defined_phases: vars.words(MetaVar::DefinedPhases)?,
             iuse: vars.words(MetaVar::IUse)?,
-            required_use: vars.expression(
-                eapi,
-                ExpressionKind::RequiredUse,
-                MetaVar::RequiredUse,
-            )?,
+            required_use: vars.expression(eapi, ExprKind::RequiredUse, MetaVar::RequiredUse)?,
             slot: vars
                 .required(MetaVar::Slot)?
                 .parse()
                 .map_err(|err| invalid(MetaVar::Slot, err))?,
-            depend: vars.expression(eapi, ExpressionKind::Dependency, MetaVar::Depend)?,
+            depend: vars.expression(eapi, ExprKind::Dependency, MetaVar::Depend)?,
             bdepend: eapi
                 .supports_bdepend()
-                .then(|| vars.expression(eapi, ExpressionKind::Dependency, MetaVar::BDepend))
+                .then(|| vars.expression(eapi, ExprKind::Dependency, MetaVar::BDepend))
                 .transpose()?
                 .unwrap_or_default(),
             idepend: eapi
                 .supports_idepend()
-                .then(|| vars.expression(eapi, ExpressionKind::Dependency, MetaVar::IDepend))
+                .then(|| vars.expression(eapi, ExprKind::Dependency, MetaVar::IDepend))
                 .transpose()?
                 .unwrap_or_default(),
-            pdepend: vars.expression(eapi, ExpressionKind::Dependency, MetaVar::PDepend)?,
-            rdepend: vars.expression(eapi, ExpressionKind::Dependency, MetaVar::RDepend)?,
+            pdepend: vars.expression(eapi, ExprKind::Dependency, MetaVar::PDepend)?,
+            rdepend: vars.expression(eapi, ExprKind::Dependency, MetaVar::RDepend)?,
             eclasses: Vec::new(),
         })
     }
@@ -360,13 +356,13 @@ impl<'a> RawPackageMetadata<'a> {
     }
 
     /// Parses the value of `var` as a dependency expression of the given `kind`.
-    fn expression<T: ExpressionItem>(
+    fn expression<T: ExprItem>(
         &self,
         eapi: Eapi,
-        kind: ExpressionKind,
+        kind: ExprKind,
         var: MetaVar,
-    ) -> Result<DepExpression<T>, PackageMetadataError> {
-        DepExpression::parse(eapi, kind, optional(self.get(var))).map_err(|err| invalid(var, err))
+    ) -> Result<DepExpr<T>, PackageMetadataError> {
+        DepExpr::parse(eapi, kind, optional(self.get(var))).map_err(|err| invalid(var, err))
     }
 }
 

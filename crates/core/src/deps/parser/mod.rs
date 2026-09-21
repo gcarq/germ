@@ -3,29 +3,29 @@ mod lexer;
 #[cfg(test)]
 mod test_support;
 
-use self::arena::{ArenaEntry, ExpressionArena, ExpressionId};
+use self::arena::{ExprArena, ExprEntry, ExprId};
 use self::lexer::{Lexer, Token};
-use crate::deps::ExpressionItem;
+use crate::deps::ExprItem;
 use crate::useflag::UseFlag;
 use anyhow::bail;
 use std::ops::Range;
 
 /// A parser for ebuild dependency expressions commonly found in `DEPEND`, `REQUIRED_USE`, etc..
 /// For more information see PMS 8.2.
-pub struct ExpressionParser<'a, T: ExpressionItem> {
+pub struct ExprParser<'a, T: ExprItem> {
     lexer: Lexer<'a>,
-    arena: ExpressionArena<T>,
+    arena: ExprArena<T>,
 }
 
 #[expect(clippy::needless_pass_by_value)]
-impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
-    /// Parses the `input` string and constructs an [`ExpressionArena`].
+impl<'a, T: ExprItem> ExprParser<'a, T> {
+    /// Parses the `input` string and constructs an [`ExprArena`].
     ///
     /// Returns `Err` if the input is not a valid expression.
-    pub fn parse(input: &'a str) -> anyhow::Result<ExpressionArena<T>> {
+    pub fn parse(input: &'a str) -> anyhow::Result<ExprArena<T>> {
         let mut parser = Self {
             lexer: Lexer::new(input),
-            arena: ExpressionArena::default(),
+            arena: ExprArena::default(),
         };
 
         parser.parse_root()?;
@@ -54,45 +54,45 @@ impl<'a, T: ExpressionItem> ExpressionParser<'a, T> {
     }
 
     /// Parses an expression based on given [`Token`].
-    fn parse_expression(&mut self, token: Token) -> anyhow::Result<ExpressionId> {
+    fn parse_expression(&mut self, token: Token) -> anyhow::Result<ExprId> {
         let node = match token {
-            Token::Ident(ident) => ArenaEntry::Item(T::parse(ident)?),
-            Token::LParen => ArenaEntry::AllOf(self.parse_group()?),
+            Token::Ident(ident) => ExprEntry::Item(T::parse(ident)?),
+            Token::LParen => ExprEntry::AllOf(self.parse_group()?),
             Token::ExactlyOneOf => {
                 self.expect_separated(Token::LParen)?;
-                ArenaEntry::ExactlyOneOf(self.parse_group()?)
+                ExprEntry::ExactlyOneOf(self.parse_group()?)
             }
             Token::AnyOf => {
                 self.expect_separated(Token::LParen)?;
-                ArenaEntry::AnyOf(self.parse_group()?)
+                ExprEntry::AnyOf(self.parse_group()?)
             }
             Token::AtMostOneOf => {
                 self.expect_separated(Token::LParen)?;
-                ArenaEntry::AtMostOneOf(self.parse_group()?)
+                ExprEntry::AtMostOneOf(self.parse_group()?)
             }
             Token::UseConditional(flag) => self.parse_use_conditional(flag)?,
             Token::Whitespace | Token::RParen | Token::Illegal(_) => {
                 bail!("unexpected token '{token}'")
             }
         };
-        self.arena.push_expression(node)
+        self.arena.push_expr(node)
     }
 
     /// Parses a USE conditional expression, e.g. `foo? ( bar )` or `!foo? ( bar )`.
-    fn parse_use_conditional(&mut self, flag: &str) -> anyhow::Result<ArenaEntry<T>> {
+    fn parse_use_conditional(&mut self, flag: &str) -> anyhow::Result<ExprEntry<T>> {
         self.expect_separated(Token::LParen)?;
         let (flag, negated) = match flag.strip_prefix('!') {
             Some(flag) => (flag, true),
             None => (flag, false),
         };
-        Ok(ArenaEntry::Use {
+        Ok(ExprEntry::Use {
             flag: UseFlag::new(flag)?,
             negated,
             nodes: self.parse_group()?,
         })
     }
 
-    /// Parses a group of expressions, see [`ArenaEntry`].
+    /// Parses a group of expressions, see [`ExprEntry`].
     ///
     /// This function expects that [`Token::LParen`] has already been consumed.
     /// Returns a [`Range`] that can be used for slicing `expression.children`.
@@ -195,7 +195,7 @@ mod tests {
         ];
 
         for (input, expected) in cases {
-            let expr = ExpressionParser::<AtomDep>::parse(input).unwrap();
+            let expr = ExprParser::<AtomDep>::parse(input).unwrap();
             assert_expr(expr.view(), &expected);
         }
     }
@@ -213,7 +213,7 @@ mod tests {
             !!<dev-perl/Mail-Box-3
         ";
 
-        let expr = ExpressionParser::<AtomDep>::parse(input).unwrap();
+        let expr = ExprParser::<AtomDep>::parse(input).unwrap();
         assert_expr(
             expr.view(),
             &[
@@ -240,7 +240,7 @@ mod tests {
             || ( wayland X )
             ssh? ( || ( rdp ( vnc X ) ) )
         ";
-        let expr = ExpressionParser::<RequiredUseFlag>::parse(input).unwrap();
+        let expr = ExprParser::<RequiredUseFlag>::parse(input).unwrap();
         assert_expr(
             expr.view(),
             &[
@@ -272,7 +272,7 @@ mod tests {
             "!! cat/pkg",
         ] {
             assert!(
-                ExpressionParser::<AtomDep>::parse(input).is_err(),
+                ExprParser::<AtomDep>::parse(input).is_err(),
                 "expected invalid expression: {input}"
             );
         }
@@ -293,7 +293,7 @@ mod tests {
             ("bar? sys-libs/db )", "expected '(', got 'sys-libs/db'"),
         ];
         for (input, expected_err) in test_data {
-            let err = ExpressionParser::<AtomDep>::parse(input).unwrap_err();
+            let err = ExprParser::<AtomDep>::parse(input).unwrap_err();
             assert_eq!(err.to_string(), expected_err, "failure for input: {input}");
         }
     }

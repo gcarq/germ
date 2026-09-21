@@ -1,5 +1,6 @@
+use std::future::{Future, ready};
+
 use anyhow::anyhow;
-use futures_util::future::BoxFuture;
 
 use super::PkgProvider;
 use crate::atom::Atom;
@@ -31,25 +32,25 @@ impl TestPkgProvider {
 }
 
 impl PkgProvider for TestPkgProvider {
-    fn find<'a>(
-        &'a self,
-        atom: &'a Atom,
-    ) -> BoxFuture<'a, anyhow::Result<Vec<anyhow::Result<Package>>>> {
-        Box::pin(async move {
-            Ok(self
-                .pkgs
-                .iter()
-                .filter(|p| p.pkg.matches_atom(atom))
-                .map(|p| Ok(p.pkg.clone()))
-                .collect())
-        })
+    fn find(
+        &self,
+        atom: &Atom,
+    ) -> impl Future<Output = anyhow::Result<Vec<anyhow::Result<Package>>>> + Send {
+        ready(Ok(self
+            .pkgs
+            .iter()
+            .filter(|p| p.pkg.matches_atom(atom))
+            .map(|p| Ok(p.pkg.clone()))
+            .collect()))
     }
 
-    fn evaluate(&self, pkg: &Package) -> anyhow::Result<PolicyResult> {
-        self.pkgs
-            .iter()
-            .find(|p| p.pkg == *pkg)
-            .map(|p| p.result.clone())
-            .ok_or_else(|| anyhow!("missing test policy result for {pkg}"))
+    fn eval(&self, pkg: &Package) -> impl Future<Output = anyhow::Result<PolicyResult>> + Send {
+        ready(
+            self.pkgs
+                .iter()
+                .find(|p| p.pkg == *pkg)
+                .map(|p| p.result.clone())
+                .ok_or_else(|| anyhow!("missing test policy result for {pkg}")),
+        )
     }
 }

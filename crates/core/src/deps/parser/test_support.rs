@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
-use crate::deps::ExpressionItem;
-use crate::deps::expression::{Expression, ExpressionNodes, ExpressionTree};
+use crate::deps::ExprItem;
+use crate::deps::expr::{Expr, ExprNodes, ExprTree};
 use crate::useflag::UseFlag;
 use TestExpression::{AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Item, Use};
 
@@ -20,32 +20,32 @@ pub enum TestExpression<T> {
 }
 
 /// Asserts the given `tree` against `expected`.
-pub fn assert_expr<T: ExpressionItem + Debug + PartialEq>(
-    tree: ExpressionTree<'_, T>,
+pub fn assert_expr<T: ExprItem + Debug + PartialEq>(
+    tree: ExprTree<'_, T>,
     expected: &[TestExpression<T>],
 ) {
     assert_nodes(tree.roots(), expected);
 }
 
 /// Creates a [`TestExpression`] from the given `input`.
-pub fn item<T: ExpressionItem>(input: &str) -> TestExpression<T> {
+pub fn item<T: ExprItem>(input: &str) -> TestExpression<T> {
     Item(T::parse(input).unwrap())
 }
 
-fn assert_expression<T: ExpressionItem + Debug + PartialEq>(
-    actual: Expression<'_, T>,
+fn assert_expression<T: ExprItem + Debug + PartialEq>(
+    actual: Expr<'_, T>,
     expected: &TestExpression<T>,
 ) {
     match (actual, expected) {
-        (Expression::Item(actual), Item(expected)) => assert_eq!(actual, expected),
-        (Expression::AllOf(actual), AllOf(expected)) => assert_nodes(actual, expected),
-        (Expression::AnyOf(actual), AnyOf(expected)) => assert_nodes(actual, expected),
-        (Expression::ExactlyOneOf(actual), ExactlyOneOf(expected)) => {
+        (Expr::Item(actual), Item(expected)) => assert_eq!(actual, expected),
+        (Expr::AllOf(actual), AllOf(expected)) => assert_nodes(actual, expected),
+        (Expr::AnyOf(actual), AnyOf(expected)) => assert_nodes(actual, expected),
+        (Expr::ExactlyOneOf(actual), ExactlyOneOf(expected)) => {
             assert_nodes(actual, expected);
         }
-        (Expression::AtMostOneOf(actual), AtMostOneOf(expected)) => assert_nodes(actual, expected),
+        (Expr::AtMostOneOf(actual), AtMostOneOf(expected)) => assert_nodes(actual, expected),
         (
-            Expression::Use {
+            Expr::Use {
                 flag: actual_flag,
                 negated: actual_negated,
                 nodes: actual_nodes,
@@ -64,13 +64,13 @@ fn assert_expression<T: ExpressionItem + Debug + PartialEq>(
     }
 }
 
-fn assert_nodes<T: ExpressionItem + Debug + PartialEq>(
-    mut actual: ExpressionNodes<'_, T>,
+fn assert_nodes<T: ExprItem + Debug + PartialEq>(
+    mut actual: ExprNodes<'_, T>,
     expected: &[TestExpression<T>],
 ) {
     for expected in expected {
         let actual = actual.next().expect("missing expression");
-        assert_expression(actual.expression(), expected);
+        assert_expression(actual, expected);
     }
     assert!(actual.next().is_none(), "extra expression");
 }

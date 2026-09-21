@@ -4,32 +4,31 @@ mod state;
 pub(crate) mod test_support;
 
 use std::fmt;
+use std::future::Future;
 
 use anyhow::Context;
-use futures_util::future::BoxFuture;
 use log::{debug, info, warn};
 
 use crate::atom::{Atom, AtomBlocker};
-use crate::deps::AtomDep;
-use crate::deps::expression::{Expression, ExpressionNodes};
+use crate::deps::{AtomDep, ExprEval};
 use crate::package::cpv::CPV;
 use crate::package::{AtomRequirement, Package, PackageView};
 use crate::policy::{PackagePolicy, PolicyResult};
 use crate::repository::{RepoName, RepoSet};
 use crate::resolver::result::{CandidateRejection, CandidateResult};
 use crate::resolver::state::ResolverState;
-use crate::useflag::EffectiveUse;
+use crate::useflag::{EffectiveUse, UseFlag};
 
 /// Provides packages for dependency resolution.
 pub trait PkgProvider: Send {
     /// Finds packages matching `atom`.
-    fn find<'a>(
-        &'a self,
-        atom: &'a Atom,
-    ) -> BoxFuture<'a, anyhow::Result<Vec<anyhow::Result<Package>>>>;
+    fn find(
+        &self,
+        atom: &Atom,
+    ) -> impl Future<Output = anyhow::Result<Vec<anyhow::Result<Package>>>> + Send;
 
     /// Evaluates `pkg` against local package policy.
-    fn evaluate(&self, pkg: &Package) -> anyhow::Result<PolicyResult>;
+    fn eval(&self, pkg: &Package) -> impl Future<Output = anyhow::Result<PolicyResult>> + Send;
 }
 
 /// A package provider backed by a repository set.
@@ -45,21 +44,16 @@ impl<'a> RepoPkgProvider<'a> {
 }
 
 impl PkgProvider for RepoPkgProvider<'_> {
-    fn find<'a>(
-        &'a self,
-        atom: &'a Atom,
-    ) -> BoxFuture<'a, anyhow::Result<Vec<anyhow::Result<Package>>>> {
-        Box::pin(async move {
-            self.reposet
-                .find_packages(atom)
-                .await
-                .map(|results| results.into_iter().map(|r| r.map_err(Into::into)).collect())
-                .map_err(Into::into)
-        })
+    async fn find(&self, atom: &Atom) -> anyhow::Result<Vec<anyhow::Result<Package>>> {
+        self.reposet
+            .find_packages(atom)
+            .await
+            .map(|results| results.into_iter().map(|r| r.map_err(Into::into)).collect())
+            .map_err(Into::into)
     }
 
-    fn evaluate(&self, pkg: &Package) -> anyhow::Result<PolicyResult> {
-        self.policy.evaluate(pkg)
+    fn eval(&self, pkg: &Package) -> impl Future<Output = anyhow::Result<PolicyResult>> + Send {
+        self.policy.eval(pkg)
     }
 }
 
@@ -168,7 +162,7 @@ impl<P: PkgProvider> Resolver<P> {
             return Ok(matches);
         }
 
-        match self.candidates.evaluate(pkg)? {
+        match self.candidates.eval(pkg).await? {
             PolicyResult::Accepted(effective_use) => {
                 if !request.satisfied_by(pkg, &effective_use)? {
                     return Ok(false);
@@ -227,107 +221,60 @@ impl<P: PkgProvider> Resolver<P> {
             (DependencyKind::RDepend, owner.metadata().rdepend().view()),
             (DependencyKind::PDepend, owner.metadata().pdepend().view()),
         ];
-        for (kind, exprtree) in dependencies {
+        for (kind, tree) in dependencies {
             let ctx = DepContext {
                 owner,
                 kind,
                 owner_use,
             };
-            for node in exprtree.roots() {
-                match self.eval_expression(&ctx, node.expression()).await {
-                    Ok(true) => (),
-                    Ok(false) => {
-                        return CandidateResult::Rejected(
-                            CandidateRejection::DependencyUnsatisfied(kind),
-                        );
-                    }
-                    Err(err) => return CandidateResult::Err(err),
+            let mut evaluator = DepEval {
+                resolver: self,
+                ctx: &ctx,
+            };
+            match tree.eval(&mut evaluator).await {
+                Ok(true) => (),
+                Ok(false) => {
+                    return CandidateResult::Rejected(CandidateRejection::DependencyUnsatisfied(
+                        kind,
+                    ));
                 }
+                Err(err) => return CandidateResult::Err(err),
             }
         }
         CandidateResult::Selected
     }
+}
 
-    /// Evaluates `expr` from a package dependency expression against its context.
-    fn eval_expression<'b>(
-        &'b mut self,
-        ctx: &'b DepContext<'_>,
-        expr: Expression<'b, AtomDep>,
-    ) -> BoxFuture<'b, anyhow::Result<bool>> {
-        Box::pin(async move {
-            match expr {
-                Expression::Item(atom) => {
-                    if let Some(blocker) = atom.blocker() {
-                        self.apply_blocker(ctx, atom.inner(), blocker)
-                    } else {
-                        let resolved = self
-                            .resolve_candidates(AtomRequirement::dependency(
-                                atom.inner(),
-                                ctx.owner_use,
-                            ))
-                            .await?;
-                        if !resolved {
-                            debug!("{}: unsatisfied {} atom {atom}", ctx.owner, ctx.kind);
-                        }
-                        Ok(resolved)
-                    }
-                }
-                Expression::AllOf(nodes) => {
-                    for node in nodes {
-                        if !self.eval_expression(ctx, node.expression()).await? {
-                            return Ok(false);
-                        }
-                    }
-                    Ok(true)
-                }
-                Expression::AnyOf(nodes) => {
-                    for node in nodes {
-                        if self.eval_expression(ctx, node.expression()).await? {
-                            return Ok(true);
-                        }
-                    }
-                    Ok(false)
-                }
-                Expression::ExactlyOneOf(nodes) => Ok(self.eval_up_to_two(ctx, nodes).await? == 1),
-                Expression::AtMostOneOf(nodes) => Ok(self.eval_up_to_two(ctx, nodes).await? < 2),
-                Expression::Use {
-                    flag,
-                    negated,
-                    nodes,
-                } => {
-                    if ctx.owner_use.is_enabled(flag)? == negated {
-                        return Ok(true);
-                    }
-                    debug!("evaluating USE expression for {flag}");
-                    for node in nodes {
-                        if !self.eval_expression(ctx, node.expression()).await? {
-                            return Ok(false);
-                        }
-                    }
-                    Ok(true)
-                }
+/// Evaluates dependency items for one package and dependency kind.
+struct DepEval<'a, 'b, P> {
+    resolver: &'a mut Resolver<P>,
+    ctx: &'a DepContext<'b>,
+}
+
+impl<P: PkgProvider> ExprEval<AtomDep> for DepEval<'_, '_, P> {
+    async fn eval_item(&mut self, atom: &AtomDep) -> anyhow::Result<bool> {
+        if let Some(blocker) = atom.blocker() {
+            self.resolver.apply_blocker(self.ctx, atom.inner(), blocker)
+        } else {
+            let resolved = self
+                .resolver
+                .resolve_candidates(AtomRequirement::dependency(
+                    atom.inner(),
+                    self.ctx.owner_use,
+                ))
+                .await?;
+            if !resolved {
+                debug!(
+                    "{}: unsatisfied {} atom {atom}",
+                    self.ctx.owner, self.ctx.kind
+                );
             }
-        })
+            Ok(resolved)
+        }
     }
 
-    /// Evaluates `nodes` and counts how many are satisfied by the given context.
-    ///
-    /// Breaks early if more than two nodes are satisfied.
-    async fn eval_up_to_two<'b>(
-        &mut self,
-        ctx: &'b DepContext<'_>,
-        nodes: ExpressionNodes<'b, AtomDep>,
-    ) -> anyhow::Result<u8> {
-        let mut count = 0;
-        for node in nodes {
-            if self.eval_expression(ctx, node.expression()).await? {
-                count += 1;
-                if count > 2 {
-                    break;
-                }
-            }
-        }
-        Ok(count)
+    fn is_use_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
+        self.ctx.owner_use.is_enabled(flag)
     }
 }
 
