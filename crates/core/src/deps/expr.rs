@@ -78,7 +78,7 @@ where
     })
 }
 
-/// Evaluates a all-of group `( foo bar )`, returns `false` on the first unsatisfied expression.
+/// Evaluates an all-of group `( foo bar )`.
 async fn eval_all<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<bool>
 where
     T: ExprItem + Sync,
@@ -92,7 +92,7 @@ where
     Ok(true)
 }
 
-/// Evaluates a any-of group `|| ( foo bar )`, returns `false` if no expression is satisfied.
+/// Evaluates an any-of group `|| ( foo bar )`.
 async fn eval_any<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<bool>
 where
     T: ExprItem + Sync,
@@ -106,7 +106,7 @@ where
     Ok(false)
 }
 
-/// Returns the number of satisfied expressions, stopping once two are found.
+/// Counts the satisfied expressions, stopping at two matches.
 async fn eval_up_to_two<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<u8>
 where
     T: ExprItem + Sync,

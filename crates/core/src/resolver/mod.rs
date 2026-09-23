@@ -102,12 +102,11 @@ impl<P: PkgProvider> Resolver<P> {
                 }
             }
             AtomBlocker::Strong => {
-                // TODO: handle strong blockers
-                warn!(
-                    "{}: strong blockers are not yet supported, ignoring {blocker}{atom} in {}",
+                debug!(
+                    "{}: cannot satisfy due to strong blocker {blocker}{atom} in {}",
                     ctx.owner, ctx.kind
                 );
-                return Ok(true);
+                return Ok(false);
             }
         };
 
@@ -259,111 +258,117 @@ mod tests {
     use crate::test_support::pkg;
     use crate::useflag::test_support::effective;
 
-    fn accepted(pkg: Package, available: &[&str], enabled: &[&str]) -> TestPkg {
-        TestPkg::new(pkg, PolicyResult::Accepted(effective(available, enabled)))
-    }
-
-    /// Creates an accepted `app-misc/root` package with the given `DEPEND`.
-    fn root(depend: &str) -> TestPkg {
-        accepted(
-            pkg("app-misc", "root", "1", &[("DEPEND", depend)]),
-            &[],
-            &[],
+    /// Returns an accepted `app-misc/<name>-1` candidate with the given metadata.
+    fn candidate(name: &str, metadata: &[(&str, &str)]) -> TestPkg {
+        TestPkg::new(
+            pkg("app-misc", name, "1", metadata),
+            PolicyResult::Accepted(effective(&[], &[])),
         )
     }
 
-    async fn resolve(pkgs: impl IntoIterator<Item = TestPkg>, atom: &str) -> ResolutionOutcome {
-        Resolver::new(TestPkgProvider::new(pkgs))
-            .resolve(&atom.parse().unwrap())
+    /// Returns the `app-misc/root` candidate with the given `DEPEND`.
+    fn root(depend: &str) -> TestPkg {
+        candidate("root", &[("DEPEND", depend)])
+    }
+
+    /// Resolves `app-misc/root` over the given packages.
+    async fn resolve(pkgs: impl IntoIterator<Item = TestPkg>) -> ResolutionOutcome {
+        resolve_with(TestPkgProvider::new(pkgs)).await
+    }
+
+    /// Resolves `app-misc/root` over the given package provider.
+    async fn resolve_with(provider: impl PkgProvider) -> ResolutionOutcome {
+        Resolver::new(provider)
+            .resolve(&"app-misc/root".parse().unwrap())
             .await
             .unwrap()
     }
 
     #[tokio::test]
     async fn test_resolve_use_conditional() {
+        let metadata = [
+            ("IUSE", "feature"),
+            ("DEPEND", "feature? ( app-misc/child )"),
+        ];
         for (enabled, child_avail, expected) in [
             (false, false, true),
             (true, false, false),
             (true, true, true),
         ] {
-            let root = pkg(
-                "app-misc",
-                "root",
-                "1",
-                &[
-                    ("IUSE", "feature"),
-                    ("DEPEND", "feature? ( app-misc/child )"),
-                ],
+            let root = TestPkg::new(
+                pkg("app-misc", "root", "1", &metadata),
+                PolicyResult::Accepted(effective(
+                    &["feature"],
+                    if enabled { &["feature"] } else { &[] },
+                )),
             );
-            let mut candidates = vec![accepted(
-                root,
-                &["feature"],
-                if enabled { &["feature"] } else { &[] },
-            )];
+            let mut pkgs = vec![root];
             if child_avail {
-                candidates.push(accepted(pkg("app-misc", "child", "1", &[]), &[], &[]));
+                pkgs.push(candidate("child", &[]));
             }
-            let result = resolve(candidates, "app-misc/root").await;
-            assert_eq!(result.is_resolved(), expected);
+            assert_eq!(resolve(pkgs).await.is_resolved(), expected);
         }
     }
 
     #[tokio::test]
-    async fn test_resolve_candidate_fallback() {
+    async fn test_resolve_fallback_masked() {
         let pkgs = [
             root("app-misc/child"),
             TestPkg::new(pkg("app-misc", "child", "2", &[]), PolicyResult::Masked),
-            accepted(pkg("app-misc", "child", "1", &[]), &[], &[]),
+            candidate("child", &[]),
         ];
-        assert!(resolve(pkgs, "app-misc/root").await.is_resolved());
+        assert!(resolve(pkgs).await.is_resolved());
     }
 
     #[tokio::test]
-    async fn test_resolve_unavailable_fallback() {
-        let provider = TestPkgProvider::new([
-            root("app-misc/child"),
-            accepted(pkg("app-misc", "child", "1", &[]), &[], &[]),
-        ])
-        .with_failure("app-misc/child-2", "metadata resolution failed");
-
-        let outcome = Resolver::new(provider)
-            .resolve(&"app-misc/root".parse().unwrap())
-            .await
-            .unwrap();
-        assert!(outcome.is_resolved());
+    async fn test_resolve_fallback_unavailable() {
+        let provider = TestPkgProvider::new([root("app-misc/child"), candidate("child", &[])])
+            .with_failure("app-misc/child-2", "metadata resolution failed");
+        assert!(resolve_with(provider).await.is_resolved());
     }
 
     #[tokio::test]
     async fn test_resolve_selected() {
-        let result = resolve(
-            [
-                root("app-misc/child app-misc/child"),
-                accepted(pkg("app-misc", "child", "1", &[]), &[], &[]),
-            ],
-            "app-misc/root",
-        )
-        .await;
-        assert!(result.is_resolved());
+        let pkgs = [
+            root("app-misc/child app-misc/child"),
+            candidate("child", &[]),
+        ];
+        assert!(resolve(pkgs).await.is_resolved());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_strong_blocker() {
+        let outcome = resolve([root("!!app-misc/other")]).await;
+        assert!(!outcome.is_resolved());
+        assert!(matches!(
+            outcome.rejected().values().next(),
+            Some(CandidateRejection::DependencyUnsatisfied(
+                DependencyKind::Depend
+            ))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_strong_blocker_fallback() {
+        let pkgs = [
+            root("|| ( !!app-misc/other app-misc/fallback )"),
+            candidate("fallback", &[]),
+        ];
+        assert!(resolve(pkgs).await.is_resolved());
     }
 
     #[tokio::test]
     async fn test_resolve_weak_blocker_self() {
-        let result = resolve([root("!app-misc/root")], "app-misc/root").await;
-        assert!(result.is_resolved());
+        assert!(resolve([root("!app-misc/root")]).await.is_resolved());
     }
 
     #[tokio::test]
-    async fn test_resolve_blocker_selected() {
+    async fn test_resolve_weak_blocker_selected() {
         let pkgs = [
             root("app-misc/a app-misc/b"),
-            accepted(
-                pkg("app-misc", "a", "1", &[("DEPEND", "!app-misc/b")]),
-                &[],
-                &[],
-            ),
-            accepted(pkg("app-misc", "b", "1", &[]), &[], &[]),
+            candidate("a", &[("DEPEND", "!app-misc/b")]),
+            candidate("b", &[]),
         ];
-        let result = resolve(pkgs, "app-misc/root").await;
-        assert!(!result.is_resolved());
+        assert!(!resolve(pkgs).await.is_resolved());
     }
 }
