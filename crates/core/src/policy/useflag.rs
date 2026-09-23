@@ -53,11 +53,11 @@ impl UsePolicy {
             use_mask: local
                 .use_mask
                 .inherit(&profile.use_mask)?
-                .into_inner()
+                .finalize()
                 .collect(),
-            use_force: profile.use_force.into_inner().collect(),
-            use_stable_mask: profile.use_stable_mask.into_inner().collect(),
-            use_stable_force: profile.use_stable_force.into_inner().collect(),
+            use_force: profile.use_force.finalize().collect(),
+            use_stable_mask: profile.use_stable_mask.finalize().collect(),
+            use_stable_force: profile.use_stable_force.finalize().collect(),
             package_use: PackageUse::new(
                 local.package_use.inherit(&profile.package_use)?,
                 &profile.expand_config,
@@ -366,6 +366,34 @@ mod tests {
         assert_eq!(effective.state(&elogind), Some(false));
         assert_eq!(effective.state(&systemd), Some(true));
         assert_eq!(effective.state(&forced), Some(true));
+        Ok(())
+    }
+
+    #[test]
+    fn test_profile_use_unmask() -> anyhow::Result<()> {
+        let elogind = UseFlag::new("elogind")?;
+        let masked = UseEntries::from_content("elogind", Precedence::Profile(0))?;
+        let profile = ProfileUseRecords {
+            use_mask: UseEntries::from_content("-elogind", Precedence::Profile(1))?
+                .inherit(&masked)?,
+            ..Default::default()
+        };
+        let policy = UsePolicy::new(
+            FxHashMap::from_iter([(elogind.clone(), true)]),
+            FxHashSet::default(),
+            profile,
+            LocalRecords::default(),
+        )?;
+        let package = Package::new(
+            cpv("sys-libs", "pam", "1.0"),
+            "gentoo".parse()?,
+            pkg_metadata(&[("IUSE", "elogind")]),
+        );
+
+        assert_eq!(
+            policy.effective_for(&package, false).state(&elogind),
+            Some(true)
+        );
         Ok(())
     }
 

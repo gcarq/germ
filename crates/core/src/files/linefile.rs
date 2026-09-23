@@ -1,5 +1,5 @@
-use crate::files::content_from_path;
-use crate::files::entry::{Entry, EntryValue, Precedence};
+use super::content_from_path;
+use super::entry::{Entry, EntryValue, Precedence};
 use crate::types::FxHashSet;
 use crate::utils::{Inherit, strip_line_comment};
 use anyhow::Context;
@@ -42,9 +42,13 @@ impl<T: EntryValue> LineEntries<T> {
         self.0.into_iter()
     }
 
-    /// Consumes self and returns an iterator of inner `T`.
-    pub fn into_inner(self) -> impl Iterator<Item = T> {
-        self.into_iter().map(Entry::into_inner)
+    /// Consumes self and returns an iterator of the inner `T` that remain set.
+    ///
+    /// Values reverted by a later hyphen-prefixed entry are omitted.
+    pub fn finalize(self) -> impl Iterator<Item = T> {
+        self.into_iter()
+            .filter(|entry| entry.op.as_bool())
+            .map(Entry::into_inner)
     }
 }
 
