@@ -1,61 +1,22 @@
-pub mod result;
+mod outcome;
+mod provider;
 mod state;
 #[cfg(test)]
 pub(crate) mod test_support;
 
 use std::fmt;
-use std::future::Future;
 
-use anyhow::Context;
 use log::{debug, info, warn};
 
+pub use self::outcome::{CandidateRejection, ResolutionOutcome, SelectedPackage};
+pub use self::provider::{Candidate, PkgProvider, RepoPkgProvider};
+
+use self::state::{PackageKey, ResolverState};
 use crate::atom::{Atom, AtomBlocker};
 use crate::deps::{AtomDep, ExprEval};
-use crate::package::cpv::CPV;
 use crate::package::{AtomRequirement, Package, PackageView};
-use crate::policy::{PackagePolicy, PolicyResult};
-use crate::repository::{RepoName, RepoSet};
-use crate::resolver::result::{CandidateRejection, CandidateResult};
-use crate::resolver::state::ResolverState;
+use crate::policy::PolicyResult;
 use crate::useflag::{EffectiveUse, UseFlag};
-
-/// Provides packages for dependency resolution.
-pub trait PkgProvider: Send {
-    /// Finds packages matching `atom`.
-    fn find(
-        &self,
-        atom: &Atom,
-    ) -> impl Future<Output = anyhow::Result<Vec<anyhow::Result<Package>>>> + Send;
-
-    /// Evaluates `pkg` against local package policy.
-    fn eval(&self, pkg: &Package) -> impl Future<Output = anyhow::Result<PolicyResult>> + Send;
-}
-
-/// A package provider backed by a repository set.
-pub struct RepoPkgProvider<'a> {
-    reposet: &'a RepoSet,
-    policy: &'a PackagePolicy,
-}
-
-impl<'a> RepoPkgProvider<'a> {
-    pub const fn new(reposet: &'a RepoSet, policy: &'a PackagePolicy) -> Self {
-        Self { reposet, policy }
-    }
-}
-
-impl PkgProvider for RepoPkgProvider<'_> {
-    async fn find(&self, atom: &Atom) -> anyhow::Result<Vec<anyhow::Result<Package>>> {
-        self.reposet
-            .find_packages(atom)
-            .await
-            .map(|results| results.into_iter().map(|r| r.map_err(Into::into)).collect())
-            .map_err(Into::into)
-    }
-
-    fn eval(&self, pkg: &Package) -> impl Future<Output = anyhow::Result<PolicyResult>> + Send {
-        self.policy.eval(pkg)
-    }
-}
 
 /// Identifies the dependency kind being evaluated.
 #[derive(Copy, Clone, Debug)]
@@ -79,62 +40,76 @@ impl fmt::Display for DependencyKind {
     }
 }
 
-pub struct Resolver<Provider> {
-    candidates: Provider,
+pub struct Resolver<P> {
+    provider: P,
     state: ResolverState,
 }
 
 impl<P: PkgProvider> Resolver<P> {
-    pub fn new(candidates: P) -> Self {
+    pub fn new(provider: P) -> Self {
         Self {
-            candidates,
+            provider,
             state: ResolverState::default(),
         }
     }
 
-    pub async fn resolve(&mut self, atom: &Atom) -> anyhow::Result<bool> {
+    /// Resolves the given `atom` and returns the resolution outcome.
+    pub async fn resolve(mut self, atom: &Atom) -> anyhow::Result<ResolutionOutcome> {
         info!("Resolving candidates for {atom}...");
-        self.resolve_candidates(AtomRequirement::root(atom)).await
+        let resolved = self.resolve_candidates(AtomRequirement::root(atom)).await?;
+        Ok(self.state.finalize(resolved))
     }
 
+    /// Resolves candidates for the given `atom` requirement.
+    ///
+    /// Returns `true` if a candidate was found, `false` otherwise.
     async fn resolve_candidates(&mut self, request: AtomRequirement<'_>) -> anyhow::Result<bool> {
-        for pkg in self.candidates.find(request.atom()).await? {
-            let pkg = match pkg {
-                Ok(pkg) => pkg,
-                Err(err) => {
-                    // TODO: format error
-                    warn!("{err}");
-                    continue;
+        for candidate in self.provider.candidates(request.atom()).await? {
+            match candidate {
+                Candidate::Evaluated { pkg, policy } => {
+                    if self.eval_candidate(&request, pkg, policy).await? {
+                        return Ok(true);
+                    }
                 }
-            };
-
-            if self.eval_candidate(&request, &pkg).await? {
-                return Ok(true);
+                Candidate::Unavailable { cpv, error } => {
+                    warn!("skipping unavailable candidate {cpv}: {error}");
+                }
             }
         }
         Ok(false)
     }
 
-    /// Applies a blocker to the resolver state if it is not already satisfied.
+    /// Handles blockers for the given `atom`.
     ///
-    /// TODO: handle strong blockers
-    fn apply_blocker(
+    /// Returns `true` if the dependency can be satisfied, `false` if its blocked.
+    fn handle_blocker(
         &mut self,
         ctx: &DepContext<'_>,
         atom: &Atom,
         blocker: AtomBlocker,
     ) -> anyhow::Result<bool> {
-        let request = AtomRequirement::dependency(atom, ctx.owner_use);
-        let key = PackageKey::new(ctx.owner);
-        let exclude = blocker.is_weak().then_some(&key);
-
-        if let Some(selected) = self.state.first_match(&request, exclude)? {
-            warn!(
-                "{}\n\tblocker {blocker}{atom} in {}\n\tmatched selected {selected}",
-                ctx.owner, ctx.kind
-            );
-            return Ok(false);
-        }
+        match blocker {
+            AtomBlocker::Weak => {
+                let req = AtomRequirement::dependency(atom, ctx.owner_use);
+                for (_, sel) in self.state.selected().filter(|sel| &sel.1.pkg != ctx.owner) {
+                    if sel.matches(&req)? {
+                        warn!(
+                            "{}\n\tblocker {atom} in {}\n\tmatched selected {}",
+                            ctx.owner, ctx.kind, sel.pkg
+                        );
+                        return Ok(false);
+                    }
+                }
+            }
+            AtomBlocker::Strong => {
+                // TODO: handle strong blockers
+                warn!(
+                    "{}: strong blockers are not yet supported, ignoring {blocker}{atom} in {}",
+                    ctx.owner, ctx.kind
+                );
+                return Ok(true);
+            }
+        };
 
         self.state
             .insert_blocker(ctx.owner_use.clone(), atom.clone());
@@ -146,9 +121,10 @@ impl<P: PkgProvider> Resolver<P> {
     async fn eval_candidate(
         &mut self,
         request: &AtomRequirement<'_>,
-        pkg: &Package,
+        pkg: Package,
+        policy: PolicyResult,
     ) -> anyhow::Result<bool> {
-        let key = PackageKey::new(pkg);
+        let key = PackageKey::new(&pkg);
 
         if self.state.is_rejected(&key) {
             return Ok(false);
@@ -162,12 +138,12 @@ impl<P: PkgProvider> Resolver<P> {
             return Ok(matches);
         }
 
-        match self.candidates.eval(pkg).await? {
+        match policy {
             PolicyResult::Accepted(effective_use) => {
-                if !request.satisfied_by(pkg, &effective_use)? {
+                if !request.satisfied_by(&pkg, &effective_use)? {
                     return Ok(false);
                 }
-                if self.state.is_blocked(pkg, &effective_use)? {
+                if self.state.is_blocked(&pkg, &effective_use)? {
                     info!("skipping {pkg} due to active blocker");
                     return Ok(false);
                 }
@@ -175,34 +151,27 @@ impl<P: PkgProvider> Resolver<P> {
                 debug!("evaluating deps for {pkg}");
                 self.state
                     .visiting(key.clone(), pkg.clone(), effective_use.clone());
-                match self.eval_dependencies(pkg, &effective_use).await {
-                    CandidateResult::Selected => {
+                match self.eval_dependencies(&pkg, &effective_use).await {
+                    Ok(()) => {
                         self.state.select(key);
                         return Ok(true);
                     }
-                    CandidateResult::Rejected(reason) => {
+                    Err(reason) => {
                         // TODO: don't reject it globally,
                         // this might be valid in a different context.
-                        self.state.reject(key);
-                        warn!("skipping {pkg} due to {reason}");
-                    }
-                    CandidateResult::Err(err) => {
-                        self.state.reject(key);
-                        Err(err).with_context(|| format!("failed to evaluate candidate {pkg}"))?;
+                        self.state.reject(key, reason);
                     }
                 }
             }
             PolicyResult::Masked => {
-                self.state.reject(key);
-                debug!("skipping {pkg} due to package mask");
+                self.state.reject(key, CandidateRejection::Masked);
             }
             PolicyResult::MissingKeyword => {
-                self.state.reject(key);
-                debug!("skipping {pkg} due to missing keyword");
+                self.state.reject(key, CandidateRejection::MissingKeyword);
             }
             PolicyResult::RequiredUseUnsatisfied => {
-                self.state.reject(key);
-                debug!("skipping {pkg} due to unsatisfied required USE flags");
+                self.state
+                    .reject(key, CandidateRejection::RequiredUseUnsatisfied);
             }
         }
         Ok(false)
@@ -213,7 +182,7 @@ impl<P: PkgProvider> Resolver<P> {
         &mut self,
         owner: &'b Package,
         owner_use: &'b EffectiveUse,
-    ) -> CandidateResult {
+    ) -> anyhow::Result<(), CandidateRejection> {
         let dependencies = [
             (DependencyKind::Depend, owner.metadata().depend().view()),
             (DependencyKind::BDepend, owner.metadata().bdepend().view()),
@@ -233,15 +202,11 @@ impl<P: PkgProvider> Resolver<P> {
             };
             match tree.eval(&mut evaluator).await {
                 Ok(true) => (),
-                Ok(false) => {
-                    return CandidateResult::Rejected(CandidateRejection::DependencyUnsatisfied(
-                        kind,
-                    ));
-                }
-                Err(err) => return CandidateResult::Err(err),
+                Ok(false) => Err(CandidateRejection::DependencyUnsatisfied(kind))?,
+                Err(err) => Err(CandidateRejection::Err(err))?,
             }
         }
-        CandidateResult::Selected
+        Ok(())
     }
 }
 
@@ -254,23 +219,24 @@ struct DepEval<'a, 'b, P> {
 impl<P: PkgProvider> ExprEval<AtomDep> for DepEval<'_, '_, P> {
     async fn eval_item(&mut self, atom: &AtomDep) -> anyhow::Result<bool> {
         if let Some(blocker) = atom.blocker() {
-            self.resolver.apply_blocker(self.ctx, atom.inner(), blocker)
-        } else {
-            let resolved = self
+            return self
                 .resolver
-                .resolve_candidates(AtomRequirement::dependency(
-                    atom.inner(),
-                    self.ctx.owner_use,
-                ))
-                .await?;
-            if !resolved {
-                debug!(
-                    "{}: unsatisfied {} atom {atom}",
-                    self.ctx.owner, self.ctx.kind
-                );
-            }
-            Ok(resolved)
+                .handle_blocker(self.ctx, atom.inner(), blocker);
         }
+        let resolved = self
+            .resolver
+            .resolve_candidates(AtomRequirement::dependency(
+                atom.inner(),
+                self.ctx.owner_use,
+            ))
+            .await?;
+        if !resolved {
+            debug!(
+                "{}: unsatisfied {} atom {atom}",
+                self.ctx.owner, self.ctx.kind
+            );
+        }
+        Ok(resolved)
     }
 
     fn is_use_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
@@ -284,16 +250,6 @@ struct DepContext<'a> {
     owner: &'a Package,
     owner_use: &'a EffectiveUse,
     kind: DependencyKind,
-}
-
-/// Represents a unique key for a package based on its CPV and repo name.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-struct PackageKey((CPV, RepoName));
-
-impl PackageKey {
-    fn new(pkg: &Package) -> Self {
-        Self((pkg.cpv().clone(), pkg.repo().clone()))
-    }
 }
 
 #[cfg(test)]
@@ -316,7 +272,7 @@ mod tests {
         )
     }
 
-    async fn resolve(pkgs: impl IntoIterator<Item = TestPkg>, atom: &str) -> bool {
+    async fn resolve(pkgs: impl IntoIterator<Item = TestPkg>, atom: &str) -> ResolutionOutcome {
         Resolver::new(TestPkgProvider::new(pkgs))
             .resolve(&atom.parse().unwrap())
             .await
@@ -347,22 +303,34 @@ mod tests {
             if child_avail {
                 candidates.push(accepted(pkg("app-misc", "child", "1", &[]), &[], &[]));
             }
-            assert_eq!(resolve(candidates, "app-misc/root").await, expected);
+            let result = resolve(candidates, "app-misc/root").await;
+            assert_eq!(result.is_resolved(), expected);
         }
     }
 
     #[tokio::test]
     async fn test_resolve_candidate_fallback() {
-        let result = resolve(
-            [
-                root("app-misc/child"),
-                TestPkg::new(pkg("app-misc", "child", "2", &[]), PolicyResult::Masked),
-                accepted(pkg("app-misc", "child", "1", &[]), &[], &[]),
-            ],
-            "app-misc/root",
-        )
-        .await;
-        assert!(result);
+        let pkgs = [
+            root("app-misc/child"),
+            TestPkg::new(pkg("app-misc", "child", "2", &[]), PolicyResult::Masked),
+            accepted(pkg("app-misc", "child", "1", &[]), &[], &[]),
+        ];
+        assert!(resolve(pkgs, "app-misc/root").await.is_resolved());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_unavailable_fallback() {
+        let provider = TestPkgProvider::new([
+            root("app-misc/child"),
+            accepted(pkg("app-misc", "child", "1", &[]), &[], &[]),
+        ])
+        .with_failure("app-misc/child-2", "metadata resolution failed");
+
+        let outcome = Resolver::new(provider)
+            .resolve(&"app-misc/root".parse().unwrap())
+            .await
+            .unwrap();
+        assert!(outcome.is_resolved());
     }
 
     #[tokio::test]
@@ -375,29 +343,27 @@ mod tests {
             "app-misc/root",
         )
         .await;
-        assert!(result);
+        assert!(result.is_resolved());
     }
 
     #[tokio::test]
     async fn test_resolve_weak_blocker_self() {
-        assert!(resolve([root("!app-misc/root")], "app-misc/root").await);
+        let result = resolve([root("!app-misc/root")], "app-misc/root").await;
+        assert!(result.is_resolved());
     }
 
     #[tokio::test]
     async fn test_resolve_blocker_selected() {
-        let result = resolve(
-            [
-                root("app-misc/a app-misc/b"),
-                accepted(
-                    pkg("app-misc", "a", "1", &[("DEPEND", "!app-misc/b")]),
-                    &[],
-                    &[],
-                ),
-                accepted(pkg("app-misc", "b", "1", &[]), &[], &[]),
-            ],
-            "app-misc/root",
-        )
-        .await;
-        assert!(!result);
+        let pkgs = [
+            root("app-misc/a app-misc/b"),
+            accepted(
+                pkg("app-misc", "a", "1", &[("DEPEND", "!app-misc/b")]),
+                &[],
+                &[],
+            ),
+            accepted(pkg("app-misc", "b", "1", &[]), &[], &[]),
+        ];
+        let result = resolve(pkgs, "app-misc/root").await;
+        assert!(!result.is_resolved());
     }
 }

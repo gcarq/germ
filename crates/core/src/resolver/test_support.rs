@@ -2,7 +2,7 @@ use std::future::{Future, ready};
 
 use anyhow::anyhow;
 
-use super::PkgProvider;
+use super::provider::{Candidate, PkgProvider};
 use crate::atom::Atom;
 use crate::package::{Package, PackageView};
 use crate::policy::PolicyResult;
@@ -19,38 +19,54 @@ impl TestPkg {
     }
 }
 
+/// Holds an unresolved candidate that cannot be resolved.
+struct Unavailable {
+    cpv: String,
+    // `anyhow::Error` doesn't implement `Clone`.
+    reason: String,
+}
+
 pub struct TestPkgProvider {
     pkgs: Vec<TestPkg>,
+    unavailable: Vec<Unavailable>,
 }
 
 impl TestPkgProvider {
     pub fn new(pkgs: impl IntoIterator<Item = TestPkg>) -> Self {
         Self {
             pkgs: pkgs.into_iter().collect(),
+            unavailable: Vec::default(),
         }
+    }
+
+    /// Adds a candidate that couldn't be resolved.
+    pub fn with_failure(mut self, cpv: impl Into<String>, reason: impl Into<String>) -> Self {
+        self.unavailable.push(Unavailable {
+            cpv: cpv.into(),
+            reason: reason.into(),
+        });
+        self
     }
 }
 
 impl PkgProvider for TestPkgProvider {
-    fn find(
+    fn candidates(
         &self,
         atom: &Atom,
-    ) -> impl Future<Output = anyhow::Result<Vec<anyhow::Result<Package>>>> + Send {
-        ready(Ok(self
+    ) -> impl Future<Output = anyhow::Result<Vec<Candidate>>> + Send {
+        let unresolved = self.unavailable.iter().map(|entry| Candidate::Unavailable {
+            cpv: entry.cpv.clone(),
+            error: anyhow!("{}", entry.reason),
+        });
+        let evaluated = self
             .pkgs
             .iter()
-            .filter(|p| p.pkg.matches_atom(atom))
-            .map(|p| Ok(p.pkg.clone()))
-            .collect()))
-    }
+            .filter(|pkg| pkg.pkg.matches_atom(atom))
+            .map(|pkg| Candidate::Evaluated {
+                pkg: pkg.pkg.clone(),
+                policy: pkg.result.clone(),
+            });
 
-    fn eval(&self, pkg: &Package) -> impl Future<Output = anyhow::Result<PolicyResult>> + Send {
-        ready(
-            self.pkgs
-                .iter()
-                .find(|p| p.pkg == *pkg)
-                .map(|p| p.result.clone())
-                .ok_or_else(|| anyhow!("missing test policy result for {pkg}")),
-        )
+        ready(Ok(unresolved.chain(evaluated).collect()))
     }
 }

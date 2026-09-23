@@ -2,27 +2,26 @@ mod config;
 mod error;
 mod sync;
 
-use self::config::RepoSetConfig;
+use std::{cmp::Ordering, fs, io, path::Path, sync::Arc};
+
 pub use self::error::RepoSetError;
+
+use self::config::RepoSetConfig;
 use self::sync::{SyncHandler, build_sync_handler};
+use super::Arch;
 use super::RepoName;
+use super::tree::PackageResult;
 use super::tree::{Repository, RepositoryError};
 use crate::SysConf;
 use crate::atom::Atom;
 use crate::package::PackageView;
 use crate::policy::pkgmask::RepositorySource;
 use crate::profile::Profile;
-use crate::repository::Arch;
-use crate::repository::tree::PackageResult;
-use crate::types::FxHashMap;
+use crate::types::{FxHashMap, FxIndexMap};
 use crate::utils::{DfsState, Inherit, Visit};
 use anyhow::anyhow;
 use either::Either;
-use indexmap::IndexMap;
 use log::{debug, error, warn};
-use std::path::Path;
-use std::sync::Arc;
-use std::{cmp::Ordering, fs, io};
 
 /// Resolves and handles all available [`Repository`] instances.
 ///
@@ -32,7 +31,7 @@ use std::{cmp::Ordering, fs, io};
 pub struct RepoSet {
     sysconf: Arc<SysConf>,
     config: RepoSetConfig,
-    entries: IndexMap<RepoName, RepositoryEntry>,
+    entries: FxIndexMap<RepoName, RepositoryEntry>,
 }
 
 /// Holds the result and sync handler of a configured repository.
@@ -69,7 +68,7 @@ impl RepoSet {
         let mut set = Self {
             config,
             sysconf,
-            entries: IndexMap::default(),
+            entries: FxIndexMap::default(),
         };
         set.reload_from_disk()?;
         Ok(set)
@@ -213,7 +212,7 @@ impl RepoSet {
 
     /// Reloads all repository data from disk.
     fn reload_from_disk(&mut self) -> Result<(), RepoSetError> {
-        let mut entries = IndexMap::default();
+        let mut entries = FxIndexMap::default();
         for config in self.config.iter() {
             let sync_handler = build_sync_handler(&config.raw_properties).map_err(|error| {
                 RepoSetError::Configuration(

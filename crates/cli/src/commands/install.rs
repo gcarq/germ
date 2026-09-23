@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use germ_core::SysConf;
 use germ_core::atom::Atom;
 use germ_core::conf::portage::PortageConf;
@@ -19,11 +19,18 @@ pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
         PackageMasks::new(&reposet.package_mask_source()?, conf.package_mask_source()?)?,
     );
 
-    match Resolver::new(RepoPkgProvider::new(&reposet, &policy))
+    let outcome = Resolver::new(RepoPkgProvider::new(&reposet, &policy))
         .resolve(atom)
-        .await?
-    {
-        true => Ok(()),
-        false => Err(anyhow::anyhow!("unable to resolve {atom}")),
+        .await?;
+    if !outcome.is_resolved() {
+        bail!("no candidates found for atom {atom}");
     }
+
+    for candidate in outcome.selected() {
+        println!("Candidate: {}", candidate.pkg);
+    }
+    println!("Total: {}", outcome.selected().len());
+    println!("Rejected: {}", outcome.rejected().len());
+
+    Ok(())
 }

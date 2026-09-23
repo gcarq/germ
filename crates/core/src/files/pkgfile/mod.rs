@@ -9,8 +9,8 @@ use std::path::Path;
 
 use crate::atom::Atom;
 use crate::files::{content_from_path, entry::Precedence};
+use crate::types::FxIndexMap;
 use crate::utils::{Inherit, strip_line_comment};
-use indexmap::IndexMap;
 
 /// This trait abstracts multiple values in a line-based file, such as `package.use`.
 pub trait AtomPolicy: Default + Inherit {
@@ -20,7 +20,7 @@ pub trait AtomPolicy: Default + Inherit {
 
 /// Maps atoms to their policies while preserving insertion order.
 #[derive(Clone, Debug, Default)]
-pub struct AtomPolicies<T: AtomPolicy>(IndexMap<Atom, T>);
+pub struct AtomPolicies<T: AtomPolicy>(FxIndexMap<Atom, T>);
 
 impl<T: AtomPolicy> AtomPolicies<T> {
     pub fn from_path(path: &Path, precedence: Precedence, recursive: bool) -> anyhow::Result<Self> {
@@ -30,7 +30,7 @@ impl<T: AtomPolicy> AtomPolicies<T> {
     }
 
     pub fn from_content(content: &str, precedence: Precedence) -> anyhow::Result<Self> {
-        let mut policies = IndexMap::<Atom, T>::default();
+        let mut policies = FxIndexMap::<Atom, T>::default();
 
         for (lineno, line) in content.lines().enumerate() {
             let line = strip_line_comment(line);
