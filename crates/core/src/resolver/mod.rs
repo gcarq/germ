@@ -7,7 +7,7 @@ pub(crate) mod test_support;
 
 use std::fmt;
 
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 
 pub use self::installed::VdbPackages;
 pub use self::outcome::{CandidateRejection, ResolutionOutcome, SelectedPackage};
@@ -151,7 +151,7 @@ impl<P: PkgProvider, I: VdbPackages> Resolver<P, I> {
         if self.state.is_selected(&key) || self.state.is_visiting(&key) {
             let matches = self.state.matches_key(&key, request)?;
             if matches {
-                debug!("already selected: {pkg}");
+                trace!("already selected: {pkg}");
             }
             return Ok(matches);
         }
@@ -169,16 +169,9 @@ impl<P: PkgProvider, I: VdbPackages> Resolver<P, I> {
                 debug!("evaluating deps for {pkg}");
                 self.state
                     .visiting(key.clone(), pkg.clone(), effective_use.clone());
-                match self.eval_dependencies(&pkg, &effective_use).await {
-                    Ok(()) => {
-                        self.state.select(key);
-                        return Ok(true);
-                    }
-                    Err(reason) => {
-                        // TODO: don't reject it globally,
-                        // this might be valid in a different context.
-                        self.state.reject(key, reason);
-                    }
+                if self.eval_dependencies(&pkg, &effective_use).await.is_ok() {
+                    self.state.select(key);
+                    return Ok(true);
                 }
             }
             PolicyResult::Masked => {
@@ -251,7 +244,7 @@ impl<P: PkgProvider, I: VdbPackages> ExprEval<AtomDep> for DepEval<'_, '_, P, I>
             .await?;
         if !resolved {
             debug!(
-                "{}: unsatisfied {} atom {atom}",
+                "rejected {}:\n\t -> unsatisfied {}: {atom}",
                 self.ctx.owner, self.ctx.kind
             );
         }
