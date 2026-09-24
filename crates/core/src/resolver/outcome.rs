@@ -1,15 +1,16 @@
 use std::fmt;
 
-use super::DependencyKind;
-use super::state::PackageKey;
+use super::{DependencyKind, state::PackageKey};
 use crate::package::{AtomRequirement, Package};
-use crate::types::FxIndexMap;
+use crate::types::{FxIndexMap, FxIndexSet};
 use crate::useflag::EffectiveUse;
+use crate::vdb::package::InstalledPackage;
 
 #[derive(Debug)]
 pub struct ResolutionOutcome {
     resolved: bool,
     selected: Vec<SelectedPackage>,
+    removals: FxIndexSet<InstalledPackage>,
     rejected: FxIndexMap<PackageKey, CandidateRejection>,
 }
 
@@ -17,11 +18,13 @@ impl ResolutionOutcome {
     pub(super) const fn new(
         resolved: bool,
         selected: Vec<SelectedPackage>,
+        removals: FxIndexSet<InstalledPackage>,
         rejected: FxIndexMap<PackageKey, CandidateRejection>,
     ) -> Self {
         Self {
             resolved,
             selected,
+            removals,
             rejected,
         }
     }
@@ -34,6 +37,11 @@ impl ResolutionOutcome {
     /// Returns the list of selected packages.
     pub fn selected(&self) -> &[SelectedPackage] {
         &self.selected
+    }
+
+    /// Returns the installed packages that are planned for removal.
+    pub const fn removals(&self) -> &FxIndexSet<InstalledPackage> {
+        &self.removals
     }
 
     /// Returns the map of rejected candidates with their reasons.

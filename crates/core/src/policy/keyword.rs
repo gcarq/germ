@@ -152,6 +152,7 @@ mod tests {
     use crate::files::entry::Precedence;
     use crate::package::Package;
     use crate::test_support::{cpv, pkg, pkg_metadata};
+    use crate::useflag::EffectiveUse;
     use crate::utils::Inherit;
     use crate::vdb::package::InstalledPackage;
 
@@ -297,7 +298,7 @@ mod tests {
             cpv("dev-lang", "rust", "1.0"),
             "gentoo".parse().unwrap(),
             pkg_metadata(&[("KEYWORDS", "amd64")]),
-            Vec::default(),
+            EffectiveUse::default(),
         );
         assert_eq!(policy.eval(&pkg), KeywordEvalResult::new(true, true));
     }

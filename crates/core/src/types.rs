@@ -1,5 +1,5 @@
 use fxhash::FxHasher;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
 
@@ -11,3 +11,6 @@ pub type FxIndexMap<K, V> = IndexMap<K, V, BuildHasherDefault<FxHasher>>;
 
 /// A [`HashSet`] using [`FxHasher`] as default.
 pub type FxHashSet<V> = HashSet<V, BuildHasherDefault<FxHasher>>;
+
+/// An [`IndexSet`] using [`FxHasher`] as default.
+pub type FxIndexSet<V> = IndexSet<V, BuildHasherDefault<FxHasher>>;

@@ -197,7 +197,7 @@ mod tests {
     fn test_use_dep_conditional_owner() {
         for input in ["foo?", "!foo?"] {
             let dep = input.parse::<UseDep>().unwrap();
-            let result = dep.is_satisfied_by(&effective(&[], &[]), &effective(&[], &[]));
+            let result = dep.is_satisfied_by(&EffectiveUse::default(), &EffectiveUse::default());
             assert!(result.is_err(), "{input}");
         }
     }

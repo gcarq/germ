@@ -5,6 +5,7 @@ use super::UseFlag;
 
 /// Final USE state of one package.
 #[derive(Debug, Clone)]
+#[cfg_attr(test, derive(Default))]
 pub struct EffectiveUse {
     /// All flags that can exist for the package.
     /// This corresponds to `IUSE_EFFECTIVE`.

@@ -189,9 +189,7 @@ mod tests {
         let cpv = cpv("app-misc", "foo", "1");
 
         let mut cache = MetadataCache::new(temp.path());
-        cache
-            .insert_batch([(&cpv, &pkg_metadata(&[]))])
-            .unwrap();
+        cache.insert_batch([(&cpv, &pkg_metadata(&[]))]).unwrap();
         cache.recreate().unwrap();
 
         assert_eq!(cache.get(&cpv).unwrap(), None);
@@ -206,10 +204,7 @@ mod tests {
 
         let mut cache = MetadataCache::new(temp.path());
         cache
-            .insert_batch([
-                (&known, &pkg_metadata(&[])),
-                (&unknown, &pkg_metadata(&[])),
-            ])
+            .insert_batch([(&known, &pkg_metadata(&[])), (&unknown, &pkg_metadata(&[]))])
             .unwrap();
         cache.retain([&known]).unwrap();
         assert!(cache.get(&known).unwrap().is_some());
@@ -229,9 +224,7 @@ mod tests {
 
         let cache = MetadataCache::new(temp.path());
         let cpv = cpv("app-misc", "foo", "1");
-        cache
-            .insert_batch([(&cpv, &pkg_metadata(&[]))])
-            .unwrap();
+        cache.insert_batch([(&cpv, &pkg_metadata(&[]))]).unwrap();
         cache.remove(&cpv).unwrap();
 
         assert_eq!(cache.get(&cpv).unwrap(), None);

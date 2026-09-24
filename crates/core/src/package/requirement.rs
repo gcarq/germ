@@ -72,10 +72,8 @@ mod tests {
         let atom = "app-misc/foo[foo]".parse().unwrap();
         let request = AtomRequirement::root(&atom);
 
-        let result = request
-            .satisfied_by(&pkg, &effective(&["foo"], &[]))
-            .unwrap();
-        assert!(result);
+        let result = request.satisfied_by(&pkg, &effective(&["foo"], &[]));
+        assert!(result.unwrap());
     }
 
     #[test]
@@ -83,7 +81,7 @@ mod tests {
         let pkg = pkg("app-misc", "foo", "1.0", &[("IUSE", "")]);
         let atom = "app-misc/bar".parse().unwrap();
 
-        let request = AtomRequirement::root(&atom);
-        assert!(!request.satisfied_by(&pkg, &effective(&[], &[])).unwrap());
+        let result = AtomRequirement::root(&atom).satisfied_by(&pkg, &EffectiveUse::default());
+        assert!(!result.unwrap());
     }
 }

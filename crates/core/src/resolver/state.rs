@@ -1,10 +1,10 @@
+use super::outcome::{CandidateRejection, ResolutionOutcome, SelectedPackage};
 use crate::atom::Atom;
 use crate::package::{AtomRequirement, Package, PackageView, cpv::CPV};
 use crate::repository::RepoName;
-use crate::types::{FxHashMap, FxIndexMap};
+use crate::types::{FxHashMap, FxIndexMap, FxIndexSet};
 use crate::useflag::EffectiveUse;
-
-use super::outcome::{CandidateRejection, ResolutionOutcome, SelectedPackage};
+use crate::vdb::package::InstalledPackage;
 
 /// Holds the current resolver state.
 ///
@@ -19,6 +19,8 @@ pub struct ResolverState {
     rejected: FxIndexMap<PackageKey, CandidateRejection>,
     /// Holds weak blockers that need to be resolved.
     blockers: Vec<ActiveBlocker>,
+    /// Holds installed packages that are planned for removal.
+    removals: FxIndexSet<InstalledPackage>,
 }
 
 impl ResolverState {
@@ -76,6 +78,11 @@ impl ResolverState {
         self.blockers.push(ActiveBlocker { owner_use, atom });
     }
 
+    /// Records `pkg` as planned for removal.
+    pub fn insert_removal(&mut self, pkg: InstalledPackage) {
+        self.removals.insert(pkg);
+    }
+
     /// Checks if the given `pkg` is blocked by any active blockers.
     pub fn is_blocked(&self, pkg: &Package, target_use: &EffectiveUse) -> anyhow::Result<bool> {
         for blocker in &self.blockers {
@@ -93,7 +100,7 @@ impl ResolverState {
 
     pub fn finalize(self, resolved: bool) -> ResolutionOutcome {
         let selected = self.selected.into_values().collect();
-        ResolutionOutcome::new(resolved, selected, self.rejected)
+        ResolutionOutcome::new(resolved, selected, self.removals, self.rejected)
     }
 }
 
@@ -124,7 +131,6 @@ impl ActiveBlocker {
 mod tests {
     use super::*;
     use crate::test_support::pkg;
-    use crate::useflag::test_support::effective;
 
     fn state_with_pkg(pkg: &Package, target_use: EffectiveUse) -> ResolverState {
         let mut state = ResolverState::default();
@@ -136,7 +142,7 @@ mod tests {
     fn test_reject() {
         let pkg = pkg("app-misc", "foo", "1.0", &[]);
         let key = PackageKey::new(&pkg);
-        let mut state = state_with_pkg(&pkg, effective(&[], &[]));
+        let mut state = state_with_pkg(&pkg, EffectiveUse::default());
 
         state.reject(key.clone(), CandidateRejection::Masked);
 

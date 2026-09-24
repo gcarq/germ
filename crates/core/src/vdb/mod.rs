@@ -10,10 +10,9 @@ use crate::vdb::package::InstalledPackage;
 use anyhow::{Context, anyhow};
 use either::Either;
 use fancy_regex::Regex;
-use std::fs;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::{fs, io::ErrorKind};
 
 /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision` from VDB.
 static VDB_PKG_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -165,6 +164,7 @@ mod tests {
         fs::create_dir_all(path).unwrap();
         fs::write(path.join("repository"), repository).unwrap();
         fs::write(path.join("USE"), "").unwrap();
+        fs::write(path.join("IUSE_EFFECTIVE"), "").unwrap();
         fs::write(path.join("EAPI"), "8").unwrap();
         fs::write(path.join("DESCRIPTION"), "Test package").unwrap();
         fs::write(path.join("SLOT"), "0").unwrap();

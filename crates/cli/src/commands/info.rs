@@ -41,7 +41,7 @@ pub fn info(atom: Option<&Atom>, sysconf: &Arc<SysConf>) -> anyhow::Result<()> {
     );
     for pkg in packages {
         println!("{}", pkg.to_string().green().bold());
-        print_useflags(pkg);
+        print_useflags(pkg)?;
         println!();
     }
 
@@ -49,13 +49,14 @@ pub fn info(atom: Option<&Atom>, sysconf: &Arc<SysConf>) -> anyhow::Result<()> {
 }
 
 /// Prints USE flag usage for the given `package`.
-fn print_useflags(package: &InstalledPackage) {
+fn print_useflags(package: &InstalledPackage) -> anyhow::Result<()> {
+    let effective_use = package.effective_use();
     let mut enabled = Vec::new();
     let mut disabled = Vec::new();
 
     for entry in package.metadata().iuse() {
         let flag = entry.flag();
-        if package.enabled_useflags().contains(flag) {
+        if effective_use.is_enabled(flag)? {
             enabled.push(flag);
         } else {
             disabled.push(flag);
@@ -76,4 +77,5 @@ fn print_useflags(package: &InstalledPackage) {
         "USE=\"{}\"",
         enabled.chain(disabled).collect::<Vec<_>>().join(" ")
     );
+    Ok(())
 }

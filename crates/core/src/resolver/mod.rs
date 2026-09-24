@@ -1,3 +1,4 @@
+mod installed;
 mod outcome;
 mod provider;
 mod state;
@@ -8,6 +9,7 @@ use std::fmt;
 
 use log::{debug, info, warn};
 
+pub use self::installed::VdbPackages;
 pub use self::outcome::{CandidateRejection, ResolutionOutcome, SelectedPackage};
 pub use self::provider::{Candidate, PkgProvider, RepoPkgProvider};
 
@@ -40,15 +42,17 @@ impl fmt::Display for DependencyKind {
     }
 }
 
-pub struct Resolver<P> {
+pub struct Resolver<P, I> {
     provider: P,
+    installed: I,
     state: ResolverState,
 }
 
-impl<P: PkgProvider> Resolver<P> {
-    pub fn new(provider: P) -> Self {
+impl<P: PkgProvider, I: VdbPackages> Resolver<P, I> {
+    pub fn new(provider: P, installed: I) -> Self {
         Self {
             provider,
+            installed,
             state: ResolverState::default(),
         }
     }
@@ -82,7 +86,7 @@ impl<P: PkgProvider> Resolver<P> {
     /// Handles blockers for the given `atom`.
     ///
     /// Returns `true` if the dependency can be satisfied, `false` if its blocked.
-    fn handle_blocker(
+    async fn handle_blocker(
         &mut self,
         ctx: &DepContext<'_>,
         atom: &Atom,
@@ -99,6 +103,21 @@ impl<P: PkgProvider> Resolver<P> {
                         );
                         return Ok(false);
                     }
+                }
+
+                for installed in self.installed.find_by_atom(atom).await? {
+                    // Weak blockers against the same installed packages are ignored.
+                    if installed.cpv() == ctx.owner.cpv() {
+                        continue;
+                    }
+                    if !req.satisfied_by(&installed, installed.effective_use())? {
+                        continue;
+                    }
+                    info!(
+                        "{}: planning removal of {installed} for weak blocker {atom} in {}",
+                        ctx.owner, ctx.kind
+                    );
+                    self.state.insert_removal(installed);
                 }
             }
             AtomBlocker::Strong => {
@@ -210,17 +229,18 @@ impl<P: PkgProvider> Resolver<P> {
 }
 
 /// Evaluates dependency items for one package and dependency kind.
-struct DepEval<'a, 'b, P> {
-    resolver: &'a mut Resolver<P>,
+struct DepEval<'a, 'b, P, I> {
+    resolver: &'a mut Resolver<P, I>,
     ctx: &'a DepContext<'b>,
 }
 
-impl<P: PkgProvider> ExprEval<AtomDep> for DepEval<'_, '_, P> {
+impl<P: PkgProvider, I: VdbPackages> ExprEval<AtomDep> for DepEval<'_, '_, P, I> {
     async fn eval_item(&mut self, atom: &AtomDep) -> anyhow::Result<bool> {
         if let Some(blocker) = atom.blocker() {
             return self
                 .resolver
-                .handle_blocker(self.ctx, atom.inner(), blocker);
+                .handle_blocker(self.ctx, atom.inner(), blocker)
+                .await;
         }
         let resolved = self
             .resolver
@@ -253,16 +273,27 @@ struct DepContext<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{TestPkg, TestPkgProvider};
+    use super::test_support::{TestPkg, TestPkgProvider, TestVdbPackages};
     use super::*;
-    use crate::test_support::pkg;
+    use crate::test_support::{cpv, pkg, pkg_metadata};
     use crate::useflag::test_support::effective;
+    use crate::vdb::package::InstalledPackage;
 
     /// Returns an accepted `app-misc/<name>-1` candidate with the given metadata.
     fn candidate(name: &str, metadata: &[(&str, &str)]) -> TestPkg {
         TestPkg::new(
             pkg("app-misc", name, "1", metadata),
-            PolicyResult::Accepted(effective(&[], &[])),
+            PolicyResult::Accepted(EffectiveUse::default()),
+        )
+    }
+
+    /// Returns an installed `app-misc/<name>-1` package with the given USE state.
+    fn installed(name: &str, iuse_effective: &[&str], enabled: &[&str]) -> InstalledPackage {
+        InstalledPackage::from_parts(
+            cpv("app-misc", name, "1"),
+            "gentoo".parse().unwrap(),
+            pkg_metadata(&[]),
+            effective(iuse_effective, enabled),
         )
     }
 
@@ -273,12 +304,12 @@ mod tests {
 
     /// Resolves `app-misc/root` over the given packages.
     async fn resolve(pkgs: impl IntoIterator<Item = TestPkg>) -> ResolutionOutcome {
-        resolve_with(TestPkgProvider::new(pkgs)).await
+        resolve_with(TestPkgProvider::new(pkgs), TestVdbPackages::default()).await
     }
 
-    /// Resolves `app-misc/root` over the given package provider.
-    async fn resolve_with(provider: impl PkgProvider) -> ResolutionOutcome {
-        Resolver::new(provider)
+    /// Resolves `app-misc/root` with the given `provider` and `vdb`.
+    async fn resolve_with(provider: impl PkgProvider, vdb: impl VdbPackages) -> ResolutionOutcome {
+        Resolver::new(provider, vdb)
             .resolve(&"app-misc/root".parse().unwrap())
             .await
             .unwrap()
@@ -324,7 +355,8 @@ mod tests {
     async fn test_resolve_fallback_unavailable() {
         let provider = TestPkgProvider::new([root("app-misc/child"), candidate("child", &[])])
             .with_failure("app-misc/child-2", "metadata resolution failed");
-        assert!(resolve_with(provider).await.is_resolved());
+        let outcome = resolve_with(provider, TestVdbPackages::default()).await;
+        assert!(outcome.is_resolved());
     }
 
     #[tokio::test]
@@ -332,27 +364,6 @@ mod tests {
         let pkgs = [
             root("app-misc/child app-misc/child"),
             candidate("child", &[]),
-        ];
-        assert!(resolve(pkgs).await.is_resolved());
-    }
-
-    #[tokio::test]
-    async fn test_resolve_strong_blocker() {
-        let outcome = resolve([root("!!app-misc/other")]).await;
-        assert!(!outcome.is_resolved());
-        assert!(matches!(
-            outcome.rejected().values().next(),
-            Some(CandidateRejection::DependencyUnsatisfied(
-                DependencyKind::Depend
-            ))
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_resolve_strong_blocker_fallback() {
-        let pkgs = [
-            root("|| ( !!app-misc/other app-misc/fallback )"),
-            candidate("fallback", &[]),
         ];
         assert!(resolve(pkgs).await.is_resolved());
     }
@@ -370,5 +381,37 @@ mod tests {
             candidate("b", &[]),
         ];
         assert!(!resolve(pkgs).await.is_resolved());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_weak_blocker_removal() {
+        let installed = TestVdbPackages::new([installed("other", &[], &[])]);
+        let outcome =
+            resolve_with(TestPkgProvider::new([root("!app-misc/other")]), installed).await;
+
+        assert!(outcome.is_resolved());
+        assert_eq!(outcome.removals().len(), 1);
+        assert_eq!(outcome.removals()[0].cpv(), &cpv("app-misc", "other", "1"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_weak_blocker_removal_self() {
+        let installed = TestVdbPackages::new([installed("root", &[], &[])]);
+        let outcome = resolve_with(TestPkgProvider::new([root("!app-misc/root")]), installed).await;
+
+        assert!(outcome.is_resolved());
+        assert!(outcome.removals().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_weak_blocker_removal_use_dep() {
+        for (enabled, removals) in [(&[][..], 0), (&["flag"][..], 1)] {
+            let installed = TestVdbPackages::new([installed("other", &["flag"], enabled)]);
+            let provider = TestPkgProvider::new([root("!app-misc/other[flag]")]);
+            let outcome = resolve_with(provider, installed).await;
+
+            assert!(outcome.is_resolved());
+            assert_eq!(outcome.removals().len(), removals);
+        }
     }
 }

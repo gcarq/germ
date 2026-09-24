@@ -1,19 +1,20 @@
-use crate::package::PackageView;
-use crate::package::cpv::CPV;
 use crate::package::metadata::{MetaVar, PackageMetadata};
+use crate::package::{PackageView, cpv::CPV};
 use crate::repository::RepoName;
-use crate::useflag::UseFlag;
+use crate::useflag::{EffectiveUse, UseFlag};
 use anyhow::Context;
+use std::cmp::Ordering;
 use std::path::Path;
 use std::str::FromStr;
-use std::{fmt, fs, io};
+use std::{fmt, fs, hash, io};
 
 /// Represents a package that is currently installed on the system.
+#[derive(Debug, Clone)]
 pub struct InstalledPackage {
     cpv: CPV,
     repo: RepoName,
     metadata: PackageMetadata,
-    useflags: Vec<UseFlag>,
+    iuse_effective: EffectiveUse,
 }
 
 impl InstalledPackage {
@@ -21,6 +22,17 @@ impl InstalledPackage {
     ///
     /// `path` is expected to be the VDB directory where additional metadata is stored.
     pub fn from_path(cpv: CPV, path: &Path) -> anyhow::Result<Self> {
+        let iuse_effective = EffectiveUse::from_parts(
+            read_meta(&path.join("IUSE_EFFECTIVE"))?
+                .split_whitespace()
+                .map(UseFlag::from_str)
+                .collect::<anyhow::Result<_>>()?,
+            fs::read_to_string(path.join("USE"))
+                .context("unable to read USE flags")?
+                .split_whitespace()
+                .map(UseFlag::from_str)
+                .collect::<anyhow::Result<_>>()?,
+        );
         Ok(Self {
             cpv,
             repo: fs::read_to_string(path.join("repository"))
@@ -28,32 +40,55 @@ impl InstalledPackage {
                 .trim()
                 .parse()?,
             metadata: load_metadata(path)?,
-            useflags: fs::read_to_string(path.join("USE"))
-                .context("unable to read USE flags")?
-                .split_whitespace()
-                .map(UseFlag::from_str)
-                .collect::<anyhow::Result<Vec<_>>>()?,
+            iuse_effective,
         })
     }
 
-    /// Creates a new [`InstalledPackage`] from the given `CPV`, `RepoName`, and `PackageMetadata`.
+    /// Creates a new [`InstalledPackage`] from the given parts.
     pub const fn from_parts(
         cpv: CPV,
         repo: RepoName,
         metadata: PackageMetadata,
-        useflags: Vec<UseFlag>,
+        iuse_effective: EffectiveUse,
     ) -> Self {
         Self {
             cpv,
             repo,
             metadata,
-            useflags,
+            iuse_effective,
         }
     }
 
-    /// Returns the enabled USE flags for this package.
-    pub fn enabled_useflags(&self) -> &[UseFlag] {
-        &self.useflags
+    /// Returns the effective USE state when the package was installed.
+    pub const fn effective_use(&self) -> &EffectiveUse {
+        &self.iuse_effective
+    }
+}
+
+impl Eq for InstalledPackage {}
+
+impl PartialEq for InstalledPackage {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Ord for InstalledPackage {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.cpv.cmp(&other.cpv).then(self.repo.cmp(&other.repo))
+    }
+}
+
+impl PartialOrd for InstalledPackage {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl hash::Hash for InstalledPackage {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.cpv.hash(state);
+        self.repo.hash(state);
     }
 }
 
@@ -103,16 +138,29 @@ impl fmt::Display for InstalledPackage {
 mod tests {
     use super::*;
     use crate::test_support::{cpv, pkg_metadata};
+    use crate::useflag::test_support::effective;
 
     #[test]
     fn test_installed_package_fmt() {
-        let cpv = cpv("app-editors", "vim", "7.0.174-r1");
-        let pkg = InstalledPackage {
-            cpv,
-            repo: "gentoo".parse().unwrap(),
-            metadata: pkg_metadata(&[]),
-            useflags: Vec::new(),
-        };
+        let pkg = InstalledPackage::from_parts(
+            cpv("app-editors", "vim", "7.0.174-r1"),
+            "gentoo".parse().unwrap(),
+            pkg_metadata(&[]),
+            EffectiveUse::default(),
+        );
         assert_eq!(pkg.to_string(), "app-editors/vim-7.0.174-r1::gentoo");
+    }
+
+    #[test]
+    fn test_effective_use() {
+        let flag: UseFlag = "flag".parse().unwrap();
+        let pkg = InstalledPackage::from_parts(
+            cpv("app-misc", "foo", "1"),
+            "gentoo".parse().unwrap(),
+            pkg_metadata(&[]),
+            effective(&["flag"], &[]),
+        );
+
+        assert_eq!(pkg.effective_use().state(&flag), Some(false));
     }
 }

@@ -100,7 +100,8 @@ impl fmt::Display for Package {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{cpv, pkg_metadata, pkg};
+    use crate::test_support::{cpv, pkg, pkg_metadata};
+    use crate::useflag::EffectiveUse;
     use crate::vdb::package::InstalledPackage;
 
     fn assert_package_view_matches_atoms<P: PackageView>(pkg: &P) {
@@ -139,11 +140,7 @@ mod tests {
         let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
         let repo: RepoName = "gentoo".parse().unwrap();
 
-        let pkg = Package::new(
-            cpv.clone(),
-            repo.clone(),
-            pkg_metadata(&[("SLOT", "15")]),
-        );
+        let pkg = Package::new(cpv.clone(), repo.clone(), pkg_metadata(&[("SLOT", "15")]));
         assert_package_view_matches_atoms(&pkg);
         assert_eq!(pkg.qualified_name(), "sys-devel/gcc");
 
@@ -151,7 +148,7 @@ mod tests {
             cpv,
             repo,
             pkg_metadata(&[("SLOT", "15")]),
-            Vec::default(),
+            EffectiveUse::default(),
         );
         assert_package_view_matches_atoms(&installed);
         assert_eq!(installed.qualified_name(), "sys-devel/gcc");

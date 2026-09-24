@@ -2,10 +2,12 @@ use std::future::{Future, ready};
 
 use anyhow::anyhow;
 
+use super::installed::VdbPackages;
 use super::provider::{Candidate, PkgProvider};
 use crate::atom::Atom;
 use crate::package::{Package, PackageView};
 use crate::policy::PolicyResult;
+use crate::vdb::package::InstalledPackage;
 
 /// Holds a [`Package`] with a predefined [`PolicyResult`] for testing.
 pub struct TestPkg {
@@ -68,5 +70,30 @@ impl PkgProvider for TestPkgProvider {
             });
 
         ready(Ok(unresolved.chain(evaluated).collect()))
+    }
+}
+
+/// Mocked VDB interface for testing.
+#[derive(Default)]
+pub struct TestVdbPackages {
+    pkgs: Vec<InstalledPackage>,
+}
+
+impl TestVdbPackages {
+    pub fn new(pkgs: impl IntoIterator<Item = InstalledPackage>) -> Self {
+        Self {
+            pkgs: pkgs.into_iter().collect(),
+        }
+    }
+}
+
+impl VdbPackages for TestVdbPackages {
+    async fn find_by_atom(&mut self, atom: &Atom) -> anyhow::Result<Vec<InstalledPackage>> {
+        Ok(self
+            .pkgs
+            .iter()
+            .filter(|pkg| pkg.matches_atom(atom))
+            .cloned()
+            .collect())
     }
 }

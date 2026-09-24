@@ -7,6 +7,7 @@ use germ_core::conf::portage::PortageConf;
 use germ_core::policy::{PackagePolicy, pkgmask::PackageMasks};
 use germ_core::repository::RepoSet;
 use germ_core::resolver::{RepoPkgProvider, Resolver};
+use germ_core::vdb::Vdb;
 
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.
@@ -19,7 +20,8 @@ pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
         PackageMasks::new(&reposet.package_mask_source()?, conf.package_mask_source()?)?,
     );
 
-    let outcome = Resolver::new(RepoPkgProvider::new(&reposet, &policy))
+    let vdb = Vdb::from_path(sysconf.vdb_path()).context("unable to read VDB")?;
+    let outcome = Resolver::new(RepoPkgProvider::new(&reposet, &policy), vdb)
         .resolve(atom)
         .await?;
     if !outcome.is_resolved() {
@@ -28,6 +30,9 @@ pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
 
     for candidate in outcome.selected() {
         println!("Candidate: {}", candidate.pkg);
+    }
+    for removal in outcome.removals() {
+        println!("Removal: {removal}");
     }
     println!("Total: {}", outcome.selected().len());
     println!("Rejected: {}", outcome.rejected().len());
