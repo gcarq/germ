@@ -1,47 +1,38 @@
 use std::fmt;
 
-use super::{DependencyKind, state::PackageKey};
+use super::{DependencyKind, ExecutionPlan, state::PackageKey};
 use crate::package::{AtomRequirement, Package};
-use crate::types::{FxIndexMap, FxIndexSet};
+use crate::types::FxIndexMap;
 use crate::useflag::EffectiveUse;
-use crate::vdb::package::InstalledPackage;
 
 #[derive(Debug)]
 pub struct ResolutionOutcome {
-    resolved: bool,
-    selected: Vec<SelectedPackage>,
-    removals: FxIndexSet<InstalledPackage>,
+    is_resolved: bool,
+    plan: ExecutionPlan,
     rejected: FxIndexMap<PackageKey, CandidateRejection>,
 }
 
 impl ResolutionOutcome {
     pub(super) const fn new(
-        resolved: bool,
-        selected: Vec<SelectedPackage>,
-        removals: FxIndexSet<InstalledPackage>,
+        is_resolved: bool,
+        plan: ExecutionPlan,
         rejected: FxIndexMap<PackageKey, CandidateRejection>,
     ) -> Self {
         Self {
-            resolved,
-            selected,
-            removals,
+            is_resolved,
+            plan,
             rejected,
         }
     }
 
     /// Returns whether the resolution was successful.
     pub const fn is_resolved(&self) -> bool {
-        self.resolved
+        self.is_resolved
     }
 
-    /// Returns the list of selected packages.
-    pub fn selected(&self) -> &[SelectedPackage] {
-        &self.selected
-    }
-
-    /// Returns the installed packages that are planned for removal.
-    pub const fn removals(&self) -> &FxIndexSet<InstalledPackage> {
-        &self.removals
+    /// Returns the [`ExecutionPlan`].
+    pub const fn plan(&self) -> &ExecutionPlan {
+        &self.plan
     }
 
     /// Returns the map of rejected candidates with their reasons.
@@ -51,7 +42,7 @@ impl ResolutionOutcome {
 }
 
 /// A package selected by the resolver together with its effective USE state.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct SelectedPackage {
     pub pkg: Package,
     pub effective_use: EffectiveUse,
@@ -67,13 +58,12 @@ impl SelectedPackage {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum CandidateRejection {
     MissingKeyword,
     Masked,
     RequiredUseUnsatisfied,
     DependencyUnsatisfied(DependencyKind),
-    Err(anyhow::Error),
 }
 
 impl fmt::Display for CandidateRejection {
@@ -83,7 +73,6 @@ impl fmt::Display for CandidateRejection {
             Self::Masked => f.write_str("masked"),
             Self::RequiredUseUnsatisfied => f.write_str("required USE unsatisfied"),
             Self::DependencyUnsatisfied(kind) => write!(f, "unsatisfied {kind}"),
-            Self::Err(err) => write!(f, "error: {err}"),
         }
     }
 }

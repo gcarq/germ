@@ -4,9 +4,10 @@ use anyhow::{Context, bail};
 use germ_core::SysConf;
 use germ_core::atom::Atom;
 use germ_core::conf::portage::PortageConf;
+use germ_core::package::PackageView;
 use germ_core::policy::{PackagePolicy, pkgmask::PackageMasks};
 use germ_core::repository::RepoSet;
-use germ_core::resolver::{RepoPkgProvider, Resolver};
+use germ_core::resolver::{ExecutionPlan, PackageOperation, PackageProvider, Resolver};
 use germ_core::vdb::Vdb;
 
 /// Installs the best matching package for the given `atom`.
@@ -21,21 +22,39 @@ pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     );
 
     let vdb = Vdb::from_path(sysconf.vdb_path()).context("unable to read VDB")?;
-    let outcome = Resolver::new(RepoPkgProvider::new(&reposet, &policy), vdb)
+    let outcome = Resolver::new(PackageProvider::new(&reposet, vdb), policy)
         .resolve(atom)
         .await?;
     if !outcome.is_resolved() {
         bail!("no candidates found for atom {atom}");
     }
 
-    for candidate in outcome.selected() {
-        println!("Candidate: {}", candidate.pkg);
-    }
-    for removal in outcome.removals() {
-        println!("Removal: {removal}");
-    }
-    println!("Total: {}", outcome.selected().len());
-    println!("Rejected: {}", outcome.rejected().len());
+    print_plan(outcome.plan());
+    println!("Total operations: {}", outcome.plan().operations().len());
+    println!("Rejected candidates: {}", outcome.rejected().len());
 
     Ok(())
+}
+
+/// Prints the execution plan.
+fn print_plan(plan: &ExecutionPlan) {
+    for operation in plan.operations() {
+        match operation {
+            PackageOperation::Merge(selected) => {
+                println!("[N   ] {}", selected.pkg.cpv());
+            }
+            PackageOperation::Replace(selected, _) => {
+                println!("[ R  ] {}", selected.pkg.cpv());
+            }
+            PackageOperation::Upgrade(selected, installed) => {
+                println!("[  U ] {} -> {}", installed.cpv(), selected.pkg.cpv());
+            }
+            PackageOperation::Downgrade(selected, installed) => {
+                println!("[  D ] {} -> {}", installed.cpv(), selected.pkg.cpv());
+            }
+            PackageOperation::Unmerge(installed) => {
+                println!("[   X] {}", installed.cpv());
+            }
+        }
+    }
 }

@@ -1,99 +1,104 @@
-use std::future::{Future, ready};
-
-use anyhow::anyhow;
-
-use super::installed::VdbPackages;
-use super::provider::{Candidate, PkgProvider};
+use super::provider::PackageLookup;
+use super::{ResolutionOutcome, Resolver};
 use crate::atom::Atom;
 use crate::package::{Package, PackageView};
-use crate::policy::PolicyResult;
+use crate::policy::test_support::PolicyFixture;
+use crate::test_support::{cpv, pkg_metadata};
+use crate::useflag::test_support::effective;
 use crate::vdb::package::InstalledPackage;
 
-/// Holds a [`Package`] with a predefined [`PolicyResult`] for testing.
-pub struct TestPkg {
-    pkg: Package,
-    result: PolicyResult,
+/// Returns an installed `app-misc/<name>-<version>` package in `slot` with the given USE state.
+pub fn installed(
+    name: &str,
+    version: &str,
+    slot: &str,
+    iuse_effective: &[&str],
+    enabled: &[&str],
+) -> InstalledPackage {
+    InstalledPackage::from_parts(
+        cpv("app-misc", name, version),
+        "gentoo".parse().unwrap(),
+        pkg_metadata(&[("SLOT", slot)]),
+        effective(iuse_effective, enabled),
+    )
 }
 
-impl TestPkg {
-    pub const fn new(pkg: Package, result: PolicyResult) -> Self {
-        Self { pkg, result }
-    }
+/// Holds resolver inputs for testing.
+pub struct TestResolver {
+    packages: Vec<Package>,
+    installed: Vec<InstalledPackage>,
+    policy: PolicyFixture,
 }
 
-/// Holds an unresolved candidate that cannot be resolved.
-struct Unavailable {
-    cpv: String,
-    // `anyhow::Error` doesn't implement `Clone`.
-    reason: String,
-}
-
-pub struct TestPkgProvider {
-    pkgs: Vec<TestPkg>,
-    unavailable: Vec<Unavailable>,
-}
-
-impl TestPkgProvider {
-    pub fn new(pkgs: impl IntoIterator<Item = TestPkg>) -> Self {
+impl TestResolver {
+    /// Creates a fixture with `packages` and no installed packages.
+    pub fn new(packages: impl IntoIterator<Item = Package>) -> Self {
         Self {
-            pkgs: pkgs.into_iter().collect(),
-            unavailable: Vec::default(),
+            packages: packages.into_iter().collect(),
+            installed: Vec::default(),
+            policy: PolicyFixture::default(),
         }
     }
 
-    /// Adds a candidate that couldn't be resolved.
-    pub fn with_failure(mut self, cpv: impl Into<String>, reason: impl Into<String>) -> Self {
-        self.unavailable.push(Unavailable {
-            cpv: cpv.into(),
-            reason: reason.into(),
-        });
+    /// Sets the installed packages available to resolution.
+    pub fn with_installed(mut self, installed: impl IntoIterator<Item = InstalledPackage>) -> Self {
+        self.installed = installed.into_iter().collect();
         self
     }
-}
 
-impl PkgProvider for TestPkgProvider {
-    fn candidates(
-        &self,
-        atom: &Atom,
-    ) -> impl Future<Output = anyhow::Result<Vec<Candidate>>> + Send {
-        let unresolved = self.unavailable.iter().map(|entry| Candidate::Unavailable {
-            cpv: entry.cpv.clone(),
-            error: anyhow!("{}", entry.reason),
-        });
-        let evaluated = self
-            .pkgs
-            .iter()
-            .filter(|pkg| pkg.pkg.matches_atom(atom))
-            .map(|pkg| Candidate::Evaluated {
-                pkg: pkg.pkg.clone(),
-                policy: pkg.result.clone(),
-            });
+    /// Sets the globally enabled USE flags available to resolution.
+    pub fn with_use(mut self, flags: &[&str]) -> Self {
+        self.policy = self.policy.with_use(flags);
+        self
+    }
 
-        ready(Ok(unresolved.chain(evaluated).collect()))
+    /// Adds a package mask atom to the policy used for resolution.
+    pub fn with_mask(mut self, atom: &str) -> Self {
+        self.policy = self.policy.with_mask(atom);
+        self
+    }
+
+    /// Resolves `atom` and returns the outcome.
+    pub async fn resolve(&self, atom: &Atom) -> ResolutionOutcome {
+        let provider = TestPackageLookup::new(&self.packages, &self.installed);
+        let resolver = Resolver::new(provider, self.policy.build().unwrap());
+        resolver.resolve(atom).await.unwrap()
     }
 }
 
-/// Mocked VDB interface for testing.
-#[derive(Default)]
-pub struct TestVdbPackages {
-    pkgs: Vec<InstalledPackage>,
+struct TestPackageLookup<'a> {
+    packages: &'a [Package],
+    installed: &'a [InstalledPackage],
 }
 
-impl TestVdbPackages {
-    pub fn new(pkgs: impl IntoIterator<Item = InstalledPackage>) -> Self {
+impl<'a> TestPackageLookup<'a> {
+    const fn new(packages: &'a [Package], installed: &'a [InstalledPackage]) -> Self {
         Self {
-            pkgs: pkgs.into_iter().collect(),
+            packages,
+            installed,
         }
     }
 }
 
-impl VdbPackages for TestVdbPackages {
-    async fn find_by_atom(&mut self, atom: &Atom) -> anyhow::Result<Vec<InstalledPackage>> {
+impl PackageLookup for TestPackageLookup<'_> {
+    async fn repo_match_by_atom(&self, atom: &Atom) -> anyhow::Result<Vec<Package>> {
+        let iter = self.packages.iter().filter(|pkg| pkg.matches_atom(atom));
+        Ok(iter.cloned().collect())
+    }
+
+    async fn vdb_match_by_atom(&mut self, atom: &Atom) -> anyhow::Result<Vec<InstalledPackage>> {
+        let iter = self.installed.iter().filter(|pkg| pkg.matches_atom(atom));
+        Ok(iter.cloned().collect())
+    }
+
+    async fn vdb_match_by_pkg(
+        &mut self,
+        pkg: &Package,
+    ) -> anyhow::Result<Option<InstalledPackage>> {
         Ok(self
-            .pkgs
+            .installed
             .iter()
-            .filter(|pkg| pkg.matches_atom(atom))
-            .cloned()
-            .collect())
+            .find(|p| p.matches_package_slot(pkg))
+            .cloned())
     }
 }

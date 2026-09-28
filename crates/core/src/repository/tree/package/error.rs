@@ -3,19 +3,20 @@ use thiserror::Error;
 
 use crate::ebuild::EbuildError;
 use crate::ebuild::handler::error::{MetadataGenerationError, PhaseExecutionError};
+use crate::package::cpv::CPV;
 use crate::repository::RepositoryError;
 
 /// Defines failures while resolving packages from repositories.
 #[derive(Debug, Error)]
 #[error("resolving metadata for {cpv} failed")]
 pub struct PackageResolutionError {
-    pub cpv: String,
+    pub cpv: Box<CPV>, // Boxed due to the large size
     #[source]
     pub source: MetadataGenerationError,
 }
 
 impl PackageResolutionError {
-    pub fn new(cpv: impl Into<String>, source: MetadataGenerationError) -> Self {
+    pub fn new(cpv: CPV, source: MetadataGenerationError) -> Self {
         Self {
             cpv: cpv.into(),
             source,
@@ -42,14 +43,14 @@ impl PackageResolutionError {
 
 #[cfg(test)]
 mod tests {
-    use std::{io, path::PathBuf};
-
     use super::*;
+    use crate::test_support::cpv;
+    use std::{io, path::PathBuf};
 
     #[test]
     fn test_promote() {
         let data = PackageResolutionError::new(
-            "app-misc/foo-1",
+            cpv("app-misc", "foo", "1"),
             MetadataGenerationError::Ebuild(EbuildError::Io {
                 path: PathBuf::from("foo-1.ebuild"),
                 source: io::Error::from(io::ErrorKind::NotFound),
@@ -60,18 +61,16 @@ mod tests {
         };
 
         let internal = PackageResolutionError::new(
-            "app-misc/foo-1",
-            MetadataGenerationError::Internal(anyhow::anyhow!("test")),
+            cpv("app-misc", "foo", "1"),
+            MetadataGenerationError::Internal(anyhow!("test")),
         );
         let RepositoryError::Internal(_) = internal.promote().unwrap_err() else {
             panic!();
         };
 
         let lifecycle = PackageResolutionError::new(
-            "app-misc/foo-1",
-            MetadataGenerationError::Execution(PhaseExecutionError::Lifecycle(anyhow::anyhow!(
-                "test"
-            ))),
+            cpv("app-misc", "foo", "1"),
+            MetadataGenerationError::Execution(PhaseExecutionError::Lifecycle(anyhow!("test"))),
         );
         assert!(lifecycle.promote().is_ok());
     }

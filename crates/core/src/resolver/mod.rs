@@ -1,58 +1,40 @@
-mod installed;
+mod deps;
 mod outcome;
+mod plan;
+mod policy;
 mod provider;
 mod state;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-use std::fmt;
+use log::{debug, info, trace};
 
-use log::{debug, info, trace, warn};
-
-pub use self::installed::VdbPackages;
+pub use self::deps::DependencyKind;
 pub use self::outcome::{CandidateRejection, ResolutionOutcome, SelectedPackage};
-pub use self::provider::{Candidate, PkgProvider, RepoPkgProvider};
+pub use self::plan::{ExecutionPlan, PackageOperation};
+pub use self::provider::{Candidate, PackageProvider};
 
 use self::state::{PackageKey, ResolverState};
-use crate::atom::{Atom, AtomBlocker};
-use crate::deps::{AtomDep, ExprEval};
-use crate::package::{AtomRequirement, Package, PackageView};
-use crate::policy::PolicyResult;
-use crate::useflag::{EffectiveUse, UseFlag};
+use crate::atom::Atom;
+use crate::package::{AtomRequirement, Package};
+use crate::policy::PackagePolicy;
+use crate::resolver::policy::eval_policy;
+use crate::resolver::provider::PackageLookup;
+use crate::useflag::EffectiveUse;
 
-/// Identifies the dependency kind being evaluated.
-#[derive(Copy, Clone, Debug)]
-pub enum DependencyKind {
-    Depend,
-    BDepend,
-    IDepend,
-    RDepend,
-    PDepend,
-}
-
-impl fmt::Display for DependencyKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Depend => f.write_str("DEPEND"),
-            Self::BDepend => f.write_str("BDEPEND"),
-            Self::IDepend => f.write_str("IDEPEND"),
-            Self::RDepend => f.write_str("RDEPEND"),
-            Self::PDepend => f.write_str("PDEPEND"),
-        }
-    }
-}
-
-pub struct Resolver<P, I> {
-    provider: P,
-    installed: I,
+/// Orchestrates dependency resolution for [`Package`]s.
+pub struct Resolver<U> {
+    provider: U,
+    policy: PackagePolicy,
     state: ResolverState,
 }
 
-impl<P: PkgProvider, I: VdbPackages> Resolver<P, I> {
-    pub fn new(provider: P, installed: I) -> Self {
+impl<U: PackageLookup> Resolver<U> {
+    /// Creates a new resolver for the given [`PackageLookup`] and [`PackagePolicy`].
+    pub fn new(provider: U, policy: PackagePolicy) -> Self {
         Self {
             provider,
-            installed,
+            policy,
             state: ResolverState::default(),
         }
     }
@@ -60,79 +42,29 @@ impl<P: PkgProvider, I: VdbPackages> Resolver<P, I> {
     /// Resolves the given `atom` and returns the resolution outcome.
     pub async fn resolve(mut self, atom: &Atom) -> anyhow::Result<ResolutionOutcome> {
         info!("Resolving candidates for {atom}...");
-        let resolved = self.resolve_candidates(AtomRequirement::root(atom)).await?;
-        Ok(self.state.finalize(resolved))
+        let is_resolved = self.resolve_candidates(AtomRequirement::root(atom)).await?;
+        // TODO: don't create a plan when it couldn't be fully resolved
+        Ok(self.state.finalize(is_resolved))
     }
 
     /// Resolves candidates for the given `atom` requirement.
     ///
     /// Returns `true` if a candidate was found, `false` otherwise.
     async fn resolve_candidates(&mut self, request: AtomRequirement<'_>) -> anyhow::Result<bool> {
-        for candidate in self.provider.candidates(request.atom()).await? {
+        let pkgs = self.provider.repo_match_by_atom(request.atom()).await?;
+        for candidate in eval_policy(pkgs, &self.policy) {
             match candidate {
-                Candidate::Evaluated { pkg, policy } => {
-                    if self.eval_candidate(&request, pkg, policy).await? {
+                Candidate::Accepted(pkg, effective_use) => {
+                    if self.eval_candidate(&request, pkg, effective_use).await? {
                         return Ok(true);
                     }
                 }
-                Candidate::Unavailable { cpv, error } => {
-                    warn!("skipping unavailable candidate {cpv}: {error}");
+                Candidate::Rejected(pkg, rejection) => {
+                    self.state.reject(PackageKey::new(&pkg), rejection);
                 }
             }
         }
         Ok(false)
-    }
-
-    /// Handles blockers for the given `atom`.
-    ///
-    /// Returns `true` if the dependency can be satisfied, `false` if its blocked.
-    async fn handle_blocker(
-        &mut self,
-        ctx: &DepContext<'_>,
-        atom: &Atom,
-        blocker: AtomBlocker,
-    ) -> anyhow::Result<bool> {
-        match blocker {
-            AtomBlocker::Weak => {
-                let req = AtomRequirement::dependency(atom, ctx.owner_use);
-                for (_, sel) in self.state.selected().filter(|sel| &sel.1.pkg != ctx.owner) {
-                    if sel.matches(&req)? {
-                        warn!(
-                            "{}\n\tblocker {atom} in {}\n\tmatched selected {}",
-                            ctx.owner, ctx.kind, sel.pkg
-                        );
-                        return Ok(false);
-                    }
-                }
-
-                for installed in self.installed.find_by_atom(atom).await? {
-                    // Weak blockers against the same installed packages are ignored.
-                    if installed.cpv() == ctx.owner.cpv() {
-                        continue;
-                    }
-                    if !req.satisfied_by(&installed, installed.effective_use())? {
-                        continue;
-                    }
-                    info!(
-                        "{}: planning removal of {installed} for weak blocker {atom} in {}",
-                        ctx.owner, ctx.kind
-                    );
-                    self.state.insert_removal(installed);
-                }
-            }
-            AtomBlocker::Strong => {
-                debug!(
-                    "{}: cannot satisfy due to strong blocker {blocker}{atom} in {}",
-                    ctx.owner, ctx.kind
-                );
-                return Ok(false);
-            }
-        };
-
-        self.state
-            .insert_blocker(ctx.owner_use.clone(), atom.clone());
-
-        Ok(true)
     }
 
     /// Evaluates a package candidate including its dependencies.
@@ -140,7 +72,7 @@ impl<P: PkgProvider, I: VdbPackages> Resolver<P, I> {
         &mut self,
         request: &AtomRequirement<'_>,
         pkg: Package,
-        policy: PolicyResult,
+        effective_use: EffectiveUse,
     ) -> anyhow::Result<bool> {
         let key = PackageKey::new(&pkg);
 
@@ -156,255 +88,310 @@ impl<P: PkgProvider, I: VdbPackages> Resolver<P, I> {
             return Ok(matches);
         }
 
-        match policy {
-            PolicyResult::Accepted(effective_use) => {
-                if !request.satisfied_by(&pkg, &effective_use)? {
-                    return Ok(false);
-                }
-                if self.state.is_blocked(&pkg, &effective_use)? {
-                    info!("skipping {pkg} due to active blocker");
-                    return Ok(false);
-                }
-
-                debug!("evaluating deps for {pkg}");
-                self.state
-                    .visiting(key.clone(), pkg.clone(), effective_use.clone());
-                if self.eval_dependencies(&pkg, &effective_use).await.is_ok() {
-                    self.state.select(key);
-                    return Ok(true);
-                }
-            }
-            PolicyResult::Masked => {
-                self.state.reject(key, CandidateRejection::Masked);
-            }
-            PolicyResult::MissingKeyword => {
-                self.state.reject(key, CandidateRejection::MissingKeyword);
-            }
-            PolicyResult::RequiredUseUnsatisfied => {
-                self.state
-                    .reject(key, CandidateRejection::RequiredUseUnsatisfied);
-            }
+        if !request.satisfied_by(&pkg, &effective_use)? {
+            return Ok(false);
         }
-        Ok(false)
-    }
-
-    /// Evaluates all dependencies of a package.
-    async fn eval_dependencies<'b>(
-        &mut self,
-        owner: &'b Package,
-        owner_use: &'b EffectiveUse,
-    ) -> anyhow::Result<(), CandidateRejection> {
-        let dependencies = [
-            (DependencyKind::Depend, owner.metadata().depend().view()),
-            (DependencyKind::BDepend, owner.metadata().bdepend().view()),
-            (DependencyKind::IDepend, owner.metadata().idepend().view()),
-            (DependencyKind::RDepend, owner.metadata().rdepend().view()),
-            (DependencyKind::PDepend, owner.metadata().pdepend().view()),
-        ];
-        for (kind, tree) in dependencies {
-            let ctx = DepContext {
-                owner,
-                kind,
-                owner_use,
-            };
-            let mut evaluator = DepEval {
-                resolver: self,
-                ctx: &ctx,
-            };
-            match tree.eval(&mut evaluator).await {
-                Ok(true) => (),
-                Ok(false) => Err(CandidateRejection::DependencyUnsatisfied(kind))?,
-                Err(err) => Err(CandidateRejection::Err(err))?,
-            }
+        if self.state.is_blocked(&pkg, &effective_use)? {
+            info!("skipping {pkg} due to active blocker");
+            return Ok(false);
         }
-        Ok(())
-    }
-}
 
-/// Evaluates dependency items for one package and dependency kind.
-struct DepEval<'a, 'b, P, I> {
-    resolver: &'a mut Resolver<P, I>,
-    ctx: &'a DepContext<'b>,
-}
+        debug!("resolving dependencies for {pkg}");
+        self.state
+            .visiting(key.clone(), pkg.clone(), effective_use.clone());
 
-impl<P: PkgProvider, I: VdbPackages> ExprEval<AtomDep> for DepEval<'_, '_, P, I> {
-    async fn eval_item(&mut self, atom: &AtomDep) -> anyhow::Result<bool> {
-        if let Some(blocker) = atom.blocker() {
-            return self
-                .resolver
-                .handle_blocker(self.ctx, atom.inner(), blocker)
-                .await;
-        }
-        let resolved = self
-            .resolver
-            .resolve_candidates(AtomRequirement::dependency(
-                atom.inner(),
-                self.ctx.owner_use,
-            ))
-            .await?;
-        if !resolved {
-            debug!(
-                "rejected {}:\n\t -> unsatisfied {}: {atom}",
-                self.ctx.owner, self.ctx.kind
+        if let Some(kind) = self.resolve_dependencies(&pkg, &effective_use).await? {
+            self.state.reject(
+                PackageKey::new(&pkg),
+                CandidateRejection::DependencyUnsatisfied(kind),
             );
+            return Ok(false);
         }
-        Ok(resolved)
-    }
 
-    fn is_use_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
-        self.ctx.owner_use.is_enabled(flag)
+        if let Some(installed) = self.provider.vdb_match_by_pkg(&pkg).await? {
+            self.state.insert_replacement(key.clone(), installed);
+        }
+        self.state.select(key);
+        Ok(true)
     }
-}
-
-/// Context for evaluating a package dependency.
-struct DepContext<'a> {
-    /// Package currently being resolved.
-    owner: &'a Package,
-    owner_use: &'a EffectiveUse,
-    kind: DependencyKind,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{TestPkg, TestPkgProvider, TestVdbPackages};
+    use super::test_support::{TestResolver, installed};
     use super::*;
-    use crate::test_support::{cpv, pkg, pkg_metadata};
-    use crate::useflag::test_support::effective;
-    use crate::vdb::package::InstalledPackage;
-
-    /// Returns an accepted `app-misc/<name>-1` candidate with the given metadata.
-    fn candidate(name: &str, metadata: &[(&str, &str)]) -> TestPkg {
-        TestPkg::new(
-            pkg("app-misc", name, "1", metadata),
-            PolicyResult::Accepted(EffectiveUse::default()),
-        )
-    }
-
-    /// Returns an installed `app-misc/<name>-1` package with the given USE state.
-    fn installed(name: &str, iuse_effective: &[&str], enabled: &[&str]) -> InstalledPackage {
-        InstalledPackage::from_parts(
-            cpv("app-misc", name, "1"),
-            "gentoo".parse().unwrap(),
-            pkg_metadata(&[]),
-            effective(iuse_effective, enabled),
-        )
-    }
-
-    /// Returns the `app-misc/root` candidate with the given `DEPEND`.
-    fn root(depend: &str) -> TestPkg {
-        candidate("root", &[("DEPEND", depend)])
-    }
-
-    /// Resolves `app-misc/root` over the given packages.
-    async fn resolve(pkgs: impl IntoIterator<Item = TestPkg>) -> ResolutionOutcome {
-        resolve_with(TestPkgProvider::new(pkgs), TestVdbPackages::default()).await
-    }
-
-    /// Resolves `app-misc/root` with the given `provider` and `vdb`.
-    async fn resolve_with(provider: impl PkgProvider, vdb: impl VdbPackages) -> ResolutionOutcome {
-        Resolver::new(provider, vdb)
-            .resolve(&"app-misc/root".parse().unwrap())
-            .await
-            .unwrap()
-    }
+    use crate::test_support::pkg;
 
     #[tokio::test]
-    async fn test_resolve_use_conditional() {
+    async fn test_resolve_use_conditional_enabled() {
+        let atom = "app-misc/root".parse().unwrap();
         let metadata = [
             ("IUSE", "feature"),
             ("DEPEND", "feature? ( app-misc/child )"),
         ];
-        for (enabled, child_avail, expected) in [
-            (false, false, true),
-            (true, false, false),
-            (true, true, true),
-        ] {
-            let root = TestPkg::new(
-                pkg("app-misc", "root", "1", &metadata),
-                PolicyResult::Accepted(effective(
-                    &["feature"],
-                    if enabled { &["feature"] } else { &[] },
-                )),
-            );
-            let mut pkgs = vec![root];
-            if child_avail {
-                pkgs.push(candidate("child", &[]));
-            }
-            assert_eq!(resolve(pkgs).await.is_resolved(), expected);
-        }
+        let root = pkg("app-misc", "root", "1", &metadata);
+        let child = pkg("app-misc", "child", "1", &[]);
+
+        let outcome = TestResolver::new([root, child])
+            .with_use(&["feature"])
+            .resolve(&atom)
+            .await;
+        assert!(outcome.is_resolved());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_use_conditional_disabled() {
+        let atom = "app-misc/root".parse().unwrap();
+        let metadata = [
+            ("IUSE", "feature"),
+            ("DEPEND", "feature? ( app-misc/child )"),
+        ];
+        let root = pkg("app-misc", "root", "1", &metadata);
+
+        let outcome = TestResolver::new([root]).resolve(&atom).await;
+        assert!(outcome.is_resolved());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_use_conditional_missing() {
+        let atom = "app-misc/root".parse().unwrap();
+        let metadata = [
+            ("IUSE", "feature"),
+            ("DEPEND", "feature? ( app-misc/child )"),
+        ];
+        let root = pkg("app-misc", "root", "1", &metadata);
+
+        let outcome = TestResolver::new([root])
+            .with_use(&["feature"])
+            .resolve(&atom)
+            .await;
+        assert!(!outcome.is_resolved());
     }
 
     #[tokio::test]
     async fn test_resolve_fallback_masked() {
-        let pkgs = [
-            root("app-misc/child"),
-            TestPkg::new(pkg("app-misc", "child", "2", &[]), PolicyResult::Masked),
-            candidate("child", &[]),
+        let atom = "app-misc/root".parse().unwrap();
+        let metadata = [("DEPEND", "app-misc/child")];
+        let packages = [
+            pkg("app-misc", "root", "1", &metadata),
+            pkg("app-misc", "child", "2", &[]),
+            pkg("app-misc", "child", "1", &[]),
         ];
-        assert!(resolve(pkgs).await.is_resolved());
-    }
 
-    #[tokio::test]
-    async fn test_resolve_fallback_unavailable() {
-        let provider = TestPkgProvider::new([root("app-misc/child"), candidate("child", &[])])
-            .with_failure("app-misc/child-2", "metadata resolution failed");
-        let outcome = resolve_with(provider, TestVdbPackages::default()).await;
+        let outcome = TestResolver::new(packages)
+            .with_mask("=app-misc/child-2")
+            .resolve(&atom)
+            .await;
         assert!(outcome.is_resolved());
     }
 
     #[tokio::test]
     async fn test_resolve_selected() {
-        let pkgs = [
-            root("app-misc/child app-misc/child"),
-            candidate("child", &[]),
+        let atom = "app-misc/root".parse().unwrap();
+        let metadata = [("DEPEND", "app-misc/child app-misc/child")];
+        let candidates = [
+            pkg("app-misc", "root", "1", &metadata),
+            pkg("app-misc", "child", "1", &[]),
         ];
-        assert!(resolve(pkgs).await.is_resolved());
+
+        let outcome = TestResolver::new(candidates).resolve(&atom).await;
+        assert!(outcome.is_resolved());
+    }
+
+    #[tokio::test]
+    async fn test_plan_merge() {
+        let atom = "app-misc/root".parse().unwrap();
+        let root = pkg("app-misc", "root", "1", &[]);
+        let outcome = TestResolver::new([root.clone()]).resolve(&atom).await;
+
+        assert_eq!(
+            outcome.plan().operations(),
+            &[PackageOperation::Merge(SelectedPackage::new(
+                root,
+                EffectiveUse::default(),
+            ))]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_plan_replace() {
+        let atom = "app-misc/root".parse().unwrap();
+        let root = pkg("app-misc", "root", "1", &[]);
+        let installed = installed("root", "1", "0", &[], &[]);
+        let outcome = TestResolver::new([root.clone()])
+            .with_installed([installed.clone()])
+            .resolve(&atom)
+            .await;
+
+        assert_eq!(
+            outcome.plan().operations(),
+            &[PackageOperation::Replace(
+                SelectedPackage::new(root, EffectiveUse::default()),
+                installed,
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_plan_upgrade() {
+        let atom = "app-misc/root".parse().unwrap();
+        let root = pkg("app-misc", "root", "2", &[]);
+        let installed = installed("root", "1", "0", &[], &[]);
+        let outcome = TestResolver::new([root.clone()])
+            .with_installed([installed.clone()])
+            .resolve(&atom)
+            .await;
+
+        assert_eq!(
+            outcome.plan().operations(),
+            &[PackageOperation::Upgrade(
+                SelectedPackage::new(root, EffectiveUse::default()),
+                installed,
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_plan_downgrade() {
+        let atom = "app-misc/root".parse().unwrap();
+        let root = pkg("app-misc", "root", "1", &[]);
+        let installed = installed("root", "2", "0", &[], &[]);
+        let outcome = TestResolver::new([root.clone()])
+            .with_installed([installed.clone()])
+            .resolve(&atom)
+            .await;
+
+        assert_eq!(
+            outcome.plan().operations(),
+            &[PackageOperation::Downgrade(
+                SelectedPackage::new(root, EffectiveUse::default()),
+                installed,
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_plan_other_slot_merge() {
+        let atom = "app-misc/root".parse().unwrap();
+        let root = pkg("app-misc", "root", "1", &[]);
+        let installed = installed("root", "1", "1", &[], &[]);
+        let outcome = TestResolver::new([root.clone()])
+            .with_installed([installed])
+            .resolve(&atom)
+            .await;
+
+        assert_eq!(
+            outcome.plan().operations(),
+            &[PackageOperation::Merge(SelectedPackage::new(
+                root,
+                EffectiveUse::default(),
+            ))]
+        );
     }
 
     #[tokio::test]
     async fn test_resolve_weak_blocker_self() {
-        assert!(resolve([root("!app-misc/root")]).await.is_resolved());
+        let atom = "app-misc/root".parse().unwrap();
+        let metadata = [("DEPEND", "!app-misc/root")];
+        let result = TestResolver::new([pkg("app-misc", "root", "1", &metadata)])
+            .resolve(&atom)
+            .await;
+        assert!(result.is_resolved());
     }
 
     #[tokio::test]
     async fn test_resolve_weak_blocker_selected() {
-        let pkgs = [
-            root("app-misc/a app-misc/b"),
-            candidate("a", &[("DEPEND", "!app-misc/b")]),
-            candidate("b", &[]),
+        let atom = "app-misc/root".parse().unwrap();
+        let metadata = [("DEPEND", "app-misc/a app-misc/b")];
+        let candidates = [
+            pkg("app-misc", "root", "1", &metadata),
+            pkg("app-misc", "a", "1", &[("DEPEND", "!app-misc/b")]),
+            pkg("app-misc", "b", "1", &[]),
         ];
-        assert!(!resolve(pkgs).await.is_resolved());
+        let result = TestResolver::new(candidates).resolve(&atom).await;
+        assert!(!result.is_resolved());
     }
 
     #[tokio::test]
     async fn test_resolve_weak_blocker_removal() {
-        let installed = TestVdbPackages::new([installed("other", &[], &[])]);
-        let outcome =
-            resolve_with(TestPkgProvider::new([root("!app-misc/other")]), installed).await;
+        let atom = "app-misc/root".parse().unwrap();
+        let root = pkg("app-misc", "root", "1", &[("DEPEND", "!app-misc/other")]);
+        let other = installed("other", "1", "0", &[], &[]);
+        let outcome = TestResolver::new([root.clone()])
+            .with_installed([other.clone()])
+            .resolve(&atom)
+            .await;
 
         assert!(outcome.is_resolved());
-        assert_eq!(outcome.removals().len(), 1);
-        assert_eq!(outcome.removals()[0].cpv(), &cpv("app-misc", "other", "1"));
+        assert_eq!(
+            outcome.plan().operations(),
+            &[
+                PackageOperation::Merge(SelectedPackage::new(root, EffectiveUse::default())),
+                PackageOperation::Unmerge(other),
+            ]
+        );
     }
 
     #[tokio::test]
     async fn test_resolve_weak_blocker_removal_self() {
-        let installed = TestVdbPackages::new([installed("root", &[], &[])]);
-        let outcome = resolve_with(TestPkgProvider::new([root("!app-misc/root")]), installed).await;
+        let atom = "app-misc/root".parse().unwrap();
+        let root = pkg("app-misc", "root", "1", &[("DEPEND", "!app-misc/root")]);
+        let installed_root = installed("root", "1", "0", &[], &[]);
+        let outcome = TestResolver::new([root.clone()])
+            .with_installed([installed_root.clone()])
+            .resolve(&atom)
+            .await;
 
         assert!(outcome.is_resolved());
-        assert!(outcome.removals().is_empty());
+        assert_eq!(
+            outcome.plan().operations(),
+            &[PackageOperation::Replace(
+                SelectedPackage::new(root, EffectiveUse::default()),
+                installed_root,
+            )]
+        );
     }
 
     #[tokio::test]
-    async fn test_resolve_weak_blocker_removal_use_dep() {
-        for (enabled, removals) in [(&[][..], 0), (&["flag"][..], 1)] {
-            let installed = TestVdbPackages::new([installed("other", &["flag"], enabled)]);
-            let provider = TestPkgProvider::new([root("!app-misc/other[flag]")]);
-            let outcome = resolve_with(provider, installed).await;
+    async fn test_resolve_weak_blocker_removal_use_dep_disabled() {
+        let atom = "app-misc/root".parse().unwrap();
+        let metadata = [("DEPEND", "!app-misc/other[flag]")];
+        let root = pkg("app-misc", "root", "1", &metadata);
+        let other = installed("other", "1", "0", &["flag"], &[]);
+        let outcome = TestResolver::new([root.clone()])
+            .with_installed([other])
+            .resolve(&atom)
+            .await;
 
-            assert!(outcome.is_resolved());
-            assert_eq!(outcome.removals().len(), removals);
-        }
+        assert!(outcome.is_resolved());
+        assert_eq!(
+            outcome.plan().operations(),
+            &[PackageOperation::Merge(SelectedPackage::new(
+                root,
+                EffectiveUse::default(),
+            ))]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_weak_blocker_removal_use_dep_enabled() {
+        let atom = "app-misc/root".parse().unwrap();
+        let metadata = [("DEPEND", "!app-misc/other[flag]")];
+        let root = pkg("app-misc", "root", "1", &metadata);
+
+        let other = installed("other", "1", "0", &["flag"], &["flag"]);
+        let outcome = TestResolver::new([root.clone()])
+            .with_installed([other.clone()])
+            .resolve(&atom)
+            .await;
+
+        assert!(outcome.is_resolved());
+        assert_eq!(
+            outcome.plan().operations(),
+            &[
+                PackageOperation::Merge(SelectedPackage::new(root, EffectiveUse::default())),
+                PackageOperation::Unmerge(other),
+            ]
+        );
     }
 }

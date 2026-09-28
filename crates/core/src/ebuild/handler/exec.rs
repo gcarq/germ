@@ -134,7 +134,7 @@ impl EbuildExecution {
 
         let status = self
             .exit_status
-            .ok_or_else(|| anyhow::anyhow!("process was not reaped"))
+            .ok_or_else(|| anyhow!("process was not reaped"))
             .map_err(PhaseExecutionError::Lifecycle)?;
         if status.success() {
             Ok(())

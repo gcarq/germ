@@ -4,7 +4,7 @@ use anyhow::bail;
 use super::UseFlag;
 
 /// Final USE state of one package.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(test, derive(Default))]
 pub struct EffectiveUse {
     /// All flags that can exist for the package.

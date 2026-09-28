@@ -1,5 +1,7 @@
 pub mod keyword;
 pub mod pkgmask;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod useflag;
 
 use anyhow::Context;
@@ -21,6 +23,8 @@ pub enum PolicyResult {
 
 /// Represents the effective package policy, which is a combination of keywords,
 /// USE flags and package masks.
+///
+/// TODO: Add license policies.
 pub struct PackagePolicy {
     keywords: EffectiveKeywords,
     usepolicy: UsePolicy,
@@ -41,15 +45,14 @@ impl PackagePolicy {
     }
 
     /// Evaluates a package and returns the result as [`PolicyResult`].
-    pub async fn eval<P>(&self, pkg: &P) -> anyhow::Result<PolicyResult>
+    pub fn eval<P>(&self, pkg: &P) -> anyhow::Result<PolicyResult>
     where
-        P: PackageView + Sync,
+        P: PackageView,
     {
         let keyword = self.keywords.eval(pkg);
         let (effective_use, use_satisfied) = self
             .usepolicy
             .eval(pkg, keyword.stable_in_use)
-            .await
             .context("failed to evaluate required USE flags")?;
 
         let result = if !keyword.accepted {

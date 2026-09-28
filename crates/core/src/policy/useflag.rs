@@ -1,5 +1,3 @@
-use std::future::{self, Future};
-
 use crate::atom::Atom;
 
 use crate::deps::{ExprEval, RequiredUseFlag};
@@ -89,24 +87,15 @@ impl UsePolicy {
     ///
     /// TODO: This currently only checks the required USE flags to satisfy the expression,
     ///       inactive branches can contain unreferenced USE flags which might not be PMS compatible.
-    pub async fn eval<P>(
-        &self,
-        pkg: &P,
-        stable_in_use: bool,
-    ) -> anyhow::Result<(EffectiveUse, bool)>
+    pub fn eval<P>(&self, pkg: &P, stable_in_use: bool) -> anyhow::Result<(EffectiveUse, bool)>
     where
-        P: PackageView + Sync,
+        P: PackageView,
     {
         let effective_use = self.effective_for(pkg, stable_in_use);
         let mut evaluator = ReqUseEval {
             state: &effective_use,
         };
-        let use_satisfied = pkg
-            .metadata()
-            .required_use()
-            .view()
-            .eval(&mut evaluator)
-            .await?;
+        let use_satisfied = pkg.metadata().required_use().view().eval(&mut evaluator)?;
         Ok((effective_use, use_satisfied))
     }
 
@@ -252,14 +241,11 @@ struct ReqUseEval<'a> {
 }
 
 impl ExprEval<RequiredUseFlag> for ReqUseEval<'_> {
-    fn eval_item(
-        &mut self,
-        flag: &RequiredUseFlag,
-    ) -> impl Future<Output = anyhow::Result<bool>> + Send {
-        future::ready(match flag.is_negated() {
+    fn eval_item(&mut self, flag: &RequiredUseFlag) -> anyhow::Result<bool> {
+        match flag.is_negated() {
             true => self.state.is_disabled(flag.inner()),
             false => self.state.is_enabled(flag.inner()),
-        })
+        }
     }
 
     fn is_use_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
@@ -307,8 +293,8 @@ mod tests {
             .state(&UseFlag::new(flag)?))
     }
 
-    #[tokio::test]
-    async fn test_eval_required_use() -> anyhow::Result<()> {
+    #[test]
+    fn test_eval_required_use() -> anyhow::Result<()> {
         // expression, foo state, bar state, expected
         let cases = [
             ("foo", true, false, true),
@@ -333,7 +319,7 @@ mod tests {
                     .collect(),
             );
             let mut evaluator = ReqUseEval { state: &state };
-            let actual = expr.view().eval(&mut evaluator).await?;
+            let actual = expr.view().eval(&mut evaluator)?;
 
             assert_eq!(actual, expected, "{input}");
         }

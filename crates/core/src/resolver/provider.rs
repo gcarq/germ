@@ -1,67 +1,78 @@
-use std::future::Future;
+use log::warn;
 
+use super::outcome::CandidateRejection;
 use crate::atom::Atom;
-use crate::package::{Package, PackageView};
-use crate::policy::{PackagePolicy, PolicyResult};
+use crate::package::Package;
 use crate::repository::RepoSet;
+use crate::useflag::EffectiveUse;
+use crate::vdb::{Vdb, package::InstalledPackage};
 
-/// Provides candidate packages for a requirement.
-pub trait PkgProvider: Send {
-    /// Returns candidate packages for `atom`, in selection order.
-    fn candidates(
-        &self,
-        atom: &Atom,
-    ) -> impl Future<Output = anyhow::Result<Vec<Candidate>>> + Send;
+/// Holds a [`Package`] with the outcome of the policy evaluation.
+#[derive(Debug)]
+pub enum Candidate {
+    Accepted(Package, EffectiveUse),
+    Rejected(Package, CandidateRejection),
 }
 
-/// A package offered by a [`PkgProvider`] for an atom.
-#[derive(Debug)]
-#[expect(clippy::large_enum_variant, reason = "resolved packages dominate")]
-pub enum Candidate {
-    /// A package that resolved and passed policy evaluation.
-    Evaluated { pkg: Package, policy: PolicyResult },
-    /// A package that could not be resolved or evaluated.
-    Unavailable { cpv: String, error: anyhow::Error },
+/// Provides an interface to fetch packages needed for the resolver.
+pub trait PackageLookup {
+    /// Returns ordered [`Package`]s that match `atom`.
+    fn repo_match_by_atom(
+        &self,
+        atom: &Atom,
+    ) -> impl Future<Output = anyhow::Result<Vec<Package>>> + Send;
+
+    /// Returns ordered [`InstalledPackage`]s that match `atom`.
+    fn vdb_match_by_atom(
+        &mut self,
+        atom: &Atom,
+    ) -> impl Future<Output = anyhow::Result<Vec<InstalledPackage>>> + Send;
+
+    /// Returns an [`InstalledPackage`] that matches`pkg`.
+    fn vdb_match_by_pkg(
+        &mut self,
+        pkg: &Package,
+    ) -> impl Future<Output = anyhow::Result<Option<InstalledPackage>>> + Send;
 }
 
 /// A package provider backed by a repository set.
-pub struct RepoPkgProvider<'a> {
+pub struct PackageProvider<'a> {
     reposet: &'a RepoSet,
-    policy: &'a PackagePolicy,
+    vdb: Vdb,
 }
 
-impl<'a> RepoPkgProvider<'a> {
-    pub const fn new(reposet: &'a RepoSet, policy: &'a PackagePolicy) -> Self {
-        Self { reposet, policy }
+impl<'a> PackageProvider<'a> {
+    pub const fn new(reposet: &'a RepoSet, vdb: Vdb) -> Self {
+        Self { reposet, vdb }
     }
 }
 
-impl PkgProvider for RepoPkgProvider<'_> {
-    async fn candidates(&self, atom: &Atom) -> anyhow::Result<Vec<Candidate>> {
-        let results = self.reposet.find_packages(atom).await?;
-        let mut candidates = Vec::with_capacity(results.len());
-
-        for result in results {
-            let pkg = match result {
-                Ok(pkg) => pkg,
+impl PackageLookup for PackageProvider<'_> {
+    async fn repo_match_by_atom(&self, atom: &Atom) -> anyhow::Result<Vec<Package>> {
+        let pkgs = self
+            .reposet
+            .find_packages(atom)
+            .await?
+            .into_iter()
+            .filter_map(|result| match result {
+                Ok(pkg) => Some(pkg),
                 Err(err) => {
-                    candidates.push(Candidate::Unavailable {
-                        cpv: err.cpv.clone(),
-                        error: err.into(),
-                    });
-                    continue;
+                    warn!("skipping erroneous package: {err:#}");
+                    None
                 }
-            };
+            })
+            .collect();
+        Ok(pkgs)
+    }
 
-            match self.policy.eval(&pkg).await {
-                Ok(policy) => candidates.push(Candidate::Evaluated { pkg, policy }),
-                Err(error) => candidates.push(Candidate::Unavailable {
-                    cpv: pkg.cpv().fqn().to_owned(),
-                    error,
-                }),
-            }
-        }
+    async fn vdb_match_by_atom(&mut self, atom: &Atom) -> anyhow::Result<Vec<InstalledPackage>> {
+        Ok(self.vdb.find_by_atom(atom)?.cloned().collect())
+    }
 
-        Ok(candidates)
+    async fn vdb_match_by_pkg(
+        &mut self,
+        pkg: &Package,
+    ) -> anyhow::Result<Option<InstalledPackage>> {
+        Ok(self.vdb.find_by_pkg(pkg)?.cloned())
     }
 }

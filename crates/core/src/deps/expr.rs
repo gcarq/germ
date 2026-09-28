@@ -1,8 +1,6 @@
 use super::ExprItem;
 use super::parser::arena::{ExprArena, ExprEntry, ExprId};
 use crate::useflag::UseFlag;
-use futures_util::future::BoxFuture;
-use std::future::Future;
 use std::ops::Range;
 use std::{fmt, slice};
 
@@ -18,12 +16,11 @@ impl<'a, T: ExprItem> ExprTree<'a, T> {
     }
 
     /// Evaluates the expression with the given [`ExprEval`] for [`ExprItem`]s.
-    pub async fn eval<E>(self, evaluator: &mut E) -> anyhow::Result<bool>
+    pub fn eval<E>(self, evaluator: &mut E) -> anyhow::Result<bool>
     where
-        T: Sync,
-        E: ExprEval<T> + Send,
+        E: ExprEval<T>,
     {
-        eval_all(evaluator, self.roots()).await
+        eval_all(evaluator, self.roots())
     }
 }
 
@@ -44,48 +41,43 @@ impl<T: ExprItem> fmt::Display for ExprTree<'_, T> {
 /// Supplies item and conditional USE decisions to [`ExprTree::eval`].
 pub trait ExprEval<T: ExprItem> {
     /// Evaluates one [`ExprItem`].
-    fn eval_item(&mut self, item: &T) -> impl Future<Output = anyhow::Result<bool>> + Send;
+    fn eval_item(&mut self, item: &T) -> anyhow::Result<bool>;
 
     /// Returns whether a USE flag is enabled.
     fn is_use_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool>;
 }
 
 /// Evaluates a single [`Expr`].
-fn eval_expr<'a, T, E>(
-    evaluator: &'a mut E,
-    expr: Expr<'a, T>,
-) -> BoxFuture<'a, anyhow::Result<bool>>
+fn eval_expr<T, E>(evaluator: &mut E, expr: Expr<'_, T>) -> anyhow::Result<bool>
 where
-    T: ExprItem + Sync,
-    E: ExprEval<T> + Send,
+    T: ExprItem,
+    E: ExprEval<T>,
 {
-    Box::pin(async move {
-        match expr {
-            Expr::Item(item) => evaluator.eval_item(item).await,
-            Expr::AllOf(nodes) => eval_all(evaluator, nodes).await,
-            Expr::AnyOf(nodes) => eval_any(evaluator, nodes).await,
-            Expr::ExactlyOneOf(nodes) => Ok(eval_up_to_two(evaluator, nodes).await? == 1),
-            Expr::AtMostOneOf(nodes) => Ok(eval_up_to_two(evaluator, nodes).await? < 2),
-            Expr::Use {
-                flag,
-                negated,
-                nodes,
-            } => match evaluator.is_use_enabled(flag)? == negated {
-                true => Ok(true),
-                false => eval_all(evaluator, nodes).await,
-            },
-        }
-    })
+    match expr {
+        Expr::Item(item) => evaluator.eval_item(item),
+        Expr::AllOf(nodes) => eval_all(evaluator, nodes),
+        Expr::AnyOf(nodes) => eval_any(evaluator, nodes),
+        Expr::ExactlyOneOf(nodes) => Ok(eval_up_to_two(evaluator, nodes)? == 1),
+        Expr::AtMostOneOf(nodes) => Ok(eval_up_to_two(evaluator, nodes)? < 2),
+        Expr::Use {
+            flag,
+            negated,
+            nodes,
+        } => match evaluator.is_use_enabled(flag)? == negated {
+            true => Ok(true),
+            false => eval_all(evaluator, nodes),
+        },
+    }
 }
 
 /// Evaluates an all-of group `( foo bar )`.
-async fn eval_all<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<bool>
+fn eval_all<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<bool>
 where
-    T: ExprItem + Sync,
-    E: ExprEval<T> + Send,
+    T: ExprItem,
+    E: ExprEval<T>,
 {
     for expr in nodes {
-        if !eval_expr(evaluator, expr).await? {
+        if !eval_expr(evaluator, expr)? {
             return Ok(false);
         }
     }
@@ -93,13 +85,13 @@ where
 }
 
 /// Evaluates an any-of group `|| ( foo bar )`.
-async fn eval_any<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<bool>
+fn eval_any<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<bool>
 where
-    T: ExprItem + Sync,
-    E: ExprEval<T> + Send,
+    T: ExprItem,
+    E: ExprEval<T>,
 {
     for expr in nodes {
-        if eval_expr(evaluator, expr).await? {
+        if eval_expr(evaluator, expr)? {
             return Ok(true);
         }
     }
@@ -107,14 +99,14 @@ where
 }
 
 /// Counts the satisfied expressions, stopping at two matches.
-async fn eval_up_to_two<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<u8>
+fn eval_up_to_two<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<u8>
 where
-    T: ExprItem + Sync,
-    E: ExprEval<T> + Send,
+    T: ExprItem,
+    E: ExprEval<T>,
 {
     let mut count = 0;
     for expr in nodes {
-        if eval_expr(evaluator, expr).await? {
+        if eval_expr(evaluator, expr)? {
             count += 1;
             if count > 1 {
                 break;
@@ -222,9 +214,6 @@ impl<T: ExprItem> ExprArena<T> {
 
 #[cfg(test)]
 mod tests {
-
-    use std::future;
-
     use super::super::parser::ExprParser;
     use super::*;
     use crate::deps::{AtomDep, RequiredUseFlag};
@@ -235,13 +224,10 @@ mod tests {
     }
 
     impl ExprEval<RequiredUseFlag> for TestEvaluator {
-        fn eval_item(
-            &mut self,
-            item: &RequiredUseFlag,
-        ) -> impl Future<Output = anyhow::Result<bool>> + Send {
+        fn eval_item(&mut self, item: &RequiredUseFlag) -> anyhow::Result<bool> {
             let value = item.inner().as_str();
             self.evaluated.push_str(value);
-            future::ready(Ok(value == "t"))
+            Ok(value == "t")
         }
 
         fn is_use_enabled(&self, flag: &UseFlag) -> anyhow::Result<bool> {
@@ -264,8 +250,8 @@ mod tests {
         assert_eq!(arena.view().to_string(), input);
     }
 
-    #[tokio::test]
-    async fn test_evaluate() -> anyhow::Result<()> {
+    #[test]
+    fn test_evaluate() -> anyhow::Result<()> {
         // expression, enabled USE flags, expected result, evaluated items in source order
         let cases: &[(&str, &[&str], bool, &str)] = &[
             ("( t t )", &[], true, "tt"),
@@ -296,7 +282,7 @@ mod tests {
                 enabled: enabled.iter().map(|flag| flag.parse().unwrap()).collect(),
                 evaluated: String::new(),
             };
-            let result = expr.view().eval(&mut evaluator).await?;
+            let result = expr.view().eval(&mut evaluator)?;
             let actual = (result, evaluator.evaluated.as_str());
             assert_eq!(actual, (expected, evaluated), "{input}");
         }

@@ -7,6 +7,8 @@ pub mod version;
 
 pub use requirement::AtomRequirement;
 
+use self::names::{CatName, PkgName};
+use self::slot::PackageSlot;
 use crate::repository::RepoName;
 use crate::{atom::Atom, package::cpv::CPV};
 use metadata::PackageMetadata;
@@ -19,9 +21,31 @@ pub trait PackageView {
     fn repo(&self) -> &RepoName;
     fn metadata(&self) -> &PackageMetadata;
 
+    /// Returns the category of the package.
+    fn category(&self) -> &CatName {
+        self.cpv().category()
+    }
+
+    /// Returns the name of the package.
+    fn package(&self) -> &PkgName {
+        self.cpv().package()
+    }
+
+    /// Returns the package slot.
+    fn slot(&self) -> &PackageSlot {
+        self.metadata().slot()
+    }
+
     /// Returns the qualified name of the package in the format `category/name`.
     fn qualified_name(&self) -> String {
         self.cpv().qualified_name()
+    }
+
+    /// Checks if self has the same category, name and primary slot as `other`.
+    fn matches_package_slot<P: PackageView>(&self, other: &P) -> bool {
+        self.category() == other.category()
+            && self.package() == other.package()
+            && self.slot().slot() == other.slot().slot()
     }
 
     /// Checks if the given [`Atom`] matches.

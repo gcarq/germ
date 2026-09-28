@@ -1,4 +1,6 @@
 pub mod package;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use crate::atom::Atom;
 use crate::grammar::{PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
@@ -72,6 +74,23 @@ impl Vdb {
             None => Either::Right(self.packages.values().flatten()),
         };
         Ok(iter.filter(|pkg| pkg.matches_atom(atom)))
+    }
+
+    /// Returns an [`InstalledPackage`] that matches the given `pkg`,
+    /// based on the category and package name and whether they are in the same slot.
+    pub fn find_by_pkg<'a, P: PackageView>(
+        &'a mut self,
+        pkg: &P,
+    ) -> anyhow::Result<Option<&'a InstalledPackage>> {
+        let category = pkg.category();
+        self.load_from_category(category)
+            .with_context(|| format!("failed to load category {category}"))?;
+        Ok(self
+            .packages
+            .get(category)
+            .into_iter()
+            .flatten()
+            .find(|p| p.matches_package_slot(pkg)))
     }
 
     /// Resolves all installed packages from the VDB root path.
@@ -157,18 +176,9 @@ impl Vdb {
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::VdbFixture;
     use super::*;
-    use crate::test_support::cpv;
-
-    fn write_vdb_package(path: &Path, repository: &str) {
-        fs::create_dir_all(path).unwrap();
-        fs::write(path.join("repository"), repository).unwrap();
-        fs::write(path.join("USE"), "").unwrap();
-        fs::write(path.join("IUSE_EFFECTIVE"), "").unwrap();
-        fs::write(path.join("EAPI"), "8").unwrap();
-        fs::write(path.join("DESCRIPTION"), "Test package").unwrap();
-        fs::write(path.join("SLOT"), "0").unwrap();
-    }
+    use crate::test_support::{cpv, pkg};
 
     #[test]
     fn test_vdb_from_path_missing() {
@@ -178,34 +188,47 @@ mod tests {
     }
 
     #[test]
-    fn test_package_from_path() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("dev-libs").join("foo--1");
-        write_vdb_package(&path, "repo-");
+    fn test_load_package() -> anyhow::Result<()> {
+        let fixture = VdbFixture::new()?;
+        fixture
+            .package("dev-libs", "foo-", "1")
+            .repo("repo-")
+            .write()?;
+        let mut vdb = fixture.vdb()?;
+        let atom = Atom::new("dev-libs/foo-")?;
 
-        let category: CatName = "dev-libs".parse().unwrap();
-        let package = Vdb::package_from_path(&category, &path).unwrap().unwrap();
-        assert_eq!(package.cpv(), &cpv("dev-libs", "foo-", "1"));
-        assert_eq!(package.repo().as_str(), "repo-");
-
-        let path = temp.path().join("dev-libs").join("foo-1");
-        write_vdb_package(&path, "invalid name");
-        assert!(Vdb::package_from_path(&category, &path).is_err());
+        let pkg = vdb.find_by_atom(&atom)?.next().unwrap();
+        assert_eq!(pkg.cpv(), &cpv("dev-libs", "foo-", "1"));
+        assert_eq!(pkg.repo().as_str(), "repo-");
+        Ok(())
     }
 
     #[test]
-    fn test_find_by_atom() {
-        let temp = tempfile::tempdir().unwrap();
-        for path in [
-            "dev-libs/bar-1",
-            "dev-libs/bar-2",
-            "dev-libs/foo-1",
-            "app-editors/foo-3",
-        ] {
-            write_vdb_package(&temp.path().join(path), "gentoo");
-        }
+    fn test_load_package_invalid_repository() -> anyhow::Result<()> {
+        let fixture = VdbFixture::new()?;
+        fixture
+            .package("dev-libs", "foo", "1")
+            .repo("invalid name")
+            .write()?;
+        let mut vdb = fixture.vdb()?;
+        let atom = Atom::new("dev-libs/foo")?;
 
-        let mut vdb = Vdb::from_path(temp.path().to_path_buf()).unwrap();
+        assert!(vdb.find_by_atom(&atom).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_find_by_atom() -> anyhow::Result<()> {
+        let fixture = VdbFixture::new()?;
+        for (category, package, version) in [
+            ("dev-libs", "bar", "1"),
+            ("dev-libs", "bar", "2"),
+            ("dev-libs", "foo", "1"),
+            ("app-editors", "foo", "3"),
+        ] {
+            fixture.package(category, package, version).write()?;
+        }
+        let mut vdb = fixture.vdb()?;
 
         let tests = [
             ("dev-libs/foo", vec!["dev-libs/foo-1"]),
@@ -216,34 +239,37 @@ mod tests {
             ("*/foo", vec!["dev-libs/foo-1", "app-editors/foo-3"]),
         ];
         for (atom, expected) in tests {
-            let atom = Atom::new(atom).unwrap();
-            let pkgs = vdb.find_by_atom(&atom).unwrap();
+            let atom = Atom::new(atom)?;
+            let pkgs = vdb.find_by_atom(&atom)?;
             let actual = pkgs.map(|pkg| pkg.cpv().fqn()).collect::<Vec<_>>();
             assert_eq!(actual, expected);
         }
+        Ok(())
     }
 
     #[test]
-    fn test_find_by_atom_missing_category() {
-        let temp = tempfile::tempdir().unwrap();
-        let mut vdb = Vdb::from_path(temp.path().to_path_buf()).unwrap();
+    fn test_find_by_pkg() -> anyhow::Result<()> {
+        let fixture = VdbFixture::new()?;
+        fixture.package("app-misc", "foo", "1").slot("0").write()?;
+        fixture.package("app-misc", "foo", "2").slot("1").write()?;
+        let mut vdb = fixture.vdb()?;
 
-        assert!(
-            vdb.find_by_atom(&Atom::new("dev-libs/foo").unwrap())
-                .unwrap()
-                .next()
-                .is_none()
-        );
+        let same_slot = pkg("app-misc", "foo", "3", &[("SLOT", "0")]);
+        let diff_slot = pkg("app-misc", "foo", "3", &[("SLOT", "2")]);
+
+        let result = vdb.find_by_pkg(&same_slot)?.map(PackageView::cpv);
+        assert_eq!(result, Some(&cpv("app-misc", "foo", "1")));
+        assert!(vdb.find_by_pkg(&diff_slot)?.is_none());
+        Ok(())
     }
 
     #[test]
-    fn test_find_by_atom_invalid_metadata() {
-        let temp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(temp.path().join("dev-libs").join("foo-1")).unwrap();
-        let mut vdb = Vdb::from_path(temp.path().to_path_buf()).unwrap();
+    fn test_find_by_atom_missing_category() -> anyhow::Result<()> {
+        let fixture = VdbFixture::new()?;
+        let mut vdb = fixture.vdb()?;
+        let atom = Atom::new("dev-libs/foo")?;
 
-        let atom = Atom::new("dev-libs/foo").unwrap();
-        let result = vdb.find_by_atom(&atom);
-        assert!(result.is_err());
+        assert!(vdb.find_by_atom(&atom)?.next().is_none());
+        Ok(())
     }
 }

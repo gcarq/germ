@@ -191,13 +191,13 @@ impl Repository {
         let ebuild = match Ebuild::new(&cpv, self) {
             Ok(ebuild) => ebuild,
             Err(error) => {
-                return Err(PackageResolutionError::new(cpv.fqn(), error.into()));
+                return Err(PackageResolutionError::new(cpv, error.into()));
             }
         };
 
         match ebuild.generate_metadata().await {
             Ok(metadata) => Ok(Package::new(cpv, self.name.clone(), metadata)),
-            Err(source) => Err(PackageResolutionError::new(cpv.fqn(), source)),
+            Err(source) => Err(PackageResolutionError::new(cpv, source)),
         }
     }
 

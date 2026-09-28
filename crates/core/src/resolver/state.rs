@@ -1,4 +1,7 @@
+use std::cmp::Ordering;
+
 use super::outcome::{CandidateRejection, ResolutionOutcome, SelectedPackage};
+use super::{ExecutionPlan, PackageOperation};
 use crate::atom::Atom;
 use crate::package::{AtomRequirement, Package, PackageView, cpv::CPV};
 use crate::repository::RepoName;
@@ -21,6 +24,8 @@ pub struct ResolverState {
     blockers: Vec<ActiveBlocker>,
     /// Holds installed packages that are planned for removal.
     removals: FxIndexSet<InstalledPackage>,
+    /// Holds installed package versions that should be replaced.
+    replacements: FxIndexMap<PackageKey, InstalledPackage>,
 }
 
 impl ResolverState {
@@ -83,6 +88,11 @@ impl ResolverState {
         self.removals.insert(pkg);
     }
 
+    /// Records `installed` as replaced by the selected package with `key`.
+    pub fn insert_replacement(&mut self, key: PackageKey, installed: InstalledPackage) {
+        self.replacements.insert(key, installed);
+    }
+
     /// Checks if the given `pkg` is blocked by any active blockers.
     pub fn is_blocked(&self, pkg: &Package, target_use: &EffectiveUse) -> anyhow::Result<bool> {
         for blocker in &self.blockers {
@@ -98,9 +108,25 @@ impl ResolverState {
         self.selected.iter().chain(self.visiting.iter())
     }
 
-    pub fn finalize(self, resolved: bool) -> ResolutionOutcome {
-        let selected = self.selected.into_values().collect();
-        ResolutionOutcome::new(resolved, selected, self.removals, self.rejected)
+    /// Consumes and finalizes the state to produce a [`ResolutionOutcome`].
+    pub fn finalize(mut self, is_resolved: bool) -> ResolutionOutcome {
+        let mut operations = Vec::with_capacity(self.selected.len() + self.removals.len());
+        for (key, sel) in self.selected {
+            let op = match self.replacements.shift_remove(&key) {
+                Some(installed) => match sel.pkg.cpv().cmp(installed.cpv()) {
+                    Ordering::Equal => PackageOperation::Replace(sel, installed),
+                    Ordering::Greater => PackageOperation::Upgrade(sel, installed),
+                    Ordering::Less => PackageOperation::Downgrade(sel, installed),
+                },
+                None => PackageOperation::Merge(sel),
+            };
+            operations.push(op);
+        }
+        for pkg in self.removals {
+            operations.push(PackageOperation::Unmerge(pkg));
+        }
+
+        ResolutionOutcome::new(is_resolved, ExecutionPlan::new(operations), self.rejected)
     }
 }
 
