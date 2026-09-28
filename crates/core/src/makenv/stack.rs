@@ -22,7 +22,7 @@ pub struct MakeEnvStack {
 impl MakeEnvStack {
     /// Expands global, profile, and user make config layers.
     pub fn new(global: MakeEnv, profile: MakeEnv, user: MakeEnv) -> anyhow::Result<Self> {
-        let vars = IncrementalVars::from_layers(&[&global, &profile, &user])?;
+        let vars = IncrementalVars::default();
         let inherited = MakeEnv::fold(&[&global, &profile], &vars)?;
         let mut user = user;
         user.expand_from(&inherited)?;
@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn test_global_use_expansion() -> anyhow::Result<()> {
+    fn test_global_use_expanded_disable() -> anyhow::Result<()> {
         let stack = MakeEnvStack::new(
             MakeEnv::from_content(
                 "USE_EXPAND=VIDEO_CARDS
@@ -177,14 +177,43 @@ mod tests {
             MakeEnv::from_content("VIDEO_CARDS=\"-amdgpu radeonsi\"")?,
         )?;
         assert_eq!(
+            stack.makenv().get("VIDEO_CARDS").unwrap().to_string(),
+            "-amdgpu radeonsi"
+        );
+        assert_eq!(
             stack.global_use()?,
             FxHashMap::from_iter([
                 (UseFlag::new("video_cards_amdgpu")?, false),
-                (UseFlag::new("video_cards_nouveau")?, true),
                 (UseFlag::new("video_cards_radeonsi")?, true),
             ])
         );
+        Ok(())
+    }
 
+    #[test]
+    fn test_global_use_expanded_override() -> anyhow::Result<()> {
+        let stack = MakeEnvStack::new(
+            MakeEnv::from_content("USE_EXPAND=VIDEO_CARDS")?,
+            MakeEnv::from_content("VIDEO_CARDS=\"dummy fbdev intel nouveau\"")?,
+            MakeEnv::from_content("VIDEO_CARDS=\"amdgpu radeon radeonsi\"")?,
+        )?;
+        assert_eq!(
+            stack.makenv().get("VIDEO_CARDS").unwrap().to_string(),
+            "amdgpu radeon radeonsi"
+        );
+        assert_eq!(
+            stack.global_use()?,
+            FxHashMap::from_iter([
+                (UseFlag::new("video_cards_amdgpu")?, true),
+                (UseFlag::new("video_cards_radeon")?, true),
+                (UseFlag::new("video_cards_radeonsi")?, true),
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_global_use_expand_replacement() -> anyhow::Result<()> {
         let stack = MakeEnvStack::new(
             MakeEnv::from_content(
                 "USE_EXPAND=VIDEO_CARDS

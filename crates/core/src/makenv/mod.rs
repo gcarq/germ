@@ -31,12 +31,17 @@ const INCREMENTAL_VARS: [&str; 14] = [
 ];
 
 /// Holds all variable names that must be considered incremental.
+///
+/// Outside a profile `USE_EXPAND` variables use replacement semantics,
+/// which means a user configuration replaces its profile value.
 #[derive(Default)]
 struct IncrementalVars(FxHashSet<EnvVarName>);
 
 impl IncrementalVars {
-    /// Collects incremental vars from effective USE expansion groups in `layers`.
-    fn from_layers(layers: &[&MakeEnv]) -> anyhow::Result<Self> {
+    /// Collects incremental vars for folding profile layers.
+    ///
+    /// `USE_EXPAND` variables are folded incrementally across the profiles.
+    fn profile_defaults(layers: &[&MakeEnv]) -> anyhow::Result<Self> {
         let provisional = MakeEnv::fold(layers, &Self::default())?;
         let expand = UseExpandConfig::from_makenv(&provisional)?;
         Ok(Self(expand.names().cloned().collect()))
@@ -90,9 +95,9 @@ impl MakeEnv {
         self.vars.iter()
     }
 
-    /// Folds ordered layers using their effective USE expansion namespace.
-    pub(crate) fn fold_with_use_expand(layers: &[&Self]) -> anyhow::Result<Self> {
-        let vars = IncrementalVars::from_layers(layers)?;
+    /// Folds ordered profile layers, treating `USE_EXPAND` variables as incremental.
+    pub(crate) fn fold_profile_defaults(layers: &[&Self]) -> anyhow::Result<Self> {
+        let vars = IncrementalVars::profile_defaults(layers)?;
         Self::fold(layers, &vars)
     }
 
@@ -233,11 +238,11 @@ enable_year2038="no"
             .collect::<anyhow::Result<Vec<_>>>()
             .unwrap();
         let layers = envs.iter().collect::<Vec<_>>();
-        MakeEnv::fold_with_use_expand(&layers)
+        MakeEnv::fold_profile_defaults(&layers)
     }
 
     #[test]
-    fn test_fold_with_use_expand_members() {
+    fn test_fold_profile_defaults_members() {
         let env = fold_contents(&[
             "USE_EXPAND='CAMERAS ROOT'
             USE_EXPAND_UNPREFIXED=ARCH
@@ -255,7 +260,7 @@ enable_year2038="no"
     }
 
     #[test]
-    fn test_fold_with_use_expand_readdition() {
+    fn test_fold_profile_defaults_readdition() {
         let env = fold_contents(&[
             "USE_EXPAND=CAMERAS CAMERAS=canon",
             "USE_EXPAND=-CAMERAS CAMERAS='-canon nikon'",
@@ -266,7 +271,7 @@ enable_year2038="no"
     }
 
     #[test]
-    fn test_fold_with_use_expand_reference() {
+    fn test_fold_profile_defaults_reference() {
         let env = fold_contents(&[
             "MEMBER_NAMES=CAMERAS CAMERAS=canon",
             "USE_EXPAND='${MEMBER_NAMES}' CAMERAS='-canon nikon'",

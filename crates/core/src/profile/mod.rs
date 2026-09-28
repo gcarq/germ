@@ -95,7 +95,7 @@ impl Profile {
             .map(|p| &p.make_defaults)
             .chain(iter::once(&profile.make_defaults))
             .collect::<Vec<_>>();
-        profile.make_defaults = MakeEnv::fold_with_use_expand(&layers)?;
+        profile.make_defaults = MakeEnv::fold_profile_defaults(&layers)?;
         profile
             .use_records
             .set_expand_config(&profile.make_defaults)?;
