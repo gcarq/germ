@@ -1,33 +1,40 @@
 use std::fmt;
 
-use super::{DependencyKind, ExecutionPlan, state::PackageKey};
-use crate::package::{AtomRequirement, Package};
+use super::state::PackageKey;
+use super::{DependencyField, ExecutionPlan};
+use crate::atom::Atom;
+use crate::package::Package;
+use crate::policy::PolicyRejection;
 use crate::types::FxIndexMap;
-use crate::useflag::EffectiveUse;
 
+/// The outcome of resolving an [`Atom`] with a resolver.
 #[derive(Debug)]
 pub struct ResolutionOutcome {
-    is_resolved: bool,
+    failure: Option<RequirementFailure>,
     plan: ExecutionPlan,
-    rejected: FxIndexMap<PackageKey, CandidateRejection>,
+    rejected: FxIndexMap<PackageKey, PolicyRejection>,
 }
 
 impl ResolutionOutcome {
-    pub(super) const fn new(
-        is_resolved: bool,
+    pub const fn new(
+        failure: Option<RequirementFailure>,
         plan: ExecutionPlan,
-        rejected: FxIndexMap<PackageKey, CandidateRejection>,
+        rejected: FxIndexMap<PackageKey, PolicyRejection>,
     ) -> Self {
         Self {
-            is_resolved,
+            failure,
             plan,
             rejected,
         }
     }
-
     /// Returns whether the resolution was successful.
     pub const fn is_resolved(&self) -> bool {
-        self.is_resolved
+        self.failure.is_none()
+    }
+
+    /// Returns the root resolution failure, if resolution failed.
+    pub const fn failure(&self) -> Option<&RequirementFailure> {
+        self.failure.as_ref()
     }
 
     /// Returns the [`ExecutionPlan`].
@@ -36,43 +43,80 @@ impl ResolutionOutcome {
     }
 
     /// Returns the map of rejected candidates with their reasons.
-    pub const fn rejected(&self) -> &FxIndexMap<PackageKey, CandidateRejection> {
+    pub const fn rejected(&self) -> &FxIndexMap<PackageKey, PolicyRejection> {
         &self.rejected
     }
 }
 
-/// A package selected by the resolver together with its effective USE state.
-#[derive(Debug, Eq, PartialEq)]
-pub struct SelectedPackage {
-    pub pkg: Package,
-    pub effective_use: EffectiveUse,
+/// Represents a rejected [`Package`] together with its [`CandidateRejectionReason`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RejectedCandidate {
+    pub package: Package,
+    pub reason: CandidateRejectionReason,
 }
 
-impl SelectedPackage {
-    pub const fn new(pkg: Package, effective_use: EffectiveUse) -> Self {
-        Self { pkg, effective_use }
-    }
-
-    pub fn matches(&self, request: &AtomRequirement<'_>) -> anyhow::Result<bool> {
-        request.satisfied_by(&self.pkg, &self.effective_use)
+impl RejectedCandidate {
+    /// Creates a rejected candidate for `package` with its `reason`.
+    pub const fn new(package: Package, reason: CandidateRejectionReason) -> Self {
+        Self { package, reason }
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum CandidateRejection {
-    MissingKeyword,
-    Masked,
-    RequiredUseUnsatisfied,
-    DependencyUnsatisfied(DependencyKind),
+/// Describes why the resolver rejected a candidate.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CandidateRejectionReason {
+    Policy(PolicyRejection),
+    Requirement(Atom),
+    ActiveBlocker { atom: Atom, owner: Box<Package> },
+    Dependency(DependencyField, Box<RequirementFailure>),
 }
 
-impl fmt::Display for CandidateRejection {
+impl fmt::Display for CandidateRejectionReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingKeyword => f.write_str("missing keyword"),
-            Self::Masked => f.write_str("masked"),
-            Self::RequiredUseUnsatisfied => f.write_str("required USE unsatisfied"),
-            Self::DependencyUnsatisfied(kind) => write!(f, "unsatisfied {kind}"),
+            Self::Policy(rejection) => write!(f, "{rejection}"),
+            Self::Requirement(atom) => write!(f, "does not satisfy requirement {atom}"),
+            Self::ActiveBlocker { atom, owner } => write!(f, "blocked by {atom} from {owner}"),
+            Self::Dependency(kind, failure) => write!(f, "unsatisfied {kind}: {failure}"),
+        }
+    }
+}
+
+/// A structured reason why an atom requirement or dependency expression
+/// could not be satisfied.
+///
+/// A root failure is always [`Self::NoCandidate`] or [`Self::Exhausted`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RequirementFailure {
+    NoCandidate(Atom),
+    Exhausted(Atom, Vec<RejectedCandidate>),
+    WeakBlocker { atom: Atom, conflict: Box<Package> },
+    StrongBlocker(Atom),
+    AnyOf(Vec<RequirementFailure>),
+}
+
+impl fmt::Display for RequirementFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoCandidate(atom) => write!(f, "no candidate for {atom}"),
+            Self::Exhausted(atom, candidates) => {
+                write!(f, "no viable candidate for {atom}")?;
+                for candidate in candidates {
+                    write!(f, "\n\t{}: {}", candidate.package, candidate.reason)?;
+                }
+                Ok(())
+            }
+            Self::WeakBlocker { atom, conflict } => {
+                write!(f, "weak blocker {atom} conflicts with {conflict}")
+            }
+            Self::StrongBlocker(atom) => write!(f, "unsupported strong blocker !!{atom}"),
+            Self::AnyOf(failures) => {
+                f.write_str("no alternative is satisfiable")?;
+                for failure in failures {
+                    write!(f, "\n\t{failure}")?;
+                }
+                Ok(())
+            }
         }
     }
 }

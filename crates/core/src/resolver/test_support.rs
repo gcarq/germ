@@ -24,13 +24,13 @@ pub fn installed(
 }
 
 /// Holds resolver inputs for testing.
-pub struct TestResolver {
+pub struct ResolverFixture {
     packages: Vec<Package>,
     installed: Vec<InstalledPackage>,
     policy: PolicyFixture,
 }
 
-impl TestResolver {
+impl ResolverFixture {
     /// Creates a fixture with `packages` and no installed packages.
     pub fn new(packages: impl IntoIterator<Item = Package>) -> Self {
         Self {
@@ -60,18 +60,18 @@ impl TestResolver {
 
     /// Resolves `atom` and returns the outcome.
     pub async fn resolve(&self, atom: &Atom) -> ResolutionOutcome {
-        let provider = TestPackageLookup::new(&self.packages, &self.installed);
+        let provider = PackageLookupFixture::new(&self.packages, &self.installed);
         let resolver = Resolver::new(provider, self.policy.build().unwrap());
         resolver.resolve(atom).await.unwrap()
     }
 }
 
-struct TestPackageLookup<'a> {
+struct PackageLookupFixture<'a> {
     packages: &'a [Package],
     installed: &'a [InstalledPackage],
 }
 
-impl<'a> TestPackageLookup<'a> {
+impl<'a> PackageLookupFixture<'a> {
     const fn new(packages: &'a [Package], installed: &'a [InstalledPackage]) -> Self {
         Self {
             packages,
@@ -80,7 +80,7 @@ impl<'a> TestPackageLookup<'a> {
     }
 }
 
-impl PackageLookup for TestPackageLookup<'_> {
+impl PackageLookup for PackageLookupFixture<'_> {
     async fn repo_match_by_atom(&self, atom: &Atom) -> anyhow::Result<Vec<Package>> {
         let iter = self.packages.iter().filter(|pkg| pkg.matches_atom(atom));
         Ok(iter.cloned().collect())

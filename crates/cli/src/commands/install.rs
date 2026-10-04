@@ -25,8 +25,8 @@ pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     let outcome = Resolver::new(PackageProvider::new(&reposet, vdb), policy)
         .resolve(atom)
         .await?;
-    if !outcome.is_resolved() {
-        bail!("no candidates found for atom {atom}");
+    if let Some(failure) = outcome.failure() {
+        bail!("unable to produce an install plan: {failure}");
     }
 
     print_plan(outcome.plan());

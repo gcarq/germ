@@ -4,6 +4,8 @@ pub mod pkgmask;
 pub(crate) mod test_support;
 pub mod useflag;
 
+use std::fmt;
+
 use anyhow::Context;
 
 use self::keyword::EffectiveKeywords;
@@ -13,12 +15,27 @@ use crate::package::PackageView;
 use crate::useflag::EffectiveUse;
 
 /// Defines the outcome of the package evaluation against the policies.
-#[derive(Debug, Clone)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum PolicyResult {
     Accepted(EffectiveUse),
+    Rejected(PolicyRejection),
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum PolicyRejection {
     Masked,
     MissingKeyword,
     RequiredUseUnsatisfied,
+}
+
+impl fmt::Display for PolicyRejection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingKeyword => f.write_str("missing keyword"),
+            Self::Masked => f.write_str("masked"),
+            Self::RequiredUseUnsatisfied => f.write_str("required USE unsatisfied"),
+        }
+    }
 }
 
 /// Represents the effective package policy, which is a combination of keywords,
@@ -56,11 +73,11 @@ impl PackagePolicy {
             .context("failed to evaluate required USE flags")?;
 
         let result = if !keyword.accepted {
-            PolicyResult::MissingKeyword
+            PolicyResult::Rejected(PolicyRejection::MissingKeyword)
         } else if !use_satisfied {
-            PolicyResult::RequiredUseUnsatisfied
+            PolicyResult::Rejected(PolicyRejection::RequiredUseUnsatisfied)
         } else if self.pkgmasks.is_masked(pkg) {
-            PolicyResult::Masked
+            PolicyResult::Rejected(PolicyRejection::Masked)
         } else {
             PolicyResult::Accepted(effective_use)
         };

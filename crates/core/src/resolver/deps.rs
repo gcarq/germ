@@ -1,36 +1,20 @@
 use std::fmt;
 
 use futures_util::future::LocalBoxFuture;
-use log::{debug, info, warn};
+use log::debug;
 
+use super::EffectivePackage;
 use super::Resolver;
+use super::outcome::RequirementFailure;
 use super::provider::PackageLookup;
 use crate::atom::{Atom, AtomBlocker};
 use crate::deps::AtomDep;
 use crate::deps::expr::{Expr, ExprNodes};
-use crate::package::{AtomRequirement, Package, PackageView};
-use crate::useflag::EffectiveUse;
+use crate::package::{AtomRequirement, PackageView};
 
-/// Holds the package and dependency kind while resolving.
-struct DependencyContext<'a> {
-    owner: &'a Package,
-    owner_use: &'a EffectiveUse,
-    kind: DependencyKind,
-}
-
-impl<'a> DependencyContext<'a> {
-    const fn new(owner: &'a Package, owner_use: &'a EffectiveUse, kind: DependencyKind) -> Self {
-        Self {
-            owner,
-            owner_use,
-            kind,
-        }
-    }
-}
-
-/// Identifies the dependency kind being evaluated.
-#[derive(Copy, Clone, Debug)]
-pub enum DependencyKind {
+/// Identifies the dependency field being evaluated.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DependencyField {
     Depend,
     BDepend,
     IDepend,
@@ -38,7 +22,7 @@ pub enum DependencyKind {
     PDepend,
 }
 
-impl fmt::Display for DependencyKind {
+impl fmt::Display for DependencyField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Depend => f.write_str("DEPEND"),
@@ -51,23 +35,22 @@ impl fmt::Display for DependencyKind {
 }
 
 impl<U: PackageLookup> Resolver<U> {
-    /// Resolves every [`DependencyKind`] for the given `owner`.
+    /// Resolves every dependency field for the given `owner` [`EffectivePackage`].
     pub(super) async fn resolve_dependencies(
         &mut self,
-        owner: &Package,
-        owner_use: &EffectiveUse,
-    ) -> anyhow::Result<Option<DependencyKind>> {
+        owner: &EffectivePackage,
+    ) -> anyhow::Result<Option<(DependencyField, RequirementFailure)>> {
+        let metadata = owner.pkg.metadata();
         let dependencies = [
-            (DependencyKind::Depend, owner.metadata().depend().view()),
-            (DependencyKind::BDepend, owner.metadata().bdepend().view()),
-            (DependencyKind::IDepend, owner.metadata().idepend().view()),
-            (DependencyKind::RDepend, owner.metadata().rdepend().view()),
-            (DependencyKind::PDepend, owner.metadata().pdepend().view()),
+            (DependencyField::Depend, metadata.depend().view()),
+            (DependencyField::BDepend, metadata.bdepend().view()),
+            (DependencyField::IDepend, metadata.idepend().view()),
+            (DependencyField::RDepend, metadata.rdepend().view()),
+            (DependencyField::PDepend, metadata.pdepend().view()),
         ];
         for (kind, tree) in dependencies {
-            let ctx = DependencyContext::new(owner, owner_use, kind);
-            if !self.resolve_all(&ctx, tree.roots()).await? {
-                return Ok(Some(kind));
+            if let Some(failure) = self.resolve_group_all(owner, tree.roots()).await? {
+                return Ok(Some((kind, failure)));
             }
         }
         Ok(None)
@@ -76,126 +59,111 @@ impl<U: PackageLookup> Resolver<U> {
     /// Resolves a single dependency expression.
     fn resolve_expr<'a>(
         &'a mut self,
-        ctx: &'a DependencyContext<'_>,
+        owner: &'a EffectivePackage,
         expr: Expr<'a, AtomDep>,
-    ) -> LocalBoxFuture<'a, anyhow::Result<bool>> {
+    ) -> LocalBoxFuture<'a, anyhow::Result<Option<RequirementFailure>>> {
         Box::pin(async move {
             match expr {
-                Expr::Item(atom) => self.resolve_atom(ctx, atom).await,
-                Expr::AllOf(nodes) => self.resolve_all(ctx, nodes).await,
-                Expr::AnyOf(nodes) => self.resolve_any(ctx, nodes).await,
-                Expr::ExactlyOneOf(_) => {
-                    unreachable!("dependency expressions cannot contain exactly-one-of groups")
-                }
-                Expr::AtMostOneOf(_) => {
-                    unreachable!("dependency expressions cannot contain at-most-one-of groups")
-                }
+                Expr::Item(atom) => self.resolve_atom(owner, atom).await,
+                Expr::AllOf(nodes) => self.resolve_group_all(owner, nodes).await,
+                Expr::AnyOf(nodes) => self.resolve_group_any(owner, nodes).await,
                 Expr::Use {
                     flag,
                     negated,
                     nodes,
-                } => match ctx.owner_use.is_enabled(flag)? == negated {
-                    true => Ok(true),
-                    false => self.resolve_all(ctx, nodes).await,
+                } => match owner.effective_use.is_enabled(flag)? == negated {
+                    true => Ok(None),
+                    false => self.resolve_group_all(owner, nodes).await,
                 },
+                Expr::ExactlyOneOf(_) => {
+                    unreachable!("BUG: dep expressions cannot contain ^^ groups: {expr}")
+                }
+                Expr::AtMostOneOf(_) => {
+                    unreachable!("BUG: dep expressions cannot contain ?? groups: {expr}")
+                }
             }
         })
     }
 
     /// Resolves every expression in an all-of group.
-    async fn resolve_all(
+    async fn resolve_group_all(
         &mut self,
-        ctx: &DependencyContext<'_>,
+        owner: &EffectivePackage,
         nodes: ExprNodes<'_, AtomDep>,
-    ) -> anyhow::Result<bool> {
+    ) -> anyhow::Result<Option<RequirementFailure>> {
         for expr in nodes {
-            if !self.resolve_expr(ctx, expr).await? {
-                return Ok(false);
+            if let Some(failure) = self.resolve_expr(owner, expr).await? {
+                return Ok(Some(failure));
             }
         }
-        Ok(true)
+        Ok(None)
     }
 
     /// Resolves alternatives in an any-of group until one succeeds.
-    async fn resolve_any(
+    async fn resolve_group_any(
         &mut self,
-        ctx: &DependencyContext<'_>,
+        owner: &EffectivePackage,
         nodes: ExprNodes<'_, AtomDep>,
-    ) -> anyhow::Result<bool> {
+    ) -> anyhow::Result<Option<RequirementFailure>> {
+        let mut failures = Vec::new();
         for expr in nodes {
-            if self.resolve_expr(ctx, expr).await? {
-                return Ok(true);
+            let traversal = self.start_traversal();
+            match self.resolve_expr(owner, expr).await {
+                Ok(None) => return Ok(None),
+                Ok(Some(failure)) => {
+                    traversal.rollback(self);
+                    failures.push(failure);
+                }
+                Err(error) => {
+                    traversal.rollback(self);
+                    return Err(error);
+                }
             }
         }
-        Ok(false)
+        Ok(Some(RequirementFailure::AnyOf(failures)))
     }
 
     /// Resolves a dependency item and handles any blockers.
     async fn resolve_atom(
         &mut self,
-        ctx: &DependencyContext<'_>,
+        owner: &EffectivePackage,
         atom: &AtomDep,
-    ) -> anyhow::Result<bool> {
+    ) -> anyhow::Result<Option<RequirementFailure>> {
         if let Some(blocker) = atom.blocker() {
-            return self.handle_blocker(ctx, atom.inner(), blocker).await;
+            self.handle_blocker(owner, atom.inner(), blocker).await
+        } else {
+            let requirement = AtomRequirement::dependency(atom.inner(), &owner.effective_use);
+            self.resolve_candidates(requirement).await
         }
-        let resolved = self
-            .resolve_candidates(AtomRequirement::dependency(atom.inner(), ctx.owner_use))
-            .await?;
-        if !resolved {
-            debug!(
-                "rejected {}:\n\t -> unsatisfied {}: {atom}",
-                ctx.owner, ctx.kind
-            );
-        }
-        Ok(resolved)
     }
 
-    /// Handles a package block for the given `atom`.
+    /// Handles the given `atom` with its `blocker` and updates the state.
     async fn handle_blocker(
         &mut self,
-        ctx: &DependencyContext<'_>,
+        owner: &EffectivePackage,
         atom: &Atom,
         blocker: AtomBlocker,
-    ) -> anyhow::Result<bool> {
+    ) -> anyhow::Result<Option<RequirementFailure>> {
         match blocker {
             AtomBlocker::Weak => {
-                let req = AtomRequirement::dependency(atom, ctx.owner_use);
-                for (_, sel) in self.state.selected().filter(|sel| &sel.1.pkg != ctx.owner) {
-                    if sel.matches(&req)? {
-                        warn!(
-                            "{}\n\tblocker {atom} in {}\n\tmatched selected {}",
-                            ctx.owner, ctx.kind, sel.pkg
-                        );
-                        return Ok(false);
-                    }
+                if let Some(conflict) = self.state.weak_blocker_conflict(owner, atom)? {
+                    return Ok(Some(RequirementFailure::WeakBlocker {
+                        atom: atom.clone(),
+                        conflict: conflict.clone().into(),
+                    }));
                 }
 
-                for installed in self.provider.vdb_match_by_atom(atom).await? {
-                    // Weak blocks against the expressing package's installed version are ignored.
-                    if installed.cpv() == ctx.owner.cpv() {
-                        continue;
-                    }
-                    if !req.satisfied_by(&installed, installed.effective_use())? {
-                        continue;
-                    }
-                    info!(
-                        "{}: planning removal of {installed} for weak blocker {atom} in {}",
-                        ctx.owner, ctx.kind
-                    );
-                    self.state.insert_removal(installed);
-                }
-
-                self.state
-                    .insert_blocker(ctx.owner_use.clone(), atom.clone());
-                Ok(true)
+                let installed = self.provider.vdb_match_by_atom(atom).await?;
+                self.state.register_weak_blocker(owner, atom, installed)?;
+                Ok(None)
             }
             AtomBlocker::Strong => {
+                // TODO: implement me
                 debug!(
-                    "{}: cannot satisfy due to strong blocker {blocker}{atom} in {}",
-                    ctx.owner, ctx.kind
+                    "{}: cannot satisfy due to strong blocker {blocker}{atom}",
+                    owner.pkg
                 );
-                Ok(false)
+                Ok(Some(RequirementFailure::StrongBlocker(atom.clone())))
             }
         }
     }

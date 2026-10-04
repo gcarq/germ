@@ -1,18 +1,9 @@
 use log::warn;
 
-use super::outcome::CandidateRejection;
 use crate::atom::Atom;
 use crate::package::Package;
 use crate::repository::RepoSet;
-use crate::useflag::EffectiveUse;
 use crate::vdb::{Vdb, package::InstalledPackage};
-
-/// Holds a [`Package`] with the outcome of the policy evaluation.
-#[derive(Debug)]
-pub enum Candidate {
-    Accepted(Package, EffectiveUse),
-    Rejected(Package, CandidateRejection),
-}
 
 /// Provides an interface to fetch packages needed for the resolver.
 pub trait PackageLookup {
@@ -28,7 +19,7 @@ pub trait PackageLookup {
         atom: &Atom,
     ) -> impl Future<Output = anyhow::Result<Vec<InstalledPackage>>> + Send;
 
-    /// Returns an [`InstalledPackage`] that matches`pkg`.
+    /// Returns an [`InstalledPackage`] that matches `pkg`.
     fn vdb_match_by_pkg(
         &mut self,
         pkg: &Package,
