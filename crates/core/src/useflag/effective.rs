@@ -40,6 +40,11 @@ impl EffectiveUse {
             .then(|| self.enabled.contains(flag))
     }
 
+    /// Returns all enabled flags.
+    pub const fn enabled(&self) -> &FxHashSet<UseFlag> {
+        &self.enabled
+    }
+
     pub(crate) const fn from_parts(
         available: FxHashSet<UseFlag>,
         enabled: FxHashSet<UseFlag>,

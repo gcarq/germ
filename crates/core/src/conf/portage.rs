@@ -13,6 +13,7 @@ use crate::policy::pkgmask::PortageSource as PackageMaskSource;
 use crate::policy::useflag::{LocalRecords as UseLocalRecords, UsePolicy};
 use crate::profile::Profile;
 use crate::repository::RepoSet;
+use crate::useflag::UseExpandConfig;
 use crate::utils::Inherit;
 
 /// Responsible for loading and validation an existing portage configuration,
@@ -51,6 +52,11 @@ impl PortageConf {
     /// Returns the resolved [`MakeEnv`].
     pub const fn makenv(&self) -> &MakeEnv {
         self.makenv_stack.makenv()
+    }
+
+    /// Returns the USE expansion config from the resolved make environment.
+    pub const fn use_expand_config(&self) -> &UseExpandConfig {
+        self.makenv_stack.use_expand_config()
     }
 
     /// Returns the [`EffectiveKeywords`] from profile and user config.

@@ -17,6 +17,7 @@ pub struct MakeEnvStack {
     // TODO: this feels like a hack, but works for now,
     //       in an optimal case, `user` should be the "final" make env.
     makenv: MakeEnv,
+    expand_config: UseExpandConfig,
 }
 
 impl MakeEnvStack {
@@ -27,29 +28,31 @@ impl MakeEnvStack {
         let mut user = user;
         user.expand_from(&inherited)?;
         let makenv = MakeEnv::fold(&[&global, &profile, &user], &vars)?;
+        let expand_config =
+            UseExpandConfig::from_makenv(&makenv).context("unable to expand USE")?;
 
         Ok(Self {
             global,
             profile,
             user,
             makenv,
+            expand_config,
         })
     }
 
     /// Returns the desired USE state from the resolved make env.
     pub fn global_use(&self) -> anyhow::Result<FxHashMap<UseFlag, bool>> {
-        let expand_conf =
-            UseExpandConfig::from_makenv(&self.makenv).context("unable to expand USE")?;
         let mut state = FxHashMap::default();
 
         apply_use_state(&mut state, self.makenv.get("USE")).context("invalid USE")?;
         apply_use_state(&mut state, self.user.get("USE")).context("invalid USE")?;
 
-        for (flag, enabled) in expand_conf.materialize(&self.makenv)? {
+        for (flag, enabled) in self.expand_config.materialize(&self.makenv)? {
             state.insert(flag, enabled);
         }
 
-        let user_disabled = expand_conf
+        let user_disabled = self
+            .expand_config
             .materialize(&self.user)?
             .into_iter()
             .filter(|(_, enabled)| !enabled);
@@ -95,6 +98,11 @@ impl MakeEnvStack {
     /// Returns the "final" resolved make env.
     pub const fn makenv(&self) -> &MakeEnv {
         &self.makenv
+    }
+
+    /// Returns the USE expansion configuration.
+    pub const fn use_expand_config(&self) -> &UseExpandConfig {
+        &self.expand_config
     }
 }
 

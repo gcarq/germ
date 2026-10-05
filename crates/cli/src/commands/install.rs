@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
@@ -8,8 +9,9 @@ use germ_core::policy::PackagePolicy;
 use germ_core::policy::pkgmask::PackageMasks;
 use germ_core::repository::RepoSet;
 use germ_core::resolver::{ExecutionPlan, PackageOperation, PackageProvider, Resolver};
+use germ_core::useflag::{EffectiveUse, UseExpandConfig};
 use germ_core::vdb::Vdb;
-use germ_pms::Atom;
+use germ_pms::{Atom, UseFlag};
 
 /// Installs the best matching package for the given `atom`.
 /// TODO: this is just a placeholder for now.
@@ -30,31 +32,104 @@ pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
         bail!("unable to produce an install plan: {failure}");
     }
 
-    print_plan(outcome.plan());
+    print_plan(outcome.plan(), conf.use_expand_config());
     println!("Total operations: {}", outcome.plan().operations().len());
     println!("Rejected candidates: {}", outcome.rejected().len());
 
     Ok(())
 }
 
+fn changed_use<'a>(old: &'a EffectiveUse, new: &'a EffectiveUse) -> Vec<(&'a UseFlag, bool)> {
+    let enabled = new
+        .enabled()
+        .difference(old.enabled())
+        .map(|flag| (flag, true));
+    let disabled = old
+        .enabled()
+        .difference(new.enabled())
+        .map(|flag| (flag, false));
+    let mut changes = enabled.chain(disabled).collect::<Vec<_>>();
+    changes.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(b.0)));
+    changes
+}
+
+fn fmt_flags<'a>(
+    flags: impl Iterator<Item = &'a (&'a UseFlag, bool)>,
+    expand: &UseExpandConfig,
+) -> String {
+    let mut groups = BTreeMap::<&str, Vec<String>>::new();
+    for (flag, enabled) in flags {
+        let (name, value) = match expand.split_expanded_flag(flag) {
+            Some((group, value)) => (group.as_str(), value),
+            None => ("USE", flag.as_str()),
+        };
+        let value = match enabled {
+            true => value.to_owned(),
+            false => format!("-{value}"),
+        };
+        groups.entry(name).or_default().push(value);
+    }
+
+    groups
+        .into_iter()
+        .map(|(name, values)| format!("{name}=\"{}\"", values.join(" ")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Prints the execution plan.
-fn print_plan(plan: &ExecutionPlan) {
+fn print_plan(plan: &ExecutionPlan, expand: &UseExpandConfig) {
+    let padding = 32;
     for operation in plan.operations() {
         match operation {
             PackageOperation::Merge(selected) => {
-                println!("[N   ] {}", selected.pkg.cpv());
+                let flags = selected
+                    .effective_use
+                    .enabled()
+                    .iter()
+                    .map(|flag| (flag, true)).collect::<Vec<_>>();
+                println!(
+                    "[N   ] {:<padding$} {} {}",
+                    selected.pkg.qualified_name(),
+                    selected.pkg.version(),
+                    fmt_flags(flags.iter(), expand)
+                );
             }
-            PackageOperation::Replace(selected, _) => {
-                println!("[ R  ] {}", selected.pkg.cpv());
+            PackageOperation::Replace(selected, installed) => {
+                let changes = changed_use(installed.effective_use(), &selected.effective_use);
+                println!(
+                    "[ R  ] {:<padding$} {} {}",
+                    selected.pkg.qualified_name(),
+                    selected.pkg.version(),
+                    fmt_flags(changes.iter(), expand)
+                );
             }
             PackageOperation::Upgrade(selected, installed) => {
-                println!("[  U ] {} -> {}", installed.cpv(), selected.pkg.cpv());
+                let changes = changed_use(installed.effective_use(), &selected.effective_use);
+                println!(
+                    "[ U  ] {:<padding$} {} -> {} {}",
+                    selected.pkg.qualified_name(),
+                    installed.version(),
+                    selected.pkg.version(),
+                    fmt_flags(changes.iter(), expand)
+                );
             }
             PackageOperation::Downgrade(selected, installed) => {
-                println!("[  D ] {} -> {}", installed.cpv(), selected.pkg.cpv());
+                let changes = changed_use(installed.effective_use(), &selected.effective_use);
+                println!(
+                    "[ D  ] {:<padding$} {} -> {} {}",
+                    selected.pkg.qualified_name(),
+                    installed.version(),
+                    selected.pkg.version(),
+                    fmt_flags(changes.iter(), expand)
+                );
             }
             PackageOperation::Unmerge(installed) => {
-                println!("[   X] {}", installed.cpv());
+                println!(
+                    "[ -  ] {:<padding$} {}",
+                    installed.qualified_name(),
+                    installed.version()
+                );
             }
         }
     }

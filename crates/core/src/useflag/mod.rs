@@ -4,4 +4,4 @@ mod expand;
 pub(crate) mod test_support;
 
 pub use effective::EffectiveUse;
-pub(crate) use expand::UseExpandConfig;
+pub use expand::UseExpandConfig;

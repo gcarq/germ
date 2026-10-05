@@ -41,6 +41,25 @@ impl UseExpandConfig {
         Ok(config)
     }
 
+    /// Returns the USE expansion group and value for `flag`,
+    /// preferring the longest matching group name.
+    pub fn split_expanded_flag<'a>(
+        &'a self,
+        flag: &'a UseFlag,
+    ) -> Option<(&'a EnvVarName, &'a str)> {
+        self.groups
+            .iter()
+            .filter(|(_, kind)| **kind == UseExpandKind::Prefixed)
+            .filter_map(|(group, _)| {
+                flag.as_str()
+                    .strip_prefix(&format!("{}_", group.as_str().to_ascii_lowercase()))
+                    .map(|value| (group, value))
+            })
+            .max_by(|(a, _), (b, _)| {
+                (a.as_str().len(), a.as_str()).cmp(&(b.as_str().len(), b.as_str()))
+            })
+    }
+
     /// Resolves a USE group value into its corresponding USE flag.
     pub fn resolve_flag(&self, group: &EnvVarName, value: &UseFlag) -> anyhow::Result<UseFlag> {
         match self.groups.get(group) {
@@ -149,6 +168,30 @@ fn expand_value(kind: UseExpandKind, group: &str, value: &str) -> anyhow::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_split_prefixed_flags() -> anyhow::Result<()> {
+        let makenv = MakeEnv::from_content(
+            "USE_EXPAND=\"LLVM_TARGETS FOO FOO_BAR\"
+             USE_EXPAND_UNPREFIXED=ARCH",
+        )?;
+        let config = UseExpandConfig::from_makenv(&makenv)?;
+
+        assert_eq!(
+            config
+                .split_expanded_flag(&"llvm_targets_LoongArch".parse()?)
+                .map(|(grp, val)| (grp.as_str(), val)),
+            Some(("LLVM_TARGETS", "LoongArch"))
+        );
+        assert_eq!(
+            config
+                .split_expanded_flag(&"foo_bar_baz".parse()?)
+                .map(|(grp, val)| (grp.as_str(), val)),
+            Some(("FOO_BAR", "baz"))
+        );
+        assert!(config.split_expanded_flag(&"amd64".parse()?).is_none());
+        Ok(())
+    }
 
     #[test]
     fn test_materialize() -> anyhow::Result<()> {

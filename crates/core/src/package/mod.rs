@@ -2,7 +2,9 @@ mod requirement;
 
 use std::{fmt, hash};
 
-use germ_pms::{Atom, CPV, CatName, PackageMetadata, PackageSlot, PkgName, RepoName};
+use germ_pms::{
+    Atom, CPV, CatName, PackageMetadata, PackageSlot, PackageVersion, PkgName, RepoName,
+};
 pub use requirement::AtomRequirement;
 
 /// Provides a trait for [`Package`] and [`InstalledPackage`] used for common operations
@@ -20,6 +22,11 @@ pub trait PackageView {
     /// Returns the name of the package.
     fn package(&self) -> &PkgName {
         self.cpv().package()
+    }
+
+    /// Returns the package version.
+    fn version(&self) -> &PackageVersion {
+        self.cpv().version()
     }
 
     /// Returns the package slot.
