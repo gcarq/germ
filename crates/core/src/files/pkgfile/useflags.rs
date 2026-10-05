@@ -6,7 +6,7 @@ use germ_pms::{Atom, UseFlag};
 use super::{AtomPolicies, AtomPolicy};
 use crate::files::entry::{Entry, Precedence};
 use crate::makenv::EnvVarName;
-use crate::types::{FxHashMap, FxHashSet};
+use crate::types::FxHashMap;
 use crate::useflag::UseExpandConfig;
 use crate::utils::Inherit;
 
@@ -37,42 +37,16 @@ impl PackageUseRecords {
             })
             .collect()
     }
+
+    #[cfg(test)]
+    fn get(&self, atom: &Atom) -> Option<&UseSpec> {
+        self.0.0.get(atom)
+    }
 }
 
 impl Inherit for PackageUseRecords {
     fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
         self.0.inherit_from(&parent.0)
-    }
-}
-
-/// Represents a package USE target, which can be either a direct USE flag
-/// or within an expansion group.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-enum PackageUseTarget {
-    Flag(UseFlag),
-    Expand { group: EnvVarName, value: UseFlag },
-}
-
-/// Represents a reset operation for USE flags, which can either reset all flags
-/// or flags within an expansion group.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-enum UseReset {
-    All,
-    Group(EnvVarName),
-}
-
-impl UseReset {
-    fn matches(&self, target: &PackageUseTarget) -> bool {
-        match self {
-            Self::All => true,
-            Self::Group(group) => match target {
-                PackageUseTarget::Expand {
-                    group: target_group,
-                    ..
-                } => group == target_group,
-                _ => false,
-            },
-        }
     }
 }
 
@@ -83,14 +57,15 @@ impl UseReset {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct UseSpec {
     targets: FxHashMap<PackageUseTarget, Entry<UseFlag>>,
-    resets: FxHashSet<UseReset>,
+    resets: UseResets,
 }
 
 impl UseSpec {
     /// Expands all USE flags, and validates them against the given `groups`.
     fn expand(self, groups: &UseExpandConfig) -> anyhow::Result<UseFlags> {
+        let Self { targets, resets } = self;
         let mut flags = FxHashMap::default();
-        for (target, entry) in self.targets {
+        for (target, entry) in targets {
             let entry = match target {
                 PackageUseTarget::Flag(_) => entry,
                 PackageUseTarget::Expand { group, .. } => {
@@ -104,12 +79,13 @@ impl UseSpec {
             }
             flags.insert(flag, entry);
         }
-        Ok(UseFlags { flags })
+        Ok(UseFlags { flags, resets })
     }
 
-    fn reset(&mut self, reset: UseReset) {
-        self.targets.retain(|target, _| !reset.matches(target));
-        self.resets.insert(reset);
+    fn reset(&mut self, reset: UseReset, precedence: Precedence) {
+        self.targets
+            .retain(|target, _| !reset.matches_target(target));
+        self.resets.insert(reset, precedence);
     }
 }
 
@@ -134,7 +110,7 @@ impl AtomPolicy for UseSpec {
                 let reset = cur_group
                     .as_ref()
                     .map_or(UseReset::All, |group| UseReset::Group(group.clone()));
-                spec.reset(reset);
+                spec.reset(reset, precedence);
                 continue;
             }
 
@@ -155,8 +131,8 @@ impl AtomPolicy for UseSpec {
     /// Updates `self` with the given [`UseSpec`],
     /// replacing existing flags with the same name.
     fn update_from(&mut self, other: Self) {
-        for reset in other.resets {
-            self.reset(reset);
+        for (reset, precedence) in other.resets.0 {
+            self.reset(reset, precedence);
         }
         self.targets.extend(other.targets);
     }
@@ -166,36 +142,156 @@ impl Inherit for UseSpec {
     /// Inherits parent targets while applying this specification's one-layer resets.
     fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
         for (target, entry) in &parent.targets {
-            if self.resets.iter().any(|reset| reset.matches(target)) {
+            if self.resets.matches(target) {
                 continue;
             }
             self.targets
                 .entry(target.clone())
                 .or_insert_with(|| entry.clone());
         }
-        self.resets.clear();
+        self.resets.merge(&parent.resets);
         Ok(())
     }
 }
 
-/// Represents the final resolved USE flags for a package after expansion and inheritance.
+/// Represents a package USE target, which can be either a direct USE flag
+/// or within an expansion group.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum PackageUseTarget {
+    Flag(UseFlag),
+    Expand { group: EnvVarName, value: UseFlag },
+}
+
+/// Holds the resolved USE flags for a single atom after expansion and inheritance.
 ///
 /// It maps a [`UseFlag`] to its corresponding [`Entry<UseFlag>`],
 /// which contains the operation (set/unset) and precedence.
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct UseFlags {
     flags: FxHashMap<UseFlag, Entry<UseFlag>>,
+    resets: UseResets,
 }
 
 impl UseFlags {
     /// Iterates over the resolved USE flag assignments.
-    pub fn iter(&self) -> impl Iterator<Item = &Entry<UseFlag>> {
+    fn iter(&self) -> impl Iterator<Item = &Entry<UseFlag>> {
         self.flags.values()
     }
 
     /// Retrieves the [`Entry<UseFlag>`] for the given [`UseFlag`], if it exists.
+    #[cfg(test)]
     pub fn get(&self, flag: &UseFlag) -> Option<&Entry<UseFlag>> {
         self.flags.get(flag)
+    }
+}
+
+/// Merged USE records matched for a single package.
+///
+/// Entries and resets are combined across matching atoms while keeping the
+/// highest [`Precedence`] per entry and reset scope.
+#[derive(Debug, Default)]
+pub struct MatchedUse<'a> {
+    entries: FxHashMap<&'a UseFlag, &'a Entry<UseFlag>>,
+    resets: UseResets,
+}
+
+impl<'a> MatchedUse<'a> {
+    /// Merges `flags`, keeping the highest precedence per entry and reset scope.
+    pub fn absorb(&mut self, flags: &'a UseFlags) {
+        for entry in flags.iter() {
+            match self.entries.get(entry.inner()) {
+                Some(existing) if existing.prec > entry.prec => continue,
+                _ => self.entries.insert(entry.inner(), entry),
+            };
+        }
+        self.resets.merge(&flags.resets);
+    }
+
+    /// Returns the state declared by the matched records for `flag`.
+    pub fn state(&self, flag: &UseFlag, groups: &UseExpandConfig) -> Option<bool> {
+        let reset = self.resets.precedence(flag, groups);
+        match (self.entries.get(flag), reset) {
+            (Some(entry), Some(prec)) if entry.prec < prec => Some(false),
+            (Some(entry), _) => Some(entry.op.as_bool()),
+            (None, Some(_)) => Some(false),
+            (None, None) => None,
+        }
+    }
+
+    /// Consumes self and returns the flags enabled by the matched entries.
+    pub fn into_enabled(self) -> impl Iterator<Item = &'a UseFlag> {
+        self.entries
+            .into_values()
+            .filter(|entry| entry.op.as_bool())
+            .map(Entry::inner)
+    }
+}
+
+/// Compiled `-*` reset directives for a set of package USE records.
+///
+/// Each reset scope keeps the highest [`Precedence`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct UseResets(FxHashMap<UseReset, Precedence>);
+
+impl UseResets {
+    /// Merges `other` into `self`, keeping the highest precedence per scope.
+    fn merge(&mut self, other: &Self) {
+        for (reset, precedence) in &other.0 {
+            self.insert(reset.clone(), *precedence);
+        }
+    }
+
+    /// Returns the highest precedence that matches the given `flag`.
+    fn precedence(&self, flag: &UseFlag, groups: &UseExpandConfig) -> Option<Precedence> {
+        if self.0.is_empty() {
+            return None;
+        }
+        self.0
+            .iter()
+            .filter(|(reset, _)| reset.matches_flag(flag, groups))
+            .map(|(_, prec)| *prec)
+            .max()
+    }
+
+    /// Inserts `reset`, keeping the highest precedence for the same scope.
+    fn insert(&mut self, reset: UseReset, precedence: Precedence) {
+        self.0
+            .entry(reset)
+            .and_modify(|cur| *cur = (*cur).max(precedence))
+            .or_insert(precedence);
+    }
+
+    /// Returns whether any reset scope matches `target`.
+    fn matches(&self, target: &PackageUseTarget) -> bool {
+        self.0.keys().any(|reset| reset.matches_target(target))
+    }
+}
+
+/// Represents a reset operation for USE flags, which can either reset all flags
+/// or flags within an expansion group.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum UseReset {
+    All,
+    Group(EnvVarName),
+}
+
+impl UseReset {
+    fn matches_target(&self, target: &PackageUseTarget) -> bool {
+        match self {
+            Self::All => true,
+            Self::Group(name) => match target {
+                PackageUseTarget::Expand { group, .. } => name == group,
+                _ => false,
+            },
+        }
+    }
+
+    /// Returns whether this reset matches the given USE flag, considering expansion groups.
+    fn matches_flag(&self, flag: &UseFlag, groups: &UseExpandConfig) -> bool {
+        match self {
+            Self::All => true,
+            Self::Group(name) => groups.group_matches_flag(name, flag),
+        }
     }
 }
 
@@ -203,6 +299,7 @@ impl UseFlags {
 mod tests {
     use super::*;
     use crate::makenv::MakeEnv;
+    use crate::types::FxHashSet;
 
     impl PackageUseTarget {
         fn flag(value: impl Into<Box<str>>) -> anyhow::Result<Self> {
@@ -220,7 +317,7 @@ mod tests {
     fn config() -> anyhow::Result<UseExpandConfig> {
         let makenv = MakeEnv::from_content(
             "USE_EXPAND=\"LLVM_TARGETS\"
-                USE_EXPAND_UNPREFIXED=\"ARCH\"",
+            USE_EXPAND_UNPREFIXED=\"ARCH\"",
         )?;
         UseExpandConfig::from_makenv(&makenv)
     }
@@ -240,7 +337,7 @@ mod tests {
                 app-admin/sudo -foo",
             Precedence::User,
         )?;
-        let sudo = policy.0.0.get(&Atom::new("app-admin/sudo")?).unwrap();
+        let sudo = policy.get(&Atom::new("app-admin/sudo")?).unwrap();
 
         assert_eq!(
             sudo.targets.get(&PackageUseTarget::flag("foo")?),
@@ -277,7 +374,7 @@ mod tests {
             spec.targets
                 .contains_key(&PackageUseTarget::expand("ARCH", "amd64")?)
         );
-        assert!(spec.resets.is_empty());
+        assert!(spec.resets.0.is_empty());
         Ok(())
     }
 
@@ -289,7 +386,7 @@ mod tests {
             Precedence::User,
         )?;
 
-        let xz = entries.0.0.get(&Atom::new("app-arch/xz-utils")?).unwrap();
+        let xz = entries.get(&Atom::new("app-arch/xz-utils")?).unwrap();
         assert!(
             xz.targets
                 .contains_key(&PackageUseTarget::flag("direct_flag")?)
@@ -304,7 +401,7 @@ mod tests {
         assert!(!spec.targets.contains_key(&PackageUseTarget::flag("foo")?));
         assert!(!spec.targets.contains_key(&PackageUseTarget::flag("bar")?));
         assert!(spec.targets.contains_key(&PackageUseTarget::flag("baz")?));
-        assert!(spec.resets.contains(&UseReset::All));
+        assert!(spec.resets.0.contains_key(&UseReset::All));
 
         let spec = UseSpec::parse("LLVM_TARGETS: X86 -* AMDGPU", Precedence::User)?;
         assert!(
@@ -318,7 +415,8 @@ mod tests {
         );
         assert!(
             spec.resets
-                .contains(&UseReset::Group(EnvVarName::new("LLVM_TARGETS")?))
+                .0
+                .contains_key(&UseReset::Group(EnvVarName::new("LLVM_TARGETS")?))
         );
         Ok(())
     }
@@ -467,6 +565,41 @@ mod tests {
         assert_eq!(
             wildcard.get(&UseFlag::new("llvm_targets_X86")?),
             Some(&Entry::from_str("llvm_targets_X86", Precedence::User)?)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_matched_use() -> anyhow::Result<()> {
+        let config = config()?;
+        let profile = PackageUseRecords::from_content(
+            "llvm-core/clang LLVM_TARGETS: NVPTX",
+            Precedence::Profile(0),
+        )?
+        .expand(&config)?;
+        let user =
+            PackageUseRecords::from_content("*/* LLVM_TARGETS: -* AMDGPU", Precedence::User)?
+                .expand(&config)?;
+        let mut matched = MatchedUse::default();
+        for (_, flags) in profile.iter().chain(user.iter()) {
+            matched.absorb(flags);
+        }
+
+        for (flag, expected) in [
+            ("llvm_targets_NVPTX", Some(false)),
+            ("llvm_targets_AMDGPU", Some(true)),
+            ("llvm_targets_X86", Some(false)),
+            ("lto", None),
+        ] {
+            assert_eq!(matched.state(&UseFlag::new(flag)?, &config), expected);
+        }
+
+        assert_eq!(
+            matched.into_enabled().cloned().collect::<FxHashSet<_>>(),
+            FxHashSet::from_iter([
+                UseFlag::new("llvm_targets_NVPTX")?,
+                UseFlag::new("llvm_targets_AMDGPU")?,
+            ])
         );
         Ok(())
     }

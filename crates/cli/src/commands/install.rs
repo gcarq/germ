@@ -87,7 +87,8 @@ fn print_plan(plan: &ExecutionPlan, expand: &UseExpandConfig) {
                     .effective_use
                     .enabled()
                     .iter()
-                    .map(|flag| (flag, true)).collect::<Vec<_>>();
+                    .map(|flag| (flag, true))
+                    .collect::<Vec<_>>();
                 println!(
                     "[N   ] {:<padding$} {} {}",
                     selected.pkg.qualified_name(),

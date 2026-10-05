@@ -39,11 +39,6 @@ impl<T: EntryValue> LineEntries<T> {
         Ok(Self(entries))
     }
 
-    /// Consumes self and returns an iterator of [`Entry<T>`].
-    pub fn into_iter(self) -> impl Iterator<Item = Entry<T>> {
-        self.0.into_iter()
-    }
-
     /// Consumes self and returns an iterator of the inner `T` that remain set.
     ///
     /// Values reverted by a later hyphen-prefixed entry are omitted.
@@ -72,6 +67,15 @@ impl<T: EntryValue> Inherit for LineEntries<T> {
         result.reverse();
         self.0 = result;
         Ok(())
+    }
+}
+
+impl<T: EntryValue> IntoIterator for LineEntries<T> {
+    type Item = Entry<T>;
+    type IntoIter = <Vec<Entry<T>> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 

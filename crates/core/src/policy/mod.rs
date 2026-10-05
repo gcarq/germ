@@ -67,19 +67,23 @@ impl PackagePolicy {
         P: PackageView,
     {
         let keyword = self.keywords.eval(pkg);
+        if !keyword.accepted {
+            return Ok(PolicyResult::Rejected(PolicyRejection::MissingKeyword));
+        }
+
+        if self.pkgmasks.is_masked(pkg) {
+            return Ok(PolicyResult::Rejected(PolicyRejection::Masked));
+        }
+
         let (effective_use, use_satisfied) = self
             .usepolicy
             .eval(pkg, keyword.stable_in_use)
             .context("failed to evaluate required USE flags")?;
 
-        let result = if !keyword.accepted {
-            PolicyResult::Rejected(PolicyRejection::MissingKeyword)
-        } else if !use_satisfied {
-            PolicyResult::Rejected(PolicyRejection::RequiredUseUnsatisfied)
-        } else if self.pkgmasks.is_masked(pkg) {
-            PolicyResult::Rejected(PolicyRejection::Masked)
-        } else {
+        let result = if use_satisfied {
             PolicyResult::Accepted(effective_use)
+        } else {
+            PolicyResult::Rejected(PolicyRejection::RequiredUseUnsatisfied)
         };
         Ok(result)
     }

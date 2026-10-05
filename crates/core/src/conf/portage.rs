@@ -94,6 +94,7 @@ impl PortageConf {
 
     /// Returns [`UsePolicy`] from profile and user config.
     pub fn use_policy(&self) -> anyhow::Result<UsePolicy> {
+        let profile_path = self.path.join("profile");
         UsePolicy::new(
             self.makenv_stack.global_use()?,
             self.makenv_stack.iuse_implicit()?,
@@ -104,13 +105,18 @@ impl PortageConf {
                     Precedence::User,
                     true,
                 )?,
+                package_use_force: PackageUseRecords::from_path(
+                    &profile_path.join("package.use.force"),
+                    Precedence::User,
+                    true,
+                )?,
                 use_mask: UseEntries::from_path(
-                    &self.path.join("profile").join("use.mask"),
+                    &profile_path.join("use.mask"),
                     Precedence::User,
                     true,
                 )?,
                 package_use_mask: PackageUseRecords::from_path(
-                    &self.path.join("profile").join("package.use.mask"),
+                    &profile_path.join("package.use.mask"),
                     Precedence::User,
                     true,
                 )?,

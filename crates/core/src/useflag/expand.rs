@@ -4,16 +4,20 @@ use germ_pms::UseFlag;
 use crate::makenv::{EnvValue, EnvVarName, MakeEnv};
 use crate::types::{FxHashMap, FxHashSet};
 
+/// Defines the kind of the USE expansion group.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum UseExpandKind {
     Prefixed,
     Unprefixed,
 }
 
-/// Maps USE expansion groups to their expansion kind (prefixed or unprefixed).
+/// Maps USE expansion groups to their prefixed or unprefixed values.
 #[derive(Clone, Debug, Default)]
 pub struct UseExpandConfig {
-    groups: FxHashMap<EnvVarName, UseExpandKind>,
+    /// Prefixed groups mapped to their lowercase `NAME_` flag prefix.
+    prefixed_groups: FxHashMap<EnvVarName, Box<str>>,
+    /// Unprefixed groups mapped to their `USE_EXPAND_VALUES_<NAME>` values.
+    unprefixed_groups: FxHashMap<EnvVarName, FxHashSet<Box<str>>>,
     /// Implicit groups get injected into `IUSE_IMPLICIT`.
     implicit_groups: FxHashSet<EnvVarName>,
 }
@@ -38,6 +42,12 @@ impl UseExpandConfig {
             .flat_map(EnvValue::iter)
             .map(|name| EnvVarName::new(name).context("invalid USE_EXPAND_IMPLICIT group"))
             .collect::<anyhow::Result<_>>()?;
+        for (group, values) in &mut config.unprefixed_groups {
+            let var = format!("USE_EXPAND_VALUES_{group}");
+            if let Some(declared) = makenv.get(var.as_str()) {
+                values.extend(declared.iter().map(Into::into));
+            }
+        }
         Ok(config)
     }
 
@@ -47,40 +57,50 @@ impl UseExpandConfig {
         &'a self,
         flag: &'a UseFlag,
     ) -> Option<(&'a EnvVarName, &'a str)> {
-        self.groups
+        self.prefixed_groups
             .iter()
-            .filter(|(_, kind)| **kind == UseExpandKind::Prefixed)
-            .filter_map(|(group, _)| {
+            .filter_map(|(group, prefix)| {
                 flag.as_str()
-                    .strip_prefix(&format!("{}_", group.as_str().to_ascii_lowercase()))
+                    .strip_prefix(prefix.as_ref())
                     .map(|value| (group, value))
             })
-            .max_by(|(a, _), (b, _)| {
-                (a.as_str().len(), a.as_str()).cmp(&(b.as_str().len(), b.as_str()))
-            })
+            .min_by_key(|(_, value)| value.len())
     }
 
     /// Resolves a USE group value into its corresponding USE flag.
     pub fn resolve_flag(&self, group: &EnvVarName, value: &UseFlag) -> anyhow::Result<UseFlag> {
-        match self.groups.get(group) {
-            Some(kind) => expand_value(*kind, group.as_str(), value.as_str()),
-            None => bail!("unknown USE expansion group '{group}'"),
+        let prefix = self.prefixed_groups.get(group).map(AsRef::as_ref);
+        if prefix.is_some() || self.unprefixed_groups.contains_key(group) {
+            return expand_value(prefix, value.as_str());
         }
+        bail!("unknown USE expansion group '{group}'")
+    }
+
+    /// Returns whether `flag` belongs to the given USE expansion `group`.
+    pub fn group_matches_flag(&self, group: &EnvVarName, flag: &UseFlag) -> bool {
+        if self.prefixed_groups.contains_key(group) {
+            return self
+                .split_expanded_flag(flag)
+                .is_some_and(|(name, _)| name == group);
+        }
+        self.unprefixed_groups
+            .get(group)
+            .is_some_and(|values| values.contains(flag.as_str()))
     }
 
     /// Returns the USE expand group names.
     pub fn names(&self) -> impl Iterator<Item = &EnvVarName> {
-        self.groups.keys()
+        self.groups().map(|(name, _)| name)
     }
 
     /// Materializes all groups into expanded desired USE assignments.
     pub fn materialize(&self, makenv: &MakeEnv) -> anyhow::Result<Vec<(UseFlag, bool)>> {
         let mut assignments = Vec::new();
-        for (name, kind) in &self.groups {
+        for (name, prefix) in self.groups() {
             let Some(value) = makenv.get(name.as_str()) else {
                 continue;
             };
-            let flags = expand_env_value(value, *kind, name.as_str())
+            let flags = expand_env_value(value, prefix)
                 .with_context(|| format!("invalid USE expand value for {name}"))?;
             assignments.extend(flags);
         }
@@ -91,7 +111,7 @@ impl UseExpandConfig {
     pub fn implicit_flags(&self, makenv: &MakeEnv) -> anyhow::Result<FxHashSet<UseFlag>> {
         let mut flags = FxHashSet::default();
 
-        for (name, kind) in &self.groups {
+        for (name, prefix) in self.groups() {
             if !self.implicit_groups.contains(name) {
                 continue;
             }
@@ -102,12 +122,22 @@ impl UseExpandConfig {
             };
 
             for value in values.iter() {
-                let flag = expand_value(*kind, name.as_str(), value)
-                    .with_context(|| format!("invalid {vars}"))?;
+                let flag =
+                    expand_value(prefix, value).with_context(|| format!("invalid {vars}"))?;
                 flags.insert(flag);
             }
         }
         Ok(flags)
+    }
+
+    /// Iterates declared groups with their lowercase `NAME_` prefix, if prefixed.
+    fn groups(&self) -> impl Iterator<Item = (&EnvVarName, Option<&str>)> {
+        let prefixed = self
+            .prefixed_groups
+            .iter()
+            .map(|(name, prefix)| (name, Some(prefix.as_ref())));
+        let unprefixed = self.unprefixed_groups.keys().map(|name| (name, None));
+        prefixed.chain(unprefixed)
     }
 
     /// Adds the use expand groups from the given [`EnvValue`] to the config.
@@ -123,23 +153,32 @@ impl UseExpandConfig {
 
         for group in values.iter() {
             let name = EnvVarName::new(group).with_context(|| format!("invalid {var} group"))?;
-            if let Some(existing) = self.groups.get(&name) {
-                if *existing != kind {
-                    bail!("USE expansion group '{name}' is present in both USE_EXPAND namespaces");
+            match kind {
+                UseExpandKind::Prefixed => {
+                    if self.unprefixed_groups.contains_key(&name) {
+                        bail!("USE expansion '{name}' is present in both USE_EXPAND namespaces");
+                    }
+                    let prefix = format!("{}_", name.as_str().to_ascii_lowercase());
+                    self.prefixed_groups
+                        .entry(name)
+                        .or_insert_with(|| prefix.into_boxed_str());
                 }
-                continue;
+                UseExpandKind::Unprefixed => {
+                    if self.prefixed_groups.contains_key(&name) {
+                        bail!("USE expansion '{name}' is present in both USE_EXPAND namespaces");
+                    }
+                    self.unprefixed_groups.entry(name).or_default();
+                }
             }
-            self.groups.insert(name, kind);
         }
         Ok(())
     }
 }
 
-/// Expands the given [`EnvValue`] into USE flags for the given `kind` and `group`.
+/// Expands the given [`EnvValue`] into USE flags for the given group `prefix`.
 fn expand_env_value(
     value: &EnvValue,
-    kind: UseExpandKind,
-    group: &str,
+    prefix: Option<&str>,
 ) -> anyhow::Result<Vec<(UseFlag, bool)>> {
     let mut flags = Vec::default();
     for val in value.iter() {
@@ -152,16 +191,16 @@ fn expand_env_value(
             Some(value) => (value, false),
             None => (val, true),
         };
-        flags.push((expand_value(kind, group, name)?, enabled));
+        flags.push((expand_value(prefix, name)?, enabled));
     }
     Ok(flags)
 }
 
 /// Expands one USE group value into its corresponding USE flag.
-fn expand_value(kind: UseExpandKind, group: &str, value: &str) -> anyhow::Result<UseFlag> {
-    match kind {
-        UseExpandKind::Prefixed => UseFlag::new(format!("{}_{value}", group.to_ascii_lowercase())),
-        UseExpandKind::Unprefixed => UseFlag::new(value),
+fn expand_value(prefix: Option<&str>, value: &str) -> anyhow::Result<UseFlag> {
+    match prefix {
+        Some(prefix) => UseFlag::new(format!("{prefix}{value}")),
+        None => UseFlag::new(value),
     }
 }
 
@@ -190,6 +229,31 @@ mod tests {
             Some(("FOO_BAR", "baz"))
         );
         assert!(config.split_expanded_flag(&"amd64".parse()?).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_group_matches_flag() -> anyhow::Result<()> {
+        let makenv = MakeEnv::from_content(
+            r#"USE_EXPAND="VIDEO_CARDS VIDEO"
+             USE_EXPAND_UNPREFIXED=ARCH
+             USE_EXPAND_VALUES_ARCH=amd64"#,
+        )?;
+        let config = UseExpandConfig::from_makenv(&makenv)?;
+
+        assert!(config.group_matches_flag(
+            &EnvVarName::new("VIDEO_CARDS")?,
+            &UseFlag::new("video_cards_amdgpu")?
+        ));
+        assert!(!config.group_matches_flag(
+            &EnvVarName::new("VIDEO")?,
+            &UseFlag::new("video_cards_amdgpu")?
+        ));
+        assert!(config.group_matches_flag(&EnvVarName::new("ARCH")?, &UseFlag::new("amd64")?));
+        assert!(!config.group_matches_flag(
+            &EnvVarName::new("ARCH")?,
+            &UseFlag::new("video_cards_amdgpu")?
+        ));
         Ok(())
     }
 

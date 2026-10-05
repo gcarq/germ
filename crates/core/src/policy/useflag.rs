@@ -2,8 +2,7 @@ use anyhow::Context;
 use germ_pms::{Atom, ExprEval, IUseEntry, IUseState, RequiredUseFlag, UseFlag};
 
 use crate::files::UseEntries;
-use crate::files::entry::Entry;
-use crate::files::pkgfile::{PackageUseRecords, UseFlags};
+use crate::files::pkgfile::{MatchedUse, PackageUseRecords, UseFlags};
 use crate::package::PackageView;
 use crate::profile::ProfileUseRecords;
 use crate::types::{FxHashMap, FxHashSet};
@@ -14,6 +13,7 @@ use crate::utils::Inherit;
 #[derive(Default)]
 pub struct LocalRecords {
     pub package_use: PackageUseRecords,
+    pub package_use_force: PackageUseRecords,
     pub use_mask: UseEntries,
     pub package_use_mask: PackageUseRecords,
 }
@@ -36,6 +36,7 @@ pub struct UsePolicy {
 
     package_use_stable_mask: PackageUse,
     package_use_stable_force: PackageUse,
+    expand_config: UseExpandConfig,
 }
 
 impl UsePolicy {
@@ -46,6 +47,7 @@ impl UsePolicy {
         profile: ProfileUseRecords,
         local: LocalRecords,
     ) -> anyhow::Result<Self> {
+        let expand_config = profile.expand_config.clone();
         Ok(Self {
             base_use: UseRules(global_use),
             use_mask: local
@@ -58,27 +60,33 @@ impl UsePolicy {
             use_stable_force: profile.use_stable_force.finalize().collect(),
             package_use: PackageUse::new(
                 local.package_use.inherit(&profile.package_use)?,
-                &profile.expand_config,
+                &expand_config,
             )
             .context("failed to resolve package.use")?,
             package_use_mask: PackageUse::new(
                 local.package_use_mask.inherit(&profile.package_use_mask)?,
-                &profile.expand_config,
+                &expand_config,
             )
             .context("failed to resolve package.use.mask")?,
-            package_use_force: PackageUse::new(profile.package_use_force, &profile.expand_config)
-                .context("failed to resolve package.use.force")?,
+            package_use_force: PackageUse::new(
+                local
+                    .package_use_force
+                    .inherit(&profile.package_use_force)?,
+                &expand_config,
+            )
+            .context("failed to resolve package.use.force")?,
             package_use_stable_mask: PackageUse::new(
                 profile.package_use_stable_mask,
-                &profile.expand_config,
+                &expand_config,
             )
             .context("failed to resolve package.use.stable.mask")?,
             package_use_stable_force: PackageUse::new(
                 profile.package_use_stable_force,
-                &profile.expand_config,
+                &expand_config,
             )
             .context("failed to resolve package.use.stable.force")?,
             iuse_implicit,
+            expand_config,
         })
     }
 
@@ -113,7 +121,7 @@ impl UsePolicy {
             .cloned()
             .collect::<FxHashSet<_>>();
 
-        let pkg_use = self.package_use.entries_for(pkg);
+        let pkg_use = self.package_use.matched_for(pkg);
         let masked = self.masked_for_pkg(pkg, stable_in_use);
         let forced = self.forced_for_pkg(pkg, stable_in_use);
 
@@ -133,12 +141,11 @@ impl UsePolicy {
     fn desired_state<P: PackageView>(
         &self,
         pkg: &P,
-        package_use: &FxHashMap<&UseFlag, &Entry<UseFlag>>,
+        package_use: &MatchedUse<'_>,
         flag: &UseFlag,
     ) -> Option<bool> {
         package_use
-            .get(flag)
-            .map(|entry| entry.op.as_bool())
+            .state(flag, &self.expand_config)
             .or_else(|| self.base_use.state(flag))
             .or_else(|| {
                 pkg.metadata()
@@ -202,36 +209,22 @@ impl PackageUse {
         Ok(Self(records.expand(config)?))
     }
 
-    /// Returns package USE entries that apply to the given `pkg`.
+    /// Returns USE entries that apply to the given `pkg`.
     ///
     /// The USE policy is matched statically, atom USE deps are not considered.
-    fn entries_for<'a, P: PackageView>(
-        &'a self,
-        pkg: &P,
-    ) -> FxHashMap<&'a UseFlag, &'a Entry<UseFlag>> {
-        let mut flags: FxHashMap<&UseFlag, &Entry<UseFlag>> = FxHashMap::default();
-
-        for (atom, cur_flags) in &self.0 {
-            if !pkg.matches_atom(atom) {
-                continue;
-            }
-
-            for entry in cur_flags.iter() {
-                match flags.get(entry.inner()) {
-                    Some(existing) if existing.prec > entry.prec => continue,
-                    _ => flags.insert(entry.inner(), entry),
-                };
+    fn matched_for<'a, P: PackageView>(&'a self, pkg: &P) -> MatchedUse<'a> {
+        let mut matched = MatchedUse::default();
+        for (atom, flags) in &self.0 {
+            if pkg.matches_atom(atom) {
+                matched.absorb(flags);
             }
         }
-        flags
+        matched
     }
 
     /// Returns all enabled USE flags that apply to the given `pkg`.
     fn enabled_for<'a, P: PackageView>(&'a self, pkg: &P) -> impl Iterator<Item = &'a UseFlag> {
-        self.entries_for(pkg)
-            .into_values()
-            .filter(|entry| entry.op.as_bool())
-            .map(Entry::inner)
+        self.matched_for(pkg).into_enabled()
     }
 }
 
@@ -266,6 +259,7 @@ mod tests {
     fn use_state(
         makenv: &str,
         make_conf: &str,
+        profile_use: &str,
         package_use: &str,
         iuse: &str,
         flag: &str,
@@ -277,10 +271,15 @@ mod tests {
             package_use: PackageUseRecords::from_content(package_use, Precedence::User)?,
             ..Default::default()
         };
+        let profile = ProfileUseRecords {
+            package_use: PackageUseRecords::from_content(profile_use, Precedence::Profile(0))?,
+            expand_config: UseExpandConfig::from_makenv(makenv_stack.makenv())?,
+            ..Default::default()
+        };
         let policy = UsePolicy::new(
             makenv_stack.global_use()?,
             FxHashSet::default(),
-            ProfileUseRecords::default(),
+            profile,
             local,
         )?;
         let package = Package::new(
@@ -355,6 +354,51 @@ mod tests {
     }
 
     #[test]
+    fn test_local_package_use_force() -> anyhow::Result<()> {
+        let flag = UseFlag::new("llvm_targets_AArch64")?;
+        let use_flag = FxHashMap::from_iter([(flag.clone(), false)]);
+        let expand_config =
+            UseExpandConfig::from_makenv(&MakeEnv::from_content("USE_EXPAND=LLVM_TARGETS")?)?;
+        let profile = ProfileUseRecords {
+            package_use_force: PackageUseRecords::from_content(
+                "*/* LLVM_TARGETS: AArch64",
+                Precedence::Profile(0),
+            )?,
+            expand_config,
+            ..Default::default()
+        };
+        let package = Package::new(
+            cpv("llvm-core", "clang", "23.1.2"),
+            "gentoo".parse()?,
+            pkg_metadata(&[("IUSE", "llvm_targets_AArch64")]),
+        );
+        let forced = UsePolicy::new(
+            use_flag.clone(),
+            FxHashSet::default(),
+            profile.clone(),
+            LocalRecords::default(),
+        )?;
+        assert_eq!(
+            forced.effective_for(&package, false).state(&flag),
+            Some(true)
+        );
+
+        let local = LocalRecords {
+            package_use_force: PackageUseRecords::from_content(
+                "*/* LLVM_TARGETS: -AArch64",
+                Precedence::User,
+            )?,
+            ..Default::default()
+        };
+        let unforced = UsePolicy::new(use_flag, FxHashSet::default(), profile, local)?;
+        assert_eq!(
+            unforced.effective_for(&package, false).state(&flag),
+            Some(false)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_profile_use_unmask() -> anyhow::Result<()> {
         let elogind = UseFlag::new("elogind")?;
         let masked = UseEntries::from_content("elogind", Precedence::Profile(0))?;
@@ -383,20 +427,64 @@ mod tests {
     }
 
     #[test]
-    fn test_effective_use() {
-        // makenv, make_conf, package_use, iuse, flag, expected
+    fn test_package_use_group_reset() -> anyhow::Result<()> {
+        let makenv = "USE=keep
+            USE_EXPAND=LLVM_TARGETS
+            LLVM_TARGETS=\"AArch64 ARM AMDGPU BPF WebAssembly X86\"";
+        let package_use = "*/* LLVM_TARGETS: -* AMDGPU BPF WebAssembly X86";
+        let iuse = "keep llvm_targets_AArch64 llvm_targets_ARM llvm_targets_AMDGPU
+            llvm_targets_BPF llvm_targets_WebAssembly llvm_targets_X86";
         let cases = [
-            ("USE=foo", "", "*/* -foo", "+foo", "foo", Some(false)),
-            ("", "USE=-foo", "*/* foo", "foo", "foo", Some(true)),
-            ("USE=foo", "", "", "", "foo", None),
-            ("", "", "", "+foo", "foo", Some(true)),
-            ("", "USE=-foo", "", "+foo", "foo", Some(false)),
+            ("keep", true),
+            ("llvm_targets_AArch64", false),
+            ("llvm_targets_ARM", false),
+            ("llvm_targets_AMDGPU", true),
+            ("llvm_targets_BPF", true),
+            ("llvm_targets_WebAssembly", true),
+            ("llvm_targets_X86", true),
         ];
 
-        for case in cases {
+        for (flag, expected) in cases {
             assert_eq!(
-                use_state(case.0, case.1, case.2, case.3, case.4).unwrap(),
-                case.5
+                use_state(makenv, "", "", package_use, iuse, flag)?,
+                Some(expected),
+                "{flag}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_package_use_reset_precedence() -> anyhow::Result<()> {
+        let makenv = "USE_EXPAND=LLVM_TARGETS
+            LLVM_TARGETS=\"NVPTX AMDGPU\"";
+        let profile_use = "dev-lang/rust LLVM_TARGETS: NVPTX";
+        let package_use = "*/* LLVM_TARGETS: -* AMDGPU";
+        let iuse = "llvm_targets_NVPTX llvm_targets_AMDGPU";
+        let cases = [("llvm_targets_NVPTX", false), ("llvm_targets_AMDGPU", true)];
+
+        for (flag, expected) in cases {
+            let state = use_state(makenv, "", profile_use, package_use, iuse, flag)?;
+            assert_eq!(state, Some(expected), "{flag}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_effective_use() {
+        // makenv, make_conf, profile_use, package_use, iuse, flag, expected
+        let cases = [
+            ("USE=foo", "", "", "*/* -foo", "+foo", "foo", Some(false)),
+            ("", "USE=-foo", "", "*/* foo", "foo", "foo", Some(true)),
+            ("USE=foo", "", "", "", "", "foo", None),
+            ("", "", "", "", "+foo", "foo", Some(true)),
+            ("", "USE=-foo", "", "", "+foo", "foo", Some(false)),
+        ];
+
+        for (makenv, make_conf, profile_use, package_use, iuse, flag, expected) in cases {
+            assert_eq!(
+                use_state(makenv, make_conf, profile_use, package_use, iuse, flag).unwrap(),
+                expected
             );
         }
     }

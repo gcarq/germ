@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::Context;
 use germ_pms::Atom;
 pub(crate) use keywords::{KeywordRule, PackageAcceptKeywords};
-pub(crate) use useflags::{PackageUseRecords, UseFlags};
+pub(crate) use useflags::{MatchedUse, PackageUseRecords, UseFlags};
 
 use crate::files::content_from_path;
 use crate::files::entry::Precedence;
@@ -47,10 +47,6 @@ impl<T: AtomPolicy> AtomPolicies<T> {
         Ok(Self(policies))
     }
 
-    pub fn into_iter(self) -> impl Iterator<Item = (Atom, T)> {
-        self.0.into_iter()
-    }
-
     fn parse_line(line: &str, precedence: Precedence) -> anyhow::Result<(Atom, T)> {
         let (atom, value) = match line.split_once(char::is_whitespace) {
             Some((atom, value)) => (atom, value),
@@ -70,6 +66,15 @@ impl<T: AtomPolicy + Clone> Inherit for AtomPolicies<T> {
             }
         }
         Ok(())
+    }
+}
+
+impl<T: AtomPolicy> IntoIterator for AtomPolicies<T> {
+    type Item = (Atom, T);
+    type IntoIter = <FxIndexMap<Atom, T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
