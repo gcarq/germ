@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use either::Either;
-use germ_core::{SysConf, repository::RepoSet};
+use germ_core::SysConf;
+use germ_core::repository::RepoSet;
 use log::{info, warn};
 
 /// Generates metadata cache for repositories.

@@ -3,12 +3,14 @@ mod lexer;
 #[cfg(test)]
 mod test_support;
 
+use std::ops::Range;
+
+use anyhow::bail;
+
 use self::arena::{ExprArena, ExprEntry, ExprId};
 use self::lexer::{Lexer, Token};
 use crate::deps::ExprItem;
 use crate::useflag::UseFlag;
-use anyhow::bail;
-use std::ops::Range;
 
 /// A parser for ebuild dependency expressions commonly found in `DEPEND`, `REQUIRED_USE`, etc..
 /// For more information see PMS 8.2.

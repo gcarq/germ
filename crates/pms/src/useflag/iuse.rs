@@ -1,7 +1,9 @@
-use super::UseFlag;
-use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+
+use rkyv::{Archive, Deserialize, Serialize};
+
+use super::UseFlag;
 
 /// Represents the optional default state on an IUSE entry.
 #[derive(

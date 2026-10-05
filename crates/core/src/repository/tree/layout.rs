@@ -1,8 +1,9 @@
-use crate::repository::RepoName;
+use std::path::Path;
+
 use anyhow::{Context, anyhow};
+use germ_pms::RepoName;
 use ini::Ini;
 use log::warn;
-use std::path::Path;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

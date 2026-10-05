@@ -2,19 +2,20 @@ pub mod package;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-use crate::atom::Atom;
-use crate::grammar::{PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
-use crate::package::names::CatName;
-use crate::package::version::PackageVersion;
-use crate::package::{PackageView, cpv::CPV};
-use crate::types::FxHashMap;
-use crate::vdb::package::InstalledPackage;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
 use anyhow::{Context, anyhow};
 use either::Either;
 use fancy_regex::Regex;
-use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
-use std::{fs, io::ErrorKind};
+use germ_pms::grammar::{PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
+use germ_pms::{Atom, CPV, CatName, PackageVersion};
+
+use crate::package::PackageView;
+use crate::types::FxHashMap;
+use crate::vdb::package::InstalledPackage;
 
 /// Regex to validate and parse `package`, `version`, `suffixes` and the `revision` from VDB.
 static VDB_PKG_RE: LazyLock<Regex> = LazyLock::new(|| {

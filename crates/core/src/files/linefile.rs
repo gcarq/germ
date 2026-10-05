@@ -1,9 +1,11 @@
+use std::path::Path;
+
+use anyhow::Context;
+
 use super::content_from_path;
 use super::entry::{Entry, EntryValue, Precedence};
 use crate::types::FxHashSet;
 use crate::utils::{Inherit, strip_line_comment};
-use anyhow::Context;
-use std::path::Path;
 
 /// Holds entries from a line-based file.
 ///
@@ -75,9 +77,8 @@ impl<T: EntryValue> Inherit for LineEntries<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::files::PackageEntries;
-
     use super::*;
+    use crate::files::PackageEntries;
 
     #[test]
     fn test_from_content() -> anyhow::Result<()> {

@@ -1,12 +1,14 @@
+use std::path::Path;
+
+use anyhow::{Context, bail};
+use germ_pms::{Atom, UseFlag};
+
 use super::{AtomPolicies, AtomPolicy};
-use crate::atom::Atom;
 use crate::files::entry::{Entry, Precedence};
 use crate::makenv::EnvVarName;
 use crate::types::{FxHashMap, FxHashSet};
-use crate::useflag::{UseExpandConfig, UseFlag};
+use crate::useflag::UseExpandConfig;
 use crate::utils::Inherit;
-use anyhow::{Context, bail};
-use std::path::Path;
 
 /// Parsed `package.use` records.
 ///
@@ -200,7 +202,6 @@ impl UseFlags {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::makenv::MakeEnv;
 
     impl PackageUseTarget {

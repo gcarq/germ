@@ -4,18 +4,20 @@ mod numeric;
 mod revision;
 mod suffix;
 
-use crate::grammar::{REVISION, VERSION, VERSION_SUFFIXES};
-use anyhow::anyhow;
-use base::VersionNumber;
-use fancy_regex::Regex;
-use revision::PackageRevision;
-use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 use std::sync::LazyLock;
-use suffix::VersionSuffixes;
 
+use anyhow::anyhow;
+pub use base::{NumberComponent, VersionNumber};
+use fancy_regex::Regex;
 pub use matching::matches_wildcard;
+pub use numeric::NumericComponent;
+pub use revision::PackageRevision;
+use rkyv::{Archive, Deserialize, Serialize};
+pub use suffix::{VersionSuffix, VersionSuffixes};
+
+use crate::grammar::{REVISION, VERSION, VERSION_SUFFIXES};
 
 /// Regex to validate and parse `version`, `suffixes` and the `revision`.
 static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -110,9 +112,10 @@ impl fmt::Display for PackageVersion {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
+
     use super::*;
     use crate::test_support::assert_eq_hash;
-    use std::cmp::Ordering;
 
     #[test]
     fn test_package_version_new() {

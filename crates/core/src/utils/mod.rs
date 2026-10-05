@@ -1,13 +1,14 @@
 mod dfs;
 
-pub(crate) use self::dfs::{DfsState, Visit};
-
-use anyhow::{anyhow, bail};
-use md5::{Digest, Md5};
 use std::fmt::Write;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+
+use anyhow::{anyhow, bail};
+use md5::{Digest, Md5};
+
+pub(crate) use self::dfs::{DfsState, Visit};
 
 /// Removes a trailing comment from the given `line` and returns a trimmed str.
 pub fn strip_line_comment(line: &str) -> &str {

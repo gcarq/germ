@@ -1,9 +1,10 @@
 use std::fmt::Debug;
 
+use TestExpression::{AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Item, Use};
+
 use crate::deps::ExprItem;
 use crate::deps::expr::{Expr, ExprNodes, ExprTree};
 use crate::useflag::UseFlag;
-use TestExpression::{AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Item, Use};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum TestExpression<T> {

@@ -1,18 +1,9 @@
-pub mod cpv;
-pub mod metadata;
-pub mod names;
 mod requirement;
-pub mod slot;
-pub mod version;
 
-pub use requirement::AtomRequirement;
-
-use self::names::{CatName, PkgName};
-use self::slot::PackageSlot;
-use crate::repository::RepoName;
-use crate::{atom::Atom, package::cpv::CPV};
-use metadata::PackageMetadata;
 use std::{fmt, hash};
+
+use germ_pms::{Atom, CPV, CatName, PackageMetadata, PackageSlot, PkgName, RepoName};
+pub use requirement::AtomRequirement;
 
 /// Provides a trait for [`Package`] and [`InstalledPackage`] used for common operations
 /// like comparison and atom matching.
@@ -123,6 +114,8 @@ impl fmt::Display for Package {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::Atom;
+
     use super::*;
     use crate::test_support::{cpv, pkg, pkg_metadata};
     use crate::useflag::EffectiveUse;

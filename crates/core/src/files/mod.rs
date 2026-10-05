@@ -8,13 +8,15 @@ pub mod entry;
 mod linefile;
 pub mod pkgfile;
 
-use crate::atom::Atom;
-use crate::files::entry::SysAtom;
-use crate::useflag::UseFlag;
-use crate::utils;
+use std::fs;
+use std::path::Path;
+
 use anyhow::{Context, bail};
+use germ_pms::{Atom, UseFlag};
 use linefile::LineEntries;
-use std::{fs, path::Path};
+
+use crate::files::entry::SysAtom;
+use crate::utils;
 
 pub type PackageEntries = LineEntries<Atom>;
 pub type SysPackageEntries = LineEntries<SysAtom>;

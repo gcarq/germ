@@ -1,8 +1,10 @@
-use crate::package::slot::{PackageSlot, SlotName};
-use crate::package::version::{PackageVersion, matches_wildcard};
-use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+
+use rkyv::{Archive, Deserialize, Serialize};
+
+use crate::package::slot::{PackageSlot, SlotName};
+use crate::package::version::{PackageVersion, matches_wildcard};
 
 /// Defines how a versioned [`Atom`] matches a [`PackageVersion`].
 #[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]

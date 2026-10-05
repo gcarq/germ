@@ -1,6 +1,7 @@
+use germ_pms::Atom;
+
 use super::provider::PackageLookup;
 use super::{ResolutionOutcome, Resolver};
-use crate::atom::Atom;
 use crate::package::{Package, PackageView};
 use crate::policy::test_support::PolicyFixture;
 use crate::test_support::{cpv, pkg_metadata};

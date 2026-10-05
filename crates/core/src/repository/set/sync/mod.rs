@@ -3,13 +3,15 @@
 
 mod git;
 
-use self::git::GitSyncHandler;
-use crate::repository::RepoName;
-use crate::types::FxHashMap;
-use anyhow::{Context, anyhow, bail};
-use log::{debug, info};
 use std::fmt;
 use std::path::PathBuf;
+
+use anyhow::{Context, anyhow, bail};
+use germ_pms::RepoName;
+use log::{debug, info};
+
+use self::git::GitSyncHandler;
+use crate::types::FxHashMap;
 
 enum SyncType {
     Git,
@@ -122,9 +124,11 @@ pub trait SyncHandler: fmt::Debug + Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use ini::Ini;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use ini::Ini;
+
+    use super::*;
 
     #[derive(Debug, Default)]
     struct TestSyncHandler {
@@ -172,8 +176,9 @@ mod tests {
             auto_sync: false,
             sync_calls: AtomicUsize::new(0),
         };
-        handler.sync(&RepoName::default(), false).unwrap();
-        handler.sync(&RepoName::default(), true).unwrap();
+        let repo_name = "gentoo".parse().unwrap();
+        handler.sync(&repo_name, false).unwrap();
+        handler.sync(&repo_name, true).unwrap();
         assert_eq!(handler.sync_calls.load(Ordering::Relaxed), 1);
     }
 

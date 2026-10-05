@@ -1,7 +1,8 @@
-use crate::atom::Atom;
+use germ_pms::{Atom, Keyword};
+
 use crate::files::entry::Operation;
 use crate::files::pkgfile::{KeywordRule, PackageAcceptKeywords};
-use crate::keyword::{Keyword, KeywordSelector};
+use crate::keyword::KeywordSelector;
 use crate::package::PackageView;
 
 /// Immutable runtime policy that determines whether a package is accepted based on its keywords.

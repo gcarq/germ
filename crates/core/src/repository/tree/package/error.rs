@@ -1,9 +1,9 @@
 use anyhow::anyhow;
+use germ_pms::CPV;
 use thiserror::Error;
 
 use crate::ebuild::EbuildError;
 use crate::ebuild::handler::error::{MetadataGenerationError, PhaseExecutionError};
-use crate::package::cpv::CPV;
 use crate::repository::RepositoryError;
 
 /// Defines failures while resolving packages from repositories.
@@ -43,9 +43,11 @@ impl PackageResolutionError {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+    use std::path::PathBuf;
+
     use super::*;
     use crate::test_support::cpv;
-    use std::{io, path::PathBuf};
 
     #[test]
     fn test_promote() {

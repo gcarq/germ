@@ -1,15 +1,12 @@
 use std::process::ExitStatus;
 
+use germ_pms::{Eapi, PackageMetadataError};
 use thiserror::Error;
 
-use crate::eapi::Eapi;
-use crate::ebuild::EbuildError;
-use crate::package::metadata::PackageMetadataError;
-
-use super::protocol::FuncType;
-
 pub use super::ipc::IpcError;
+use super::protocol::FuncType;
 pub use super::protocol::ProtocolError;
+use crate::ebuild::EbuildError;
 
 /// Errors returned while handling an ebuild function call.
 #[derive(Error, Debug)]

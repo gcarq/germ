@@ -1,9 +1,10 @@
-use crate::atom::Atom;
+use germ_pms::Atom;
+use log::debug;
+
 use crate::files::PackageEntries;
 use crate::files::entry::{Entry, Operation, Precedence};
 use crate::package::PackageView;
 use crate::utils::Inherit;
-use log::debug;
 
 /// Simple DTO used to build [`PackageMasks`] from repo entries.
 #[derive(Default)]

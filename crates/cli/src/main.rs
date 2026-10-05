@@ -1,15 +1,17 @@
 mod commands;
 mod utils;
 
-use crate::commands::Command;
-use crate::utils::format_error;
+use std::num::NonZeroUsize;
+use std::path::PathBuf;
+use std::{io, process};
+
 use clap::Parser;
 use colored::{Color, Colorize};
 use germ_core::SysConf;
 use log::error;
-use std::num::NonZeroUsize;
-use std::path::PathBuf;
-use std::{io, process};
+
+use crate::commands::Command;
+use crate::utils::format_error;
 
 /// Package management tool for Gentoo-like systems.
 #[derive(Parser)]

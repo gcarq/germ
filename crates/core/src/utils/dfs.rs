@@ -1,5 +1,6 @@
-use crate::types::FxHashSet;
 use std::hash;
+
+use crate::types::FxHashSet;
 
 /// Holds the result of entering a node during traversal.
 pub enum Visit {

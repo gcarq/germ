@@ -1,8 +1,10 @@
-use crate::deps::{ExprItem, ExprKind};
-use crate::useflag::UseFlag;
+use std::ops::Range;
+
 use anyhow::{Context, bail};
 use rkyv::{Archive, Deserialize, Serialize};
-use std::ops::Range;
+
+use crate::deps::{ExprItem, ExprKind};
+use crate::useflag::UseFlag;
 
 /// Represents an arena entry, this can be an `Item` (USE Flag, Atom, URI, ...),
 /// an expression group or other variants defined in PMS 8.2.

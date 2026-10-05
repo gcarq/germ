@@ -1,9 +1,10 @@
+use germ_pms::Atom;
 use log::warn;
 
-use crate::atom::Atom;
 use crate::package::Package;
 use crate::repository::RepoSet;
-use crate::vdb::{Vdb, package::InstalledPackage};
+use crate::vdb::Vdb;
+use crate::vdb::package::InstalledPackage;
 
 /// Provides an interface to fetch packages needed for the resolver.
 pub trait PackageLookup {

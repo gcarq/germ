@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+use anyhow::Context;
+use log::debug;
+
 use crate::SysConf;
 use crate::files::entry::Precedence;
 use crate::files::pkgfile::{PackageAcceptKeywords, PackageUseRecords};
@@ -11,8 +14,6 @@ use crate::policy::useflag::{LocalRecords as UseLocalRecords, UsePolicy};
 use crate::profile::Profile;
 use crate::repository::RepoSet;
 use crate::utils::Inherit;
-use anyhow::Context;
-use log::debug;
 
 /// Responsible for loading and validation an existing portage configuration,
 /// usually located at `/etc/portage`.

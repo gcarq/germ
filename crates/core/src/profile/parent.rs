@@ -1,9 +1,12 @@
-use super::ProfileSource;
-use crate::repository::{RepoName, RepoSet};
-use crate::utils::is_blank_or_comment;
-use anyhow::{Context, anyhow, bail};
 use std::path::{Path, PathBuf};
 use std::{fmt, fs};
+
+use anyhow::{Context, anyhow, bail};
+use germ_pms::RepoName;
+
+use super::ProfileSource;
+use crate::repository::RepoSet;
+use crate::utils::is_blank_or_comment;
 
 /// Represents a parsed entry from a profile's `parent` file.
 /// This can be in multiple formats, depending on the profile format.

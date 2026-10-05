@@ -1,25 +1,20 @@
+use std::collections::BTreeMap;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+use std::{fmt, fs};
+
 use anyhow::bail;
-use fancy_regex::Regex;
+use germ_pms::EclassName;
 use log::trace;
 use rkyv::with::AsString;
 use rkyv::{Archive, Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt;
-use std::fs;
-use std::ops::Deref;
-use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
-
-/// Regex to validate eclass names according to PMS 3.1.6.
-static ECLASS_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[A-Za-z_][a-zA-Z0-9_.-]*$").unwrap());
 
 /// Contains all known eclasses, including inherited ones,
 /// and their repository lookup paths.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct Eclasses {
-    entries: BTreeMap<String, Eclass>,
+    entries: BTreeMap<EclassName, Eclass>,
     repo_paths: Vec<PathBuf>,
 }
 
@@ -56,7 +51,7 @@ impl Eclasses {
                 .file_type()
                 .ok()?
                 .is_file()
-                .then(|| Eclass::new(name.to_owned(), entry.path()))
+                .then(|| Eclass::new(name, entry.path()))
         });
 
         for eclass in entries {
@@ -98,17 +93,16 @@ impl Eclasses {
 }
 
 impl Deref for Eclasses {
-    type Target = BTreeMap<String, Eclass>;
+    type Target = BTreeMap<EclassName, Eclass>;
     fn deref(&self) -> &Self::Target {
         &self.entries
     }
 }
 
-/// Represents an eclass defined in PMS chapter 10.
-/// TODO: parse documentation
+/// Represents an resolved eclass with its name and path.
 #[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct Eclass {
-    pub name: String,
+    pub name: EclassName,
     #[rkyv(with = AsString)]
     pub path: PathBuf,
 }
@@ -117,22 +111,20 @@ impl Eclass {
     /// Creates a new [`Eclass`] from the given `name` and `path`.
     /// The name should not contain the `.eclass` suffix.
     /// Returns `Err` if `name` is invalid.
-    pub fn new(name: String, path: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(name: &str, path: PathBuf) -> anyhow::Result<Self> {
         trace!("Loading eclass '{name}' from '{}' ...", path.display());
         debug_assert!(
             !name.ends_with(".eclass"),
             "eclass name should not contain the .eclass suffix"
         );
-        if !ECLASS_RE.is_match(&name)? || name == "default" {
-            bail!("invalid eclass name: '{name}'");
-        }
+        let name = name.parse()?;
         Ok(Self { name, path })
     }
 }
 
 impl fmt::Display for Eclass {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.name)
+        f.write_str(self.name.as_str())
     }
 }
 
@@ -144,7 +136,7 @@ mod tests {
     fn test_eclass_new_ok() {
         let names = vec!["apache-module", "autotools", "kernel-2", "python-utils-r1"];
         for name in names {
-            let eclass = Eclass::new(name.into(), PathBuf::from("/path/to/eclass.eclass"));
+            let eclass = Eclass::new(name, PathBuf::from("/path/to/eclass.eclass"));
             assert!(eclass.is_ok(), "Eclass name '{name}' should be valid");
             assert_eq!(eclass.unwrap().to_string(), name);
         }
@@ -160,7 +152,7 @@ mod tests {
             "",
         ];
         for name in names {
-            let eclass = Eclass::new(name.into(), PathBuf::from("/path/to/eclass.eclass"));
+            let eclass = Eclass::new(name, PathBuf::from("/path/to/eclass.eclass"));
             assert!(eclass.is_err(), "Eclass name '{name}' should be invalid");
         }
     }

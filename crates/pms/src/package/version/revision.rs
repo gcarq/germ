@@ -1,14 +1,16 @@
-use super::numeric::NumericComponent;
-use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
+
+use rkyv::{Archive, Deserialize, Serialize};
+
+use super::numeric::NumericComponent;
 
 /// Represents a package revision.
 ///
 /// Revisions with different source spellings can compare equally,
 /// and an explicit revision 0 is equal to an omitted revision.
 ///
-/// For example `-r0302 == -r302`, `-r0` == None`.
+/// For example, `-r0302 == -r302`, and `-r0` equals an omitted revision.
 #[derive(Archive, Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PackageRevision(Option<NumericComponent>);
 

@@ -1,5 +1,8 @@
-use super::{PackageVersion, base::NumberComponent, numeric::NumericComponent};
 use std::iter;
+
+use super::PackageVersion;
+use super::base::NumberComponent;
+use super::numeric::NumericComponent;
 
 /// Represents a single component of a the complete version,
 /// this is necessary for correct atom wildcard matching.

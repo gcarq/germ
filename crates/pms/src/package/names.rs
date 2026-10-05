@@ -1,8 +1,12 @@
-use crate::grammar::{CATEGORY, PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
+use std::fmt;
+use std::str::FromStr;
+use std::sync::LazyLock;
+
 use anyhow::bail;
 use fancy_regex::Regex;
 use rkyv::{Archive, Deserialize, Serialize};
-use std::{fmt, str::FromStr, sync::LazyLock};
+
+use crate::grammar::{CATEGORY, PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
 
 /// Regex for category name validation.
 static CATEGORY_RE: LazyLock<Regex> =

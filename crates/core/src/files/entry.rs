@@ -1,10 +1,10 @@
-use crate::atom::Atom;
-use crate::useflag::UseFlag;
-use anyhow::bail;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::str::FromStr;
+
+use anyhow::bail;
+use germ_pms::{Atom, UseFlag};
 
 /// This trait abstracts a single value in a line-based file, such as `use.mask`.
 pub trait EntryValue:

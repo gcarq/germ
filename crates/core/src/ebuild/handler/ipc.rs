@@ -1,14 +1,16 @@
-use super::protocol::{EBUILD_MESSAGE_DELIMITER, FUNCTION_REPLY_DELIMITER};
-use crate::types::FxHashMap;
+use std::io;
+use std::os::fd::AsRawFd;
+
 use nix::errno::Errno;
 use nix::fcntl::{FcntlArg, FdFlag, OFlag, fcntl};
 use nix::unistd::pipe2;
-use std::io;
-use std::os::fd::AsRawFd;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::pipe::{Receiver, Sender};
 use tokio::process;
+
+use super::protocol::{EBUILD_MESSAGE_DELIMITER, FUNCTION_REPLY_DELIMITER};
+use crate::types::FxHashMap;
 
 /// Errors caused by ebuild IPC setup or I/O.
 #[derive(Error, Debug)]

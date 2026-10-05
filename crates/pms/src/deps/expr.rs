@@ -1,8 +1,9 @@
+use std::ops::Range;
+use std::{fmt, slice};
+
 use super::ExprItem;
 use super::parser::arena::{ExprArena, ExprEntry, ExprId};
 use crate::useflag::UseFlag;
-use std::ops::Range;
-use std::{fmt, slice};
 
 /// A borrowed view of [`ExprArena`].
 pub struct ExprTree<'a, T: ExprItem> {

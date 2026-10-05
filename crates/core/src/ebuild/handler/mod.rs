@@ -5,11 +5,9 @@ mod functions;
 mod ipc;
 mod protocol;
 
-use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
-use crate::ebuild::Ebuild;
-use crate::makenv::MakeEnv;
-use anyhow::anyhow;
+use std::fmt;
 
+use anyhow::anyhow;
 use env::EbuildEnv;
 use error::{FuncCallError, PhaseExecutionError};
 use exec::EbuildExecution;
@@ -18,7 +16,10 @@ use functions::{debug_print, die, resolve_eclass};
 use ipc::IpcHandler;
 use log::debug;
 use protocol::{EbuildMessage, FuncCall, FuncType, FunctionReply};
-use std::fmt;
+
+use crate::consts::{BASH_BINARY_PATH, SANDBOX_BINARY_PATH};
+use crate::ebuild::Ebuild;
+use crate::makenv::MakeEnv;
 
 /// Defines all implemented ebuild phases.
 pub enum EbuildPhase {
@@ -210,7 +211,8 @@ impl<'r> EbuildPhaseHandler<'r> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ebuild::handler::error::ProtocolError, types::FxHashMap};
+    use crate::ebuild::handler::error::ProtocolError;
+    use crate::types::FxHashMap;
 
     #[tokio::test]
     async fn test_abort_ipc_ordering() {

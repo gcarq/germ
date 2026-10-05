@@ -2,26 +2,26 @@ mod config;
 mod error;
 mod sync;
 
-use std::{cmp::Ordering, fs, io, path::Path, sync::Arc};
+use std::cmp::Ordering;
+use std::path::Path;
+use std::sync::Arc;
+use std::{fs, io};
 
-pub use self::error::RepoSetError;
+use anyhow::anyhow;
+use either::Either;
+use germ_pms::{Arch, Atom, RepoName};
+use log::{debug, error, warn};
 
 use self::config::RepoSetConfig;
+pub use self::error::RepoSetError;
 use self::sync::{SyncHandler, build_sync_handler};
-use super::Arch;
-use super::RepoName;
-use super::tree::PackageResult;
-use super::tree::{Repository, RepositoryError};
+use super::tree::{PackageResult, Repository, RepositoryError};
 use crate::SysConf;
-use crate::atom::Atom;
 use crate::package::PackageView;
 use crate::policy::pkgmask::RepositorySource;
 use crate::profile::Profile;
 use crate::types::{FxHashMap, FxIndexMap};
 use crate::utils::{DfsState, Inherit, Visit};
-use anyhow::anyhow;
-use either::Either;
-use log::{debug, error, warn};
 
 /// Resolves and handles all available [`Repository`] instances.
 ///

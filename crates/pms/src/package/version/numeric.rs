@@ -1,8 +1,9 @@
-use anyhow::bail;
-use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::str::FromStr;
 use std::{fmt, hash};
+
+use anyhow::bail;
+use rkyv::{Archive, Deserialize, Serialize};
 
 /// Represents a numeric value without a fixed width that uses numeric comparison.
 #[derive(Archive, Serialize, Deserialize, Clone, Debug)]

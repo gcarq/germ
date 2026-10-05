@@ -1,7 +1,8 @@
+use anyhow::{Context, bail};
+use germ_pms::UseFlag;
+
 use crate::makenv::{EnvValue, EnvVarName, MakeEnv};
 use crate::types::{FxHashMap, FxHashSet};
-use crate::useflag::UseFlag;
-use anyhow::{Context, bail};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum UseExpandKind {

@@ -18,6 +18,7 @@
 
 use std::fmt;
 use std::str::{FromStr, Utf8Error};
+
 use thiserror::Error;
 
 /// Field delimiter in messages from the ebuild process.

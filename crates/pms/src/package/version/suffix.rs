@@ -1,9 +1,11 @@
-use super::numeric::NumericComponent;
-use anyhow::{Context, anyhow, bail};
-use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::str::FromStr;
 use std::{fmt, hash};
+
+use anyhow::{Context, anyhow, bail};
+use rkyv::{Archive, Deserialize, Serialize};
+
+use super::numeric::NumericComponent;
 
 const SUFFIX_PREFIXES: [&str; 5] = ["alpha", "beta", "pre", "rc", "p"];
 

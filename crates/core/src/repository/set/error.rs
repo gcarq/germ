@@ -1,7 +1,7 @@
-use crate::repository::RepoName;
+use germ_pms::RepoName;
+use thiserror::Error;
 
 use super::super::tree::RepositoryError;
-use thiserror::Error;
 
 /// Defines failures for working with a repository set.
 #[derive(Debug, Error)]

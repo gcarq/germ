@@ -2,14 +2,16 @@ mod name;
 mod stack;
 mod value;
 
+use std::path::Path;
+
+pub use name::EnvVarName;
+pub use stack::MakeEnvStack;
+pub use value::EnvValue;
+
 use crate::files::content_from_path;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::UseExpandConfig;
 use crate::utils::{self, Inherit};
-pub use name::EnvVarName;
-pub use stack::MakeEnvStack;
-use std::path::Path;
-pub use value::EnvValue;
 
 /// List of variables that are incremental as per PMS section 5.3 and
 /// <https://github.com/gentoo/portage/blob/0783d820e6eecffa3adff52c4669fc715d65dbaa/lib/portage/const.py#L121>

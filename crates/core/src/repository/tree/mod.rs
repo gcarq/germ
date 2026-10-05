@@ -4,38 +4,37 @@ mod layout;
 mod package;
 mod profiles;
 
-pub use eclass::{Eclass, Eclasses};
-use either::Either;
-pub use error::RepositoryError;
-use futures_util::{StreamExt, TryStreamExt, stream};
-pub use layout::{Layout, LayoutError};
-pub use package::{PackageResolutionError, PackageResult};
-pub use profiles::{Arch, Arches, ProfileError};
-
-use self::package::discovery::{
-    resolve_from_category_path, resolve_from_pkg_path, resolve_from_repo_path,
-};
-use self::package::{CPVIndex, cache::MetadataCache};
-use self::profiles::ProfileDescriptions;
-use crate::SysConf;
-use crate::atom::Atom;
-use crate::eapi::Eapi;
-use crate::ebuild::Ebuild;
-use crate::files::{PackageEntries, entry::Precedence};
-use crate::package::PackageView;
-use crate::package::names::CatName;
-use crate::package::{Package, cpv::CPV};
-use crate::repository::RepoName;
-use crate::types::FxHashSet;
-use crate::utils::{Inherit, is_blank_or_comment};
-use anyhow::{Context, anyhow};
-use log::{debug, warn};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fmt, fs};
 
+use anyhow::{Context, anyhow};
+pub use eclass::{Eclass, Eclasses};
+use either::Either;
+pub use error::RepositoryError;
+use futures_util::{StreamExt, TryStreamExt, stream};
+use germ_pms::{Arch, Atom, CPV, CatName, RepoName};
+pub use layout::{Layout, LayoutError};
+use log::{debug, warn};
 pub use package::cache::CacheError;
+pub use package::{PackageResolutionError, PackageResult};
+pub use profiles::{Arches, ProfileError};
+
+use self::package::CPVIndex;
+use self::package::cache::MetadataCache;
+use self::package::discovery::{
+    resolve_from_category_path, resolve_from_pkg_path, resolve_from_repo_path,
+};
+use self::profiles::ProfileDescriptions;
+use crate::SysConf;
+use crate::eapi::read_eapi;
+use crate::ebuild::Ebuild;
+use crate::files::PackageEntries;
+use crate::files::entry::Precedence;
+use crate::package::{Package, PackageView};
+use crate::types::FxHashSet;
+use crate::utils::{Inherit, is_blank_or_comment};
 
 /// Represents an available ebuild repository.
 /// See https://projects.gentoo.org/pms/8/pms.html#x1-290004.1
@@ -65,7 +64,7 @@ impl Repository {
     ) -> Result<Self, RepositoryError> {
         let layout = Layout::from_path(&location.join("metadata").join("layout.conf"))?;
         let profiles = location.join("profiles");
-        let eapi = Eapi::from_eapi_file(&profiles.join("eapi")).map_err(ProfileError::from)?;
+        let eapi = read_eapi(&profiles.join("eapi")).map_err(ProfileError::from)?;
 
         let dir_support = eapi.supports_profile_file_dirs() || layout.supports_profile_file_dirs();
         let package_mask = PackageEntries::from_path(
@@ -391,9 +390,8 @@ impl Default for Repository {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use super::super::test_support::RepoBuilder;
+    use super::*;
     use crate::test_support::{cpv, pkg_metadata};
 
     #[tokio::test]
@@ -490,12 +488,9 @@ mod tests {
         )
         .unwrap();
 
-        let mut repository = Repository::load(
-            &RepoName::default(),
-            &location,
-            Arc::new(SysConf::default()),
-        )
-        .unwrap();
+        let repo_name = "gentoo".parse().unwrap();
+        let mut repository =
+            Repository::load(&repo_name, &location, Arc::new(SysConf::default())).unwrap();
         repository.finalize().unwrap();
 
         assert!(

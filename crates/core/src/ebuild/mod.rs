@@ -1,24 +1,23 @@
 pub mod handler;
 
-use crate::eapi::{Eapi, EapiError};
-
-use crate::ebuild::handler::error::MetadataGenerationError;
-use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
-use crate::makenv::MakeEnv;
-use crate::package::cpv::CPV;
-use crate::package::metadata::{PackageMetadata, RawPackageMetadata};
-use crate::repository::Repository;
-use crate::utils::is_blank_or_comment;
-
-use anyhow::anyhow;
-use fancy_regex::Regex;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::LazyLock;
+
+use anyhow::anyhow;
+use fancy_regex::Regex;
+use germ_pms::{CPV, Eapi, EapiError, PackageMetadata, RawPackageMetadata};
 use thiserror::Error;
+
+use crate::eapi::is_supported_for_ebuilds;
+use crate::ebuild::handler::error::MetadataGenerationError;
+use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
+use crate::makenv::MakeEnv;
+use crate::repository::Repository;
+use crate::utils::is_blank_or_comment;
 
 /// Regex for a PMS 7.3.1 EAPI declaration.
 static PMS_EAPI_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -70,7 +69,7 @@ impl<'r> Ebuild<'r> {
             .join(format!("{}.ebuild", cpv.pf()));
 
         let eapi = Self::parse_eapi(&path)?;
-        if !eapi.is_supported_for_ebuilds() {
+        if !is_supported_for_ebuilds(&eapi) {
             return Err(EbuildError::UnsupportedEapi(eapi));
         }
 
@@ -157,10 +156,9 @@ impl fmt::Display for Ebuild<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::repository::test_support::RepoBuilder;
     use crate::test_support::cpv;
-
-    use super::*;
 
     #[test]
     fn test_eapi_declarations() {

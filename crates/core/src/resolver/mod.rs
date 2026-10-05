@@ -8,17 +8,15 @@ mod state;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+use germ_pms::Atom;
 use log::info;
 
-pub use self::deps::DependencyField;
 pub use self::outcome::{
     CandidateRejectionReason, RejectedCandidate, RequirementFailure, ResolutionOutcome,
 };
 pub use self::plan::{ExecutionPlan, PackageOperation};
 pub use self::provider::{PackageLookup, PackageProvider};
-
 use self::state::ResolverState;
-use crate::atom::Atom;
 use crate::package::{AtomRequirement, Package};
 use crate::policy::PackagePolicy;
 use crate::useflag::EffectiveUse;
@@ -72,6 +70,8 @@ impl EffectivePackage {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::DependencyField;
+
     use super::test_support::{ResolverFixture, installed};
     use super::*;
     use crate::policy::PolicyRejection;

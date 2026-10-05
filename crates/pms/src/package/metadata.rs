@@ -1,15 +1,16 @@
+use std::borrow::Cow;
+use std::fmt;
+use std::str::FromStr;
+
+use fxhash::FxHashMap;
+use rkyv::{Archive, Deserialize, Serialize};
+use thiserror::Error;
+
 use crate::deps::{AtomDep, DepExpr, ExprItem, ExprKind, RequiredUseFlag};
 use crate::eapi::Eapi;
 use crate::keyword::Keyword;
 use crate::package::slot::PackageSlot;
-use crate::repository::Eclass;
-use crate::types::FxHashMap;
 use crate::useflag::IUseEntry;
-use rkyv::{Archive, Deserialize, Serialize};
-use std::borrow::Cow;
-use std::fmt;
-use std::str::FromStr;
-use thiserror::Error;
 
 /// Identifies metadata variable names.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -88,6 +89,28 @@ impl fmt::Display for MetaVar {
     }
 }
 
+/// Identifies the dependency field being evaluated.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DependencyField {
+    Depend,
+    BDepend,
+    IDepend,
+    RDepend,
+    PDepend,
+}
+
+impl fmt::Display for DependencyField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Depend => f.write_str("DEPEND"),
+            Self::BDepend => f.write_str("BDEPEND"),
+            Self::IDepend => f.write_str("IDEPEND"),
+            Self::RDepend => f.write_str("RDEPEND"),
+            Self::PDepend => f.write_str("PDEPEND"),
+        }
+    }
+}
+
 /// Errors returned when parsing package metadata variables.
 #[derive(Debug, Error)]
 pub enum PackageMetadataError {
@@ -134,7 +157,6 @@ pub struct PackageMetadata {
     idepend: DepExpr<AtomDep>,
     pdepend: DepExpr<AtomDep>,
     rdepend: DepExpr<AtomDep>,
-    eclasses: Vec<Eclass>,
 }
 
 impl PackageMetadata {
@@ -210,15 +232,11 @@ impl PackageMetadata {
         &self.rdepend
     }
 
-    pub fn eclasses(&self) -> &[Eclass] {
-        &self.eclasses
-    }
-
     /// Builds validated metadata from the given raw `variables`.
     ///
     /// Returns a [`PackageMetadataError`] if a required variable is missing or invalid.
     /// When `sourced_eapi` is given, the parsed EAPI must match it, see PMS 7.3.1.
-    pub(crate) fn from_raw(
+    pub fn from_raw(
         vars: &RawPackageMetadata<'_>,
         sourced_eapi: Option<Eapi>,
     ) -> Result<Self, PackageMetadataError> {
@@ -253,25 +271,24 @@ impl PackageMetadata {
                 .to_owned(),
             defined_phases: vars.words(MetaVar::DefinedPhases)?,
             iuse: vars.words(MetaVar::IUse)?,
-            required_use: vars.expression(eapi, ExprKind::RequiredUse, MetaVar::RequiredUse)?,
+            required_use: vars.expression(ExprKind::RequiredUse, MetaVar::RequiredUse)?,
             slot: vars
                 .required(MetaVar::Slot)?
                 .parse()
                 .map_err(|err| invalid(MetaVar::Slot, err))?,
-            depend: vars.expression(eapi, ExprKind::Dependency, MetaVar::Depend)?,
+            depend: vars.expression(ExprKind::Dependency, MetaVar::Depend)?,
             bdepend: eapi
                 .supports_bdepend()
-                .then(|| vars.expression(eapi, ExprKind::Dependency, MetaVar::BDepend))
+                .then(|| vars.expression(ExprKind::Dependency, MetaVar::BDepend))
                 .transpose()?
                 .unwrap_or_default(),
             idepend: eapi
                 .supports_idepend()
-                .then(|| vars.expression(eapi, ExprKind::Dependency, MetaVar::IDepend))
+                .then(|| vars.expression(ExprKind::Dependency, MetaVar::IDepend))
                 .transpose()?
                 .unwrap_or_default(),
-            pdepend: vars.expression(eapi, ExprKind::Dependency, MetaVar::PDepend)?,
-            rdepend: vars.expression(eapi, ExprKind::Dependency, MetaVar::RDepend)?,
-            eclasses: Vec::new(),
+            pdepend: vars.expression(ExprKind::Dependency, MetaVar::PDepend)?,
+            rdepend: vars.expression(ExprKind::Dependency, MetaVar::RDepend)?,
         })
     }
 }
@@ -320,13 +337,13 @@ impl fmt::Display for PackageMetadata {
 
 /// Raw metadata variables collected from a package metadata source.
 #[derive(Debug)]
-pub(crate) struct RawPackageMetadata<'a> {
+pub struct RawPackageMetadata<'a> {
     values: FxHashMap<Cow<'a, str>, Cow<'a, str>>,
 }
 
 impl<'a> RawPackageMetadata<'a> {
     /// Returns the value stored for the given metadata `var`, if any.
-    fn get(&self, var: MetaVar) -> Option<&str> {
+    pub fn get(&self, var: MetaVar) -> Option<&str> {
         self.values.get(var.name()).map(AsRef::as_ref)
     }
 
@@ -358,11 +375,10 @@ impl<'a> RawPackageMetadata<'a> {
     /// Parses the value of `var` as a dependency expression of the given `kind`.
     fn expression<T: ExprItem>(
         &self,
-        eapi: Eapi,
         kind: ExprKind,
         var: MetaVar,
     ) -> Result<DepExpr<T>, PackageMetadataError> {
-        DepExpr::parse(eapi, kind, optional(self.get(var))).map_err(|err| invalid(var, err))
+        DepExpr::parse(kind, optional(self.get(var))).map_err(|err| invalid(var, err))
     }
 }
 

@@ -1,7 +1,8 @@
-use anyhow::anyhow;
-use fancy_regex::Regex;
 use std::fmt;
 use std::sync::LazyLock;
+
+use anyhow::anyhow;
+use fancy_regex::Regex;
 
 /// Regex to capture variable references for expansion.
 static VAR_EXPAND_RE: LazyLock<Regex> =

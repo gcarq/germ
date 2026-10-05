@@ -1,38 +1,11 @@
-use std::fmt;
-
 use futures_util::future::LocalBoxFuture;
+use germ_pms::{Atom, AtomBlocker, AtomDep, DependencyField, Expr, ExprNodes};
 use log::debug;
 
-use super::EffectivePackage;
-use super::Resolver;
 use super::outcome::RequirementFailure;
 use super::provider::PackageLookup;
-use crate::atom::{Atom, AtomBlocker};
-use crate::deps::AtomDep;
-use crate::deps::expr::{Expr, ExprNodes};
+use super::{EffectivePackage, Resolver};
 use crate::package::{AtomRequirement, PackageView};
-
-/// Identifies the dependency field being evaluated.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DependencyField {
-    Depend,
-    BDepend,
-    IDepend,
-    RDepend,
-    PDepend,
-}
-
-impl fmt::Display for DependencyField {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Depend => f.write_str("DEPEND"),
-            Self::BDepend => f.write_str("BDEPEND"),
-            Self::IDepend => f.write_str("IDEPEND"),
-            Self::RDepend => f.write_str("RDEPEND"),
-            Self::PDepend => f.write_str("PDEPEND"),
-        }
-    }
-}
 
 impl<U: PackageLookup> Resolver<U> {
     /// Resolves every dependency field for the given `owner` [`EffectivePackage`].

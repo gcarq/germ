@@ -1,12 +1,12 @@
-use once_cell::sync::OnceCell;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
+use germ_pms::{CPV, PackageMetadata};
+use once_cell::sync::OnceCell;
 use redb::{Database, ReadableDatabase, TableDefinition};
 use rkyv::rancor;
 use thiserror::Error;
 
-use crate::package::{cpv::CPV, metadata::PackageMetadata};
 use crate::types::FxHashSet;
 
 const METADATA_CACHE_FILE: &str = "germ";

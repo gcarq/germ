@@ -1,12 +1,14 @@
+use std::sync::Arc;
+
 use anyhow::Context;
 use colored::Colorize;
 use germ_core::SysConf;
-use germ_core::atom::Atom;
 use germ_core::conf::portage::PortageConf;
 use germ_core::package::PackageView;
 use germ_core::repository::RepoSet;
-use germ_core::vdb::{Vdb, package::InstalledPackage};
-use std::sync::Arc;
+use germ_core::vdb::Vdb;
+use germ_core::vdb::package::InstalledPackage;
+use germ_pms::Atom;
 
 /// Prints system- and package information for all packages matching the given `Atom`.
 pub fn info(atom: Option<&Atom>, sysconf: &Arc<SysConf>) -> anyhow::Result<()> {

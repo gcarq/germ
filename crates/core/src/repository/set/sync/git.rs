@@ -1,10 +1,12 @@
+use std::collections::HashMap;
+use std::process::{Command, Output, Stdio};
+
+use anyhow::{Context, anyhow, bail};
+use log::{debug, info};
+
 use super::{SyncConfig, SyncHandler};
 use crate::consts::GIT_BINARY_PATH;
 use crate::types::FxHashMap;
-use anyhow::{Context, anyhow, bail};
-use log::{debug, info};
-use std::collections::HashMap;
-use std::process::{Command, Output, Stdio};
 
 #[derive(Debug)]
 pub struct GitSyncHandler {
@@ -276,11 +278,11 @@ impl GitSyncHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::repository::RepoName;
-    use crate::repository::test_support::RepoBuilder;
     use std::fs;
     use std::path::{Path, PathBuf};
+
+    use super::*;
+    use crate::repository::test_support::RepoBuilder;
 
     fn properties(location: &Path, sync_uri: &str) -> FxHashMap<String, String> {
         FxHashMap::from_iter([
@@ -374,7 +376,8 @@ mod tests {
             props.insert("clone-depth".into(), clone_depth.into());
 
             let handler = GitSyncHandler::new(&props).unwrap();
-            handler.sync(&RepoName::default(), false).unwrap();
+            let repo_name = "gentoo".parse().unwrap();
+            handler.sync(&repo_name, false).unwrap();
 
             let output = git_in(&dest, &["rev-parse", "--is-shallow-repository"]);
             assert_eq!(
@@ -393,7 +396,8 @@ mod tests {
         props.insert("clone-depth".into(), "0".into());
         props.insert("sync-depth".into(), "0".into());
         let handler = GitSyncHandler::new(&props).unwrap();
-        handler.sync(&RepoName::default(), false).unwrap();
+        let repo_name = "gentoo".parse().unwrap();
+        handler.sync(&repo_name, false).unwrap();
 
         fs::write(dest.join("MARKER"), "local commit").unwrap();
         commit_all(&dest, "local commit");
@@ -402,7 +406,7 @@ mod tests {
         commit_all(&work, "remote update");
         git_in(&work, &["push", "origin", "main"]);
 
-        handler.sync(&RepoName::default(), false).unwrap();
+        handler.sync(&repo_name, false).unwrap();
 
         assert_eq!(
             fs::read_to_string(dest.join("MARKER")).unwrap(),
@@ -427,12 +431,13 @@ mod tests {
         let mut init_props = properties(&destination, &origin_one_url);
         init_props.insert("clone-depth".into(), "0".into());
         let handler = GitSyncHandler::new(&init_props).unwrap();
-        handler.sync(&RepoName::default(), false).unwrap();
+        let repo_name = "gentoo".parse().unwrap();
+        handler.sync(&repo_name, false).unwrap();
 
         let mut new_props = properties(&destination, &origin_two_url);
         new_props.insert("sync-depth".into(), "0".into());
         let handler = GitSyncHandler::new(&new_props).unwrap();
-        handler.sync(&RepoName::default(), false).unwrap();
+        handler.sync(&repo_name, false).unwrap();
 
         let output = git_in(&destination, &["remote", "get-url", "origin"]);
         assert_eq!(

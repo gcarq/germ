@@ -1,13 +1,12 @@
 #![cfg_attr(test, allow(clippy::similar_names))]
 
-pub mod atom;
 pub mod conf;
 pub mod consts;
-pub mod deps;
+
 mod eapi;
 mod ebuild;
 mod files;
-mod grammar;
+
 mod keyword;
 pub mod makenv;
 pub mod package;

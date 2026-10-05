@@ -1,6 +1,7 @@
-use anyhow::{Context, anyhow};
 use std::fs;
 use std::path::Path;
+
+use anyhow::{Context, anyhow};
 
 /// Information about a deprecated profile.
 /// Contains the recommended profile to upgrade to and an additional info that is shown to the user.

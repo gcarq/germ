@@ -1,0 +1,14 @@
+[package]
+name = "germ-pms"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+fancy-regex.workspace = true
+fxhash.workspace = true
+rkyv.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

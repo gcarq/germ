@@ -1,7 +1,8 @@
+use thiserror::Error;
+
 use super::layout::LayoutError;
 use super::package::cache::CacheError;
 use super::profiles::ProfileError;
-use thiserror::Error;
 
 /// Defines failures while loading or accessing an available repository tree.
 #[derive(Debug, Error)]

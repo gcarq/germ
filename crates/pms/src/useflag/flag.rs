@@ -1,10 +1,12 @@
-use crate::grammar::USE_FLAG;
-use anyhow::bail;
-use fancy_regex::Regex;
-use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::LazyLock;
+
+use anyhow::bail;
+use fancy_regex::Regex;
+use rkyv::{Archive, Deserialize, Serialize};
+
+use crate::grammar::USE_FLAG;
 
 static USE_FLAG_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"\A{USE_FLAG}\z")).unwrap());

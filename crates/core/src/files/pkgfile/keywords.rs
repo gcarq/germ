@@ -1,11 +1,13 @@
-use std::{mem, path::Path};
+use std::mem;
+use std::path::Path;
+
+use anyhow::Context;
+use germ_pms::Atom;
 
 use super::{AtomPolicies, AtomPolicy};
-use crate::atom::Atom;
 use crate::files::entry::{Entry, EntryValue, Precedence};
 use crate::keyword::KeywordSelector;
 use crate::utils::Inherit;
-use anyhow::Context;
 
 /// Represents the content of a package accept keywords file.
 ///

@@ -1,12 +1,11 @@
-use crate::grammar::{REVISION, VERSION, VERSION_SUFFIXES};
-use crate::package::cpv::CPV;
-use crate::package::names::{CatName, PkgName};
-use crate::package::version::PackageVersion;
-use fancy_regex::Regex;
-use log::debug;
 use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
+
+use fancy_regex::Regex;
+use germ_pms::grammar::{REVISION, VERSION, VERSION_SUFFIXES};
+use germ_pms::{CPV, CatName, PackageVersion, PkgName};
+use log::debug;
 
 /// Regex to validate and parse `version`, `suffixes` and the `revision` from an ebuild file name.
 static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {

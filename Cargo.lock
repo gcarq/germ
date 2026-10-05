@@ -374,6 +374,7 @@ dependencies = [
  "either",
  "fern",
  "germ-core",
+ "germ-pms",
  "log",
  "tokio",
 ]
@@ -387,6 +388,7 @@ dependencies = [
  "fancy-regex",
  "futures-util",
  "fxhash",
+ "germ-pms",
  "indexmap",
  "log",
  "md-5",
@@ -400,6 +402,17 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "germ-pms"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "fancy-regex",
+ "fxhash",
+ "rkyv",
+ "thiserror",
 ]
 
 [[package]]

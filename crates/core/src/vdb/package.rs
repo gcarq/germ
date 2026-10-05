@@ -1,12 +1,14 @@
-use crate::package::metadata::{MetaVar, PackageMetadata};
-use crate::package::{PackageView, cpv::CPV};
-use crate::repository::RepoName;
-use crate::useflag::{EffectiveUse, UseFlag};
-use anyhow::Context;
 use std::cmp::Ordering;
 use std::path::Path;
 use std::str::FromStr;
 use std::{fmt, fs, hash, io};
+
+use anyhow::{Context, bail};
+use germ_pms::{CPV, MetaVar, PackageMetadata, RepoName, UseFlag};
+
+use crate::eapi::is_supported_for_ebuilds;
+use crate::package::PackageView;
+use crate::useflag::EffectiveUse;
 
 /// Represents a package that is currently installed on the system.
 #[derive(Debug, Clone)]
@@ -100,7 +102,11 @@ fn load_metadata(path: &Path) -> anyhow::Result<PackageMetadata> {
         .filter(|&var| *var != MetaVar::SrcUri)
         .map(|var| Ok((var.name(), read_meta(&path.join(var.name()))?)))
         .collect::<anyhow::Result<_>>()?;
-    Ok(PackageMetadata::from_raw(&vars, None)?)
+    let metadata = PackageMetadata::from_raw(&vars, None)?;
+    if !is_supported_for_ebuilds(&metadata.eapi()) {
+        bail!("EAPI {} is not supported for ebuilds", metadata.eapi());
+    }
+    Ok(metadata)
 }
 
 /// Reads the content of a metadata file at the given `path`.
@@ -149,6 +155,16 @@ mod tests {
             EffectiveUse::default(),
         );
         assert_eq!(pkg.to_string(), "app-editors/vim-7.0.174-r1::gentoo");
+    }
+
+    #[test]
+    fn test_load_metadata_unsupported_eapi() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("EAPI"), "6").unwrap();
+        fs::write(directory.path().join("DESCRIPTION"), "Test package").unwrap();
+        fs::write(directory.path().join("SLOT"), "0").unwrap();
+
+        assert!(load_metadata(directory.path()).is_err());
     }
 
     #[test]

@@ -1,19 +1,16 @@
 pub mod expr;
 mod parser;
 
-use crate::atom::{Atom, AtomBlocker};
-use crate::deps::expr::ExprTree;
-use crate::deps::parser::ExprParser;
-use crate::deps::parser::arena::{ExprArena, ExprEntry};
-use crate::eapi::Eapi;
-use crate::useflag::UseFlag;
-
-pub use expr::ExprEval;
-
-use anyhow::bail;
-use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+
+pub use expr::{Expr, ExprEval, ExprNodes, ExprTree};
+use rkyv::{Archive, Deserialize, Serialize};
+
+use crate::atom::{Atom, AtomBlocker};
+use crate::deps::parser::ExprParser;
+use crate::deps::parser::arena::{ExprArena, ExprEntry};
+use crate::useflag::UseFlag;
 
 /// Selects the expression context for validation.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -173,17 +170,13 @@ pub struct DepExpr<T: ExprItem> {
 }
 
 impl<T: ExprItem> DepExpr<T> {
-    /// Parses the given `input` using the EAPI and metadata expression context.
+    /// Parses `input` as an expression of the given [`ExprKind`].
     ///
     /// # Errors
     ///
-    /// Returns an error when the EAPI is not supported, when the input is syntactically invalid,
-    /// or when the parsed expression violates the context restrictions.
-    pub fn parse(eapi: Eapi, kind: ExprKind, input: &str) -> anyhow::Result<Self> {
-        if !eapi.is_supported_for_ebuilds() {
-            bail!("EAPI {eapi} is not supported for dependency expressions");
-        }
-
+    /// Returns an error when `input` is syntactically invalid or when the parsed expression
+    /// violates the context restrictions.
+    pub fn parse(kind: ExprKind, input: &str) -> anyhow::Result<Self> {
         if input.trim().is_empty() {
             return Ok(Self::default());
         }
@@ -264,20 +257,18 @@ mod tests {
 
     #[test]
     fn test_parse_empty() {
-        let expression =
-            DepExpr::<AtomDep>::parse(Eapi::Seven, ExprKind::Dependency, " \t").unwrap();
+        let expression = DepExpr::<AtomDep>::parse(ExprKind::Dependency, " \t").unwrap();
         assert_eq!(expression.to_string(), "");
     }
 
     #[test]
     fn test_parse_kinds() {
-        let eapi = Eapi::Eight;
         for (input, valid) in [
             ("!cat/pkg", true),
             ("!!cat/pkg", true),
             ("^^ ( cat/pkg cat/other )", false),
         ] {
-            let result = DepExpr::<AtomDep>::parse(eapi, ExprKind::Dependency, input);
+            let result = DepExpr::<AtomDep>::parse(ExprKind::Dependency, input);
             assert_eq!(result.is_ok(), valid, "dependency: {input}");
         }
 
@@ -290,7 +281,7 @@ mod tests {
             (ExprKind::Restrict, "( fetch mirror )", true),
             (ExprKind::Restrict, "|| ( fetch mirror )", false),
         ] {
-            let result = DepExpr::<RequiredUseFlag>::parse(eapi, kind, input);
+            let result = DepExpr::<RequiredUseFlag>::parse(kind, input);
             assert_eq!(result.is_ok(), valid, "{kind}: {input}");
         }
     }

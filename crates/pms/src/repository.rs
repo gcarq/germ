@@ -1,8 +1,13 @@
-use crate::grammar::{REPOSITORY, REVISION, VERSION, VERSION_SUFFIXES};
+use std::borrow::Borrow;
+use std::fmt;
+use std::str::FromStr;
+use std::sync::LazyLock;
+
 use anyhow::bail;
 use fancy_regex::Regex;
 use rkyv::{Archive, Deserialize, Serialize};
-use std::{borrow::Borrow, fmt, str::FromStr, sync::LazyLock};
+
+use crate::grammar::{REPOSITORY, REVISION, VERSION, VERSION_SUFFIXES};
 
 static REPO_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(

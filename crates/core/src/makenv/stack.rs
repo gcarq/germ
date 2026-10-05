@@ -1,10 +1,10 @@
 use anyhow::Context;
+use germ_pms::{Arch, UseFlag};
 
 use super::{EnvValue, IncrementalVars, MakeEnv};
 use crate::keyword::KeywordSelector;
-use crate::repository::Arch;
 use crate::types::{FxHashMap, FxHashSet};
-use crate::useflag::{UseExpandConfig, UseFlag};
+use crate::useflag::UseExpandConfig;
 
 /// Holds all make envs. They are split into global, profile,
 /// and user layers, which are folded into a final make env.

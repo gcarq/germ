@@ -1,19 +1,22 @@
 mod deprecation;
 mod parent;
 
-use crate::eapi::Eapi;
+use std::path::{Path, PathBuf};
+use std::{fmt, iter};
+
+use anyhow::{Context, bail};
+use log::warn;
+
+use crate::eapi::read_eapi;
+use crate::files::entry::Precedence;
 use crate::files::pkgfile::{PackageAcceptKeywords, PackageUseRecords};
-use crate::files::{PackageEntries, SysPackageEntries, UseEntries, entry::Precedence};
+use crate::files::{PackageEntries, SysPackageEntries, UseEntries};
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
 use crate::profile::parent::ParentEntry;
 use crate::repository::{RepoSet, Repository};
 use crate::useflag::UseExpandConfig;
 use crate::utils::{DfsState, Inherit};
-use anyhow::{Context, bail};
-use log::warn;
-use std::path::{Path, PathBuf};
-use std::{fmt, iter};
 
 /// Identifies a profile by its canonical path and owning repository.
 struct ProfileSource<'repo> {
@@ -108,7 +111,7 @@ impl Profile {
     /// The passed `order` must be the order in the inheritance chain.
     fn load(source: &ProfileSource<'_>, order: Precedence) -> anyhow::Result<Self> {
         let path = &source.path;
-        let eapi = Eapi::from_eapi_file(&path.join("eapi"))?;
+        let eapi = read_eapi(&path.join("eapi"))?;
         let recursive = eapi.supports_profile_file_dirs()
             || source.owning_repo.layout().supports_profile_file_dirs();
 
@@ -285,12 +288,12 @@ impl ProfileUseRecords {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
     use crate::files::entry::Entry;
     use crate::files::pkgfile::KeywordRule;
-
     use crate::repository::test_support::{RepoBuilder, repo_set};
-    use std::fs;
 
     fn profile_path(repository: &Path, profile: &str) -> PathBuf {
         repository.join("profiles").join(profile)

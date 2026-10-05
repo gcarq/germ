@@ -1,3 +1,5 @@
+use germ_pms::UseFlag;
+
 use super::PackagePolicy;
 use super::keyword::EffectiveKeywords;
 use super::pkgmask::{PackageMasks, PortageSource, RepositorySource};
@@ -8,7 +10,6 @@ use crate::files::pkgfile::PackageAcceptKeywords;
 use crate::keyword::KeywordSelector;
 use crate::profile::ProfileUseRecords;
 use crate::types::{FxHashMap, FxHashSet};
-use crate::useflag::UseFlag;
 
 /// Builds a [`PackagePolicy`] for tests.
 #[derive(Default)]

@@ -1,11 +1,13 @@
-use crate::repository::RepoName;
-use crate::types::FxHashMap;
-use crate::utils;
-use anyhow::{Context, anyhow, bail};
-use ini::Ini;
-use log::{debug, warn};
 use std::path::{Path, PathBuf};
 use std::{cmp, fs};
+
+use anyhow::{Context, anyhow, bail};
+use germ_pms::RepoName;
+use ini::Ini;
+use log::{debug, warn};
+
+use crate::types::FxHashMap;
+use crate::utils;
 
 // List of properties in repos.conf that are currently not supported.
 const UNSUPPORTED_CONF_PROPERTIES: &[&str] = &["aliases", "eclass-overrides", "force"];

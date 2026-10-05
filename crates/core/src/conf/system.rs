@@ -1,4 +1,6 @@
-use std::{num::NonZeroUsize, path::PathBuf, thread};
+use std::num::NonZeroUsize;
+use std::path::PathBuf;
+use std::thread;
 
 const PORTAGE_CONF_PATH: &str = "etc/portage";
 const DEFAULT_PORTAGE_CONF_PATH: &str = "usr/share/portage/config";

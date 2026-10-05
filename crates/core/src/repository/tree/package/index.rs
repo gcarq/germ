@@ -1,11 +1,9 @@
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use crate::atom::Atom;
-use crate::package::cpv::CPV;
-use crate::package::names::{CatName, PkgName};
-use crate::types::{FxHashMap, FxHashSet};
-
 use either::Either;
+use germ_pms::{Atom, CPV, CatName, PkgName};
+
+use crate::types::{FxHashMap, FxHashSet};
 
 /// Holds all available packages in a repository, grouped by category and package name.
 #[derive(Default, Debug)]

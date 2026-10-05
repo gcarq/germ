@@ -1,10 +1,12 @@
-use crate::grammar::SLOT;
-use anyhow::bail;
-use fancy_regex::Regex;
-use rkyv::{Archive, Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::LazyLock;
+
+use anyhow::bail;
+use fancy_regex::Regex;
+use rkyv::{Archive, Deserialize, Serialize};
+
+use crate::grammar::SLOT;
 
 static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"\A{SLOT}\z")).unwrap());
 

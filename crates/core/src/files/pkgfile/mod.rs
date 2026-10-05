@@ -1,14 +1,15 @@
 mod keywords;
 mod useflags;
 
+use std::path::Path;
+
+use anyhow::Context;
+use germ_pms::Atom;
 pub(crate) use keywords::{KeywordRule, PackageAcceptKeywords};
 pub(crate) use useflags::{PackageUseRecords, UseFlags};
 
-use anyhow::Context;
-use std::path::Path;
-
-use crate::atom::Atom;
-use crate::files::{content_from_path, entry::Precedence};
+use crate::files::content_from_path;
+use crate::files::entry::Precedence;
 use crate::types::FxIndexMap;
 use crate::utils::{Inherit, strip_line_comment};
 
@@ -74,8 +75,9 @@ impl<T: AtomPolicy + Clone> Inherit for AtomPolicies<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::{fs, mem};
+
+    use super::*;
 
     #[derive(Clone, Debug, Default, Eq, PartialEq)]
     struct TestPolicy(Vec<Box<str>>);

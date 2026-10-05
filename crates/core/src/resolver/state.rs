@@ -1,13 +1,12 @@
 use std::cmp::Ordering;
 
+use germ_pms::{Atom, CPV, RepoName};
 use log::info;
 
 use super::outcome::{RequirementFailure, ResolutionOutcome};
 use super::{EffectivePackage, ExecutionPlan, PackageOperation};
-use crate::atom::Atom;
-use crate::package::{AtomRequirement, Package, PackageView, cpv::CPV};
+use crate::package::{AtomRequirement, Package, PackageView};
 use crate::policy::PolicyRejection;
-use crate::repository::RepoName;
 use crate::types::{FxIndexMap, FxIndexSet};
 use crate::vdb::package::InstalledPackage;
 

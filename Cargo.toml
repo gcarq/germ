@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/cli", "crates/core"]
+members = ["crates/cli", "crates/core", "crates/pms"]
 default-members = ["crates/cli"]
 resolver = "3"
 
@@ -21,6 +21,7 @@ md-5 = { version = "0.11.0", default-features = false }
 nix = { version = "0.31.3", default-features = false, features = ["fs", "process", "signal"] }
 once_cell = { version = "1.21.4", default-features = false, features = ["std"] }
 germ-core = { path = "crates/core" }
+germ-pms = { path = "crates/pms" }
 redb = { version = "4.3.0", default-features = false }
 rayon = { version = "1.12.0", default-features = false }
 fancy-regex = { version = "0.19.2", default-features = false, features = ["perf", "std"] }

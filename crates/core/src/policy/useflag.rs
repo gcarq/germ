@@ -1,14 +1,14 @@
-use crate::atom::Atom;
+use anyhow::Context;
+use germ_pms::{Atom, ExprEval, IUseEntry, IUseState, RequiredUseFlag, UseFlag};
 
-use crate::deps::{ExprEval, RequiredUseFlag};
+use crate::files::UseEntries;
+use crate::files::entry::Entry;
 use crate::files::pkgfile::{PackageUseRecords, UseFlags};
-use crate::files::{UseEntries, entry::Entry};
 use crate::package::PackageView;
 use crate::profile::ProfileUseRecords;
 use crate::types::{FxHashMap, FxHashSet};
-use crate::useflag::{EffectiveUse, IUseEntry, IUseState, UseExpandConfig, UseFlag};
+use crate::useflag::{EffectiveUse, UseExpandConfig};
 use crate::utils::Inherit;
-use anyhow::Context;
 
 /// Simple DTO used to build [`UsePolicy`] from user configured USE entries.
 #[derive(Default)]
@@ -255,9 +255,9 @@ impl ExprEval<RequiredUseFlag> for ReqUseEval<'_> {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::{DepExpr, ExprKind};
+
     use super::*;
-    use crate::deps::{DepExpr, ExprKind};
-    use crate::eapi::Eapi;
     use crate::files::entry::Precedence;
     use crate::makenv::{MakeEnv, MakeEnvStack};
     use crate::package::Package;
@@ -309,8 +309,7 @@ mod tests {
         let bar = UseFlag::new("bar")?;
         let available = FxHashSet::from_iter([foo.clone(), bar.clone()]);
         for (input, foo_state, bar_state, expected) in cases {
-            let expr =
-                DepExpr::<RequiredUseFlag>::parse(Eapi::Eight, ExprKind::RequiredUse, input)?;
+            let expr = DepExpr::<RequiredUseFlag>::parse(ExprKind::RequiredUse, input)?;
             let state = EffectiveUse::from_parts(
                 available.clone(),
                 [(&foo, foo_state), (&bar, bar_state)]

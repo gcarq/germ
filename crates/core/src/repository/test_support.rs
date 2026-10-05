@@ -1,15 +1,14 @@
-use std::{
-    collections::{BTreeMap, HashSet},
-    fs, io,
-    ops::{Deref, DerefMut},
-    path::{Path, PathBuf},
-};
+use std::collections::{BTreeMap, HashSet};
+use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use anyhow::{Context, bail};
+use germ_pms::RepoName;
 
 use super::{RepoSet, Repository};
+use crate::SysConf;
 use crate::types::FxHashSet;
-use crate::{SysConf, repository::RepoName};
 
 /// Owns a temporary directory together with a value that depends on it.
 pub struct Temp<T> {
@@ -53,7 +52,6 @@ fn write_file(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<
     fs::write(path, contents)
 }
 
-#[derive(Default)]
 pub struct RepoBuilder {
     repo_name: RepoName,
     repos_conf: BTreeMap<String, String>,
@@ -76,7 +74,15 @@ impl RepoBuilder {
     pub fn new(repo_name: impl Into<String>) -> Self {
         Self {
             repo_name: repo_name.into().parse().expect("invalid repository name"),
-            ..Default::default()
+            repos_conf: BTreeMap::new(),
+            masters: None,
+            formats: None,
+            eapi: None,
+            profiles: Vec::new(),
+            entries: Vec::new(),
+            categories: FxHashSet::default(),
+            eclasses: Vec::new(),
+            ebuilds: Vec::new(),
         }
     }
 

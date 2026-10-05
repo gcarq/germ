@@ -1,10 +1,11 @@
 pub mod version;
 
+use anyhow::anyhow;
+use log::{debug, warn};
+
 use crate::ebuild::handler::error::{FuncCallError, PhaseExecutionError};
 use crate::ebuild::handler::protocol::FunctionReply;
 use crate::repository::Repository;
-use anyhow::anyhow;
-use log::{debug, warn};
 
 /// Logs the given `args` using `debug!()`.
 pub fn debug_print(args: &[String]) -> FunctionReply {
@@ -46,15 +47,17 @@ pub fn resolve_eclass(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use germ_pms::Eapi;
+
     use super::*;
-    use crate::eapi::Eapi;
     use crate::ebuild::Ebuild;
     use crate::ebuild::handler::protocol::{FuncCall, FuncType};
     use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
     use crate::makenv::MakeEnv;
     use crate::repository::test_support::{RepoBuilder, repo_set};
     use crate::test_support::cpv;
-    use std::path::PathBuf;
 
     fn with_handler(eapi: Eapi, test: impl FnOnce(&EbuildPhaseHandler)) {
         let reposet = repo_set(vec![RepoBuilder::new("repo")]).unwrap();

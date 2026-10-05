@@ -1,7 +1,9 @@
+use core::hash;
+use std::cmp::Ordering;
+use std::fmt;
+
 use crate::package::names::{CatName, PkgName};
 use crate::package::version::PackageVersion;
-use core::hash;
-use std::{cmp::Ordering, fmt};
 
 /// Represents a simplified form of a package only with its category, name and version.
 ///

@@ -1,6 +1,13 @@
 mod constraints;
 
-pub use constraints::SlotConstraint;
+use std::fmt::{self, Write};
+use std::str::FromStr;
+use std::sync::LazyLock;
+
+use anyhow::{Context, anyhow, bail};
+pub use constraints::{SlotConstraint, VersionConstraint};
+use fancy_regex::{Captures, Regex};
+use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::grammar::{CATEGORY, PACKAGE, REPOSITORY, REVISION, VERSION, VERSION_SUFFIXES};
 use crate::package::cpv::CPV;
@@ -8,13 +15,6 @@ use crate::package::names::{CatName, PkgName};
 use crate::package::version::PackageVersion;
 use crate::repository::RepoName;
 use crate::useflag::UseDep;
-use anyhow::{Context, anyhow, bail};
-use constraints::VersionConstraint;
-use fancy_regex::{Captures, Regex};
-use rkyv::{Archive, Deserialize, Serialize};
-use std::fmt::{self, Write};
-use std::str::FromStr;
-use std::sync::LazyLock;
 
 static ATOM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(

@@ -1,5 +1,8 @@
+use std::borrow::Borrow;
+use std::fmt;
+use std::str::FromStr;
+
 use anyhow::bail;
-use std::{borrow::Borrow, fmt, str::FromStr};
 
 /// Holds a validated make variable name.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

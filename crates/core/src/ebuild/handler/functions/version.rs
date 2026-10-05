@@ -1,8 +1,9 @@
-use crate::ebuild::handler::protocol::FunctionReply;
-use crate::package::cpv::CPV;
-use crate::package::version::PackageVersion;
-use anyhow::bail;
 use std::cmp::Ordering;
+
+use anyhow::bail;
+use germ_pms::{CPV, PackageVersion};
+
+use crate::ebuild::handler::protocol::FunctionReply;
 
 /// Implements the `ver_cut` function for ebuilds that extracts version components,
 /// e.g.: `"ver_cut 1-2 1.2.3" -> "1.2"`.
@@ -192,9 +193,8 @@ fn parse_range(range: &str, max: usize) -> anyhow::Result<(usize, usize)> {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_support::cpv;
-
     use super::*;
+    use crate::test_support::cpv;
 
     #[test]
     fn test_ver_cut_ok() {

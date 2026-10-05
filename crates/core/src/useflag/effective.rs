@@ -1,7 +1,7 @@
-use crate::types::FxHashSet;
 use anyhow::bail;
+use germ_pms::UseFlag;
 
-use super::UseFlag;
+use crate::types::FxHashSet;
 
 /// Final USE state of one package.
 #[derive(Debug, Clone, Eq, PartialEq)]

@@ -1,10 +1,12 @@
-use super::numeric::NumericComponent;
-use anyhow::{anyhow, bail};
-use rkyv::{Archive, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::Write;
 use std::str::FromStr;
 use std::{fmt, hash};
+
+use anyhow::{anyhow, bail};
+use rkyv::{Archive, Deserialize, Serialize};
+
+use super::numeric::NumericComponent;
 
 /// Represents the base version number as individual components and an optional letter suffix.
 #[derive(Archive, Serialize, Deserialize, Clone, Eq, Debug)]
@@ -286,10 +288,10 @@ mod tests {
 
     #[test]
     fn test_number_component_ordering() {
-        let alpha03 = NumberComponent::Alphabetic("03".into());
-        let alpha3 = NumberComponent::Alphabetic("3".into());
+        let leading_zero = NumberComponent::Alphabetic("03".into());
+        let no_leading_zero = NumberComponent::Alphabetic("3".into());
 
-        assert!(alpha03 < alpha3); // Alphabetic components compare as ASCII
+        assert!(leading_zero < no_leading_zero); // Alphabetic components compare as ASCII
     }
 
     #[test]

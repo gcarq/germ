@@ -1,8 +1,9 @@
+use std::path::PathBuf;
+use std::{fs, io};
+
 use tempfile::{TempDir, tempdir};
 
 use super::Vdb;
-use std::path::PathBuf;
-use std::{fs, io};
 
 /// Holds a temporary VDB filesystem fixture.
 pub struct VdbFixture {
