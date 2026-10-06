@@ -4,11 +4,11 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-germ-pms.workspace = true
 anyhow.workspace = true
 either.workspace = true
 futures-util.workspace = true
 fxhash.workspace = true
+germ-pms.workspace = true
 indexmap.workspace = true
 log.workspace = true
 md-5.workspace = true

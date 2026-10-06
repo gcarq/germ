@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::types::FxHashSet;
 
-const METADATA_CACHE_FILE: &str = "germ";
+const METADATA_CACHE_FILE: &str = "cache.redb";
 const METADATA_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("metadata");
 
 /// Errors that can occur while interacting with the metadata cache.

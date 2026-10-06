@@ -5,6 +5,7 @@ mod package;
 mod profiles;
 
 use std::hash::{Hash, Hasher};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fmt, fs};
@@ -34,7 +35,7 @@ use crate::files::PackageEntries;
 use crate::files::entry::Precedence;
 use crate::package::{Package, PackageView};
 use crate::types::FxHashSet;
-use crate::utils::{Inherit, is_blank_or_comment};
+use crate::utils::{Inherit, is_blank_or_comment, md5sum};
 
 /// Represents an available ebuild repository.
 /// See https://projects.gentoo.org/pms/8/pms.html#x1-290004.1
@@ -81,10 +82,17 @@ impl Repository {
         .map_err(|err| ProfileError::from(err.context("unable to load package.unmask")))?;
 
         let name = Self::resolve_repo_name(name, &layout, &profiles)?;
+        let metadata_dir =
+            Self::gen_metadata_dir(sysconf.cache_dir(), &name, location).map_err(|err| {
+                RepositoryError::Data(err.context(format!(
+                    "unable to generate metadata dir for {}",
+                    location.display()
+                )))
+            })?;
 
         Ok(Self {
             location: location.to_owned(),
-            metadata_cache: MetadataCache::new(&location.join("cache")),
+            metadata_cache: MetadataCache::new(&metadata_dir),
             known_categories: FxHashSet::default(),
             eclasses: Eclasses::empty(location),
             supported_arches: Arches::from_path(&profiles.join("arch.list"))?,
@@ -300,6 +308,24 @@ impl Repository {
         self.cpv_index.update(atom, cpvs);
     }
 
+    /// Returns the metadata cache directory for `name` and `repo_location`.
+    ///
+    /// The directory is generated based on the repo name
+    /// and the canonicalized repo path.
+    fn gen_metadata_dir(
+        cache_dir: &Path,
+        name: &RepoName,
+        repo_location: &Path,
+    ) -> anyhow::Result<PathBuf> {
+        let hash = md5sum(fs::canonicalize(repo_location)?.as_os_str().as_bytes())?;
+        let path = cache_dir.join(name.as_str()).join(hash);
+        debug!(
+            "Generated metadata cache directory for {name} at {}",
+            path.display()
+        );
+        Ok(path)
+    }
+
     /// Resolves the repo name and validates it against `profiles/repo_name` and `layout.conf`.
     ///
     /// The given `name` should be the name of the repository as defined in `repos.conf`.
@@ -367,13 +393,19 @@ impl fmt::Display for Repository {
 #[cfg(test)]
 impl Default for Repository {
     fn default() -> Self {
+        use crate::conf::test_support::build_sysconf;
+
         let temp_dir = tempfile::Builder::new()
             .tempdir()
             .expect("failed to create temp dir");
-        let metadata_cache = MetadataCache::new(&temp_dir.path().join("metadata"));
+        let sysconf = build_sysconf(&temp_dir);
+
+        let name = "repo".parse().unwrap();
+        let location = temp_dir.path();
+        let metadata_dir = Repository::gen_metadata_dir(sysconf.cache_dir(), &name, location)
+            .expect("failed to generate metadata dir");
         Self {
-            name: "repo".parse().unwrap(),
-            location: temp_dir.path().to_owned(),
+            location: location.to_path_buf(),
             layout: Layout::default(),
             known_categories: FxHashSet::default(),
             package_mask: PackageEntries::default(),
@@ -382,8 +414,9 @@ impl Default for Repository {
             supported_arches: Arches::default(),
             profiles_desc: ProfileDescriptions::default(),
             cpv_index: CPVIndex::default(),
-            sysconf: SysConf::default().into(),
-            metadata_cache,
+            metadata_cache: MetadataCache::new(&metadata_dir),
+            sysconf: sysconf.into(),
+            name,
         }
     }
 }
@@ -392,6 +425,7 @@ impl Default for Repository {
 mod tests {
     use super::super::test_support::RepoBuilder;
     use super::*;
+    use crate::conf::test_support::build_sysconf;
     use crate::test_support::{cpv, pkg_metadata};
 
     #[tokio::test]
@@ -489,8 +523,8 @@ mod tests {
         .unwrap();
 
         let repo_name = "gentoo".parse().unwrap();
-        let mut repository =
-            Repository::load(&repo_name, &location, Arc::new(SysConf::default())).unwrap();
+        let sysconf = Arc::new(build_sysconf(&temp));
+        let mut repository = Repository::load(&repo_name, &location, sysconf).unwrap();
         repository.finalize().unwrap();
 
         assert!(

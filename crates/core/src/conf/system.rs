@@ -1,5 +1,5 @@
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 const PORTAGE_CONF_PATH: &str = "etc/portage";
@@ -11,15 +11,18 @@ const VDB_PATH: &str = "var/db/pkg";
 pub struct SysConf {
     /// Root path to configuration files, usually `/`.
     config_root: PathBuf,
+    /// Application cache directory.
+    cache_dir: PathBuf,
     /// Maximum number of isolated ebuild requests that may run concurrently.
     ebuild_jobs: NonZeroUsize,
 }
 
 impl SysConf {
-    pub fn new(config_root: PathBuf) -> Self {
+    pub fn new(config_root: PathBuf, cache_dir: PathBuf) -> Self {
         Self {
             config_root,
-            ..Self::default()
+            cache_dir,
+            ebuild_jobs: thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
         }
     }
 
@@ -46,19 +49,15 @@ impl SysConf {
         self.config_root.join(VDB_PATH)
     }
 
+    /// Returns the application cache directory.
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
+    }
+
     /// Returns the maximum number of isolated ebuild requests
     /// that may run concurrently.
     pub const fn ebuild_jobs(&self) -> usize {
         self.ebuild_jobs.get()
-    }
-}
-
-impl Default for SysConf {
-    fn default() -> Self {
-        Self {
-            config_root: PathBuf::from("/"),
-            ebuild_jobs: thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
-        }
     }
 }
 
@@ -68,12 +67,15 @@ mod tests {
 
     #[test]
     fn test_portage_paths() {
-        let temp = tempfile::tempdir().unwrap();
-        let config = SysConf::new(temp.path().to_path_buf());
-        assert_eq!(config.portage_conf(), temp.path().join(PORTAGE_CONF_PATH));
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_root = temp_dir.path().to_path_buf();
+        let cache_dir = temp_dir.path().join("cache");
+        let config = SysConf::new(config_root.clone(), cache_dir.clone());
+        assert_eq!(config.portage_conf(), config_root.join(PORTAGE_CONF_PATH));
+        assert_eq!(config.cache_dir(), cache_dir.as_path());
         assert_eq!(
             config.default_portage_conf(),
-            temp.path().join(DEFAULT_PORTAGE_CONF_PATH)
+            config_root.join(DEFAULT_PORTAGE_CONF_PATH)
         );
     }
 }

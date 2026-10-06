@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use germ_pms::RepoName;
 
 use super::{RepoSet, Repository};
-use crate::SysConf;
+use crate::conf::test_support::build_sysconf;
 use crate::types::FxHashSet;
 
 /// Owns a temporary directory together with a value that depends on it.
@@ -250,12 +250,13 @@ impl RepoBuilder {
     /// Writes and loads a repository in an owned temporary directory.
     pub fn finalize(self) -> anyhow::Result<Temp<Repository>> {
         let temp_dir = tempfile::tempdir().context("failed to create temp dir")?;
+        let sysconf = build_sysconf(&temp_dir);
         let name = self.repo_name.clone();
         let location = temp_dir.path().join(name.as_str());
 
         self.write_to(&location)
             .with_context(|| format!("failed to write repository '{name}'"))?;
-        let repository = Repository::load(&name, &location, SysConf::default().into())?;
+        let repository = Repository::load(&name, &location, sysconf.into())?;
         Ok(Temp::new(repository, temp_dir))
     }
 }
@@ -265,6 +266,7 @@ impl RepoBuilder {
 /// The returned [`Temp`] keeps the repositories' temporary filesystem alive.
 pub fn repo_set(repos: impl IntoIterator<Item = RepoBuilder>) -> anyhow::Result<Temp<RepoSet>> {
     let temp = tempfile::tempdir().context("failed to create temp dir")?;
+    let sysconf = build_sysconf(&temp);
     let mut names = HashSet::new();
     let mut conf = String::new();
 
@@ -285,7 +287,6 @@ pub fn repo_set(repos: impl IntoIterator<Item = RepoBuilder>) -> anyhow::Result<
             .with_context(|| format!("failed to write repository '{name}'"))?;
     }
 
-    let sysconf = SysConf::new(temp.path().to_path_buf());
     let repos_conf = sysconf.portage_conf().join("repos.conf");
     write_file(repos_conf, conf).context("failed to write repos.conf")?;
     let reposet = RepoSet::new(sysconf.into())?;

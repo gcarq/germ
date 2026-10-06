@@ -39,8 +39,7 @@ pub trait Inherit {
     }
 }
 
-/// Calculates and returns the MD5 hash of the given `file` as a hexadecimal `String`.
-#[allow(unused)]
+/// Calculates and returns the MD5 hash of the given `data` as a hexadecimal `String`.
 pub fn md5sum(data: &[u8]) -> anyhow::Result<String> {
     let hash = Md5::digest(data);
     let mut checksum = String::with_capacity(hash.len() * 2);

@@ -27,7 +27,7 @@ use crate::utils::{DfsState, Inherit, Visit};
 ///
 /// It gets configured via `repos.conf` that usually resides in `/etc/portage/`.
 /// See <https://dev.gentoo.org/~zmedico/portage/doc/man/portage.5.html>
-#[cfg_attr(test, derive(Default, Debug))]
+#[derive(Debug)]
 pub struct RepoSet {
     sysconf: Arc<SysConf>,
     config: RepoSetConfig,
@@ -384,6 +384,7 @@ impl RepoSet {
 mod tests {
     use super::super::test_support::{RepoBuilder, repo_set};
     use super::*;
+    use crate::conf::test_support::build_sysconf;
     use crate::files::entry::Precedence;
 
     #[test]
@@ -457,7 +458,7 @@ mod tests {
         let temp = tempfile::Builder::new().tempdir().unwrap();
         let location = temp.path().join("repository");
         RepoBuilder::new("repo").write_to(&location).unwrap();
-        let sysconf = SysConf::new(temp.path().to_path_buf());
+        let sysconf = build_sysconf(&temp);
         fs::create_dir_all(sysconf.portage_conf()).unwrap();
         let config = sysconf.portage_conf().join("repos.conf");
         fs::write(
@@ -486,7 +487,7 @@ mod tests {
     #[test]
     fn test_missing_repository() {
         let temp = tempfile::Builder::new().tempdir().unwrap();
-        let sysconf = SysConf::new(temp.path().to_path_buf());
+        let sysconf = build_sysconf(&temp);
         fs::create_dir_all(sysconf.portage_conf()).unwrap();
         let config = sysconf.portage_conf().join("repos.conf");
         fs::write(

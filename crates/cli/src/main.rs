@@ -5,6 +5,7 @@ use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::{io, process};
 
+use anyhow::anyhow;
 use clap::Parser;
 use colored::{Color, Colorize};
 use germ_core::SysConf;
@@ -43,7 +44,13 @@ async fn main() {
     };
     setup_logger(log_level).expect("unable to setup logger");
 
-    let sysconf = build_sysconf(&args).into();
+    let sysconf = match build_sysconf(&args) {
+        Ok(sysconf) => sysconf.into(),
+        Err(err) => {
+            error!("{}", format_error(&err));
+            process::exit(1);
+        }
+    };
     if let Err(err) = commands::execute(&args, sysconf).await {
         error!("{}", format_error(&err));
         process::exit(1);
@@ -51,12 +58,15 @@ async fn main() {
 }
 
 /// Builds a [`SysConf`] from the given clap `args`.
-fn build_sysconf(args: &Args) -> SysConf {
-    let mut sysconf = SysConf::new(args.config_root.clone());
+fn build_sysconf(args: &Args) -> anyhow::Result<SysConf> {
+    let cache_dir = xdg::BaseDirectories::with_prefix("germ")
+        .get_cache_home()
+        .ok_or_else(|| anyhow!("unable to determine XDG cache directory"))?;
+    let mut sysconf = SysConf::new(args.config_root.clone(), cache_dir);
     if let Some(jobs) = args.jobs {
         sysconf = sysconf.with_ebuild_jobs(jobs);
     }
-    sysconf
+    Ok(sysconf)
 }
 
 /// Sets up application logger with the given `log_level`.

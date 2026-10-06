@@ -12,7 +12,7 @@ use crate::utils;
 // List of properties in repos.conf that are currently not supported.
 const UNSUPPORTED_CONF_PROPERTIES: &[&str] = &["aliases", "eclass-overrides", "force"];
 
-#[cfg_attr(test, derive(Default, Debug))]
+#[derive(Debug)]
 pub struct RepoSetConfig {
     repo_confs: Vec<RepositoryConfig>,
 }
@@ -67,8 +67,7 @@ impl RepoSetConfig {
 }
 
 /// Represents the configuration of a single repository from `repos.conf`.
-#[derive(Clone)]
-#[cfg_attr(test, derive(Debug))]
+#[derive(Clone, Debug)]
 pub struct RepositoryConfig {
     // The path to the repository on the filesystem
     pub location: PathBuf,

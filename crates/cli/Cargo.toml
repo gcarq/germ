@@ -9,10 +9,11 @@ clap.workspace = true
 colored.workspace = true
 either.workspace = true
 fern.workspace = true
-log.workspace = true
 germ-core.workspace = true
 germ-pms.workspace = true
+log.workspace = true
 tokio.workspace = true
+xdg.workspace = true
 
 [lints]
 workspace = true
