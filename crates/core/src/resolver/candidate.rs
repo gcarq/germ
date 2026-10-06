@@ -27,6 +27,23 @@ impl<U: PackageLookup> Resolver<U> {
 
         let mut rejected = Vec::new();
         for pkg in pkgs {
+            let key = PackageKey::new(&pkg);
+
+            if let Some(rejection) = self.state.rejection(&key).copied() {
+                trace!("skipping {}: cached rejection {rejection}", pkg.cpv());
+                rejected.push(RejectedCandidate::policy(pkg, rejection));
+                continue;
+            }
+
+            if self.state.is_selected(&key) || self.state.is_visiting(&key) {
+                if self.state.satisfies(&key, &requirement)? {
+                    trace!("already selected: {pkg}");
+                    return Ok(None);
+                }
+                rejected.push(RejectedCandidate::requirement(pkg, atom.clone()));
+                continue;
+            }
+
             match self.policy.eval(&pkg) {
                 Ok(PolicyResult::Accepted(effective_use)) => {
                     let candidate = EffectivePackage::new(pkg, effective_use);
@@ -38,11 +55,8 @@ impl<U: PackageLookup> Resolver<U> {
                     }
                 }
                 Ok(PolicyResult::Rejected(rejection)) => {
-                    self.state.reject(PackageKey::new(&pkg), rejection);
-                    rejected.push(RejectedCandidate::new(
-                        pkg,
-                        CandidateRejectionReason::Policy(rejection),
-                    ));
+                    self.state.reject(key, rejection);
+                    rejected.push(RejectedCandidate::policy(pkg, rejection));
                 }
                 Err(error) => {
                     warn!("skipping unavailable pkg {}: {error:#}", pkg.cpv());
@@ -55,26 +69,15 @@ impl<U: PackageLookup> Resolver<U> {
 
     /// Evaluates an [`EffectivePackage`] candidate including its dependencies and
     /// takes care of updating the resolver state.
+    ///
+    /// The caller must ensure the candidate is compliant with the policy
+    /// and is not already selected or currently being visited.
     async fn eval_candidate(
         &mut self,
         requirement: &AtomRequirement<'_>,
         candidate: &EffectivePackage,
     ) -> anyhow::Result<Option<CandidateRejectionReason>> {
         let key = PackageKey::new(&candidate.pkg);
-
-        if let Some(rejection) = self.state.rejection(&key) {
-            return Ok(Some(CandidateRejectionReason::Policy(*rejection)));
-        }
-
-        if self.state.is_selected(&key) || self.state.is_visiting(&key) {
-            if self.state.satisfies(&key, requirement)? {
-                trace!("already selected: {}", candidate.pkg);
-                return Ok(None);
-            }
-            return Ok(Some(CandidateRejectionReason::Requirement(
-                requirement.atom().clone(),
-            )));
-        }
 
         if !requirement.satisfied_by(&candidate.pkg, &candidate.effective_use)? {
             return Ok(Some(CandidateRejectionReason::Requirement(

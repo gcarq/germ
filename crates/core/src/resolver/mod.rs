@@ -262,7 +262,7 @@ mod tests {
             .await;
 
         let rejected = nested_rejection(&outcome);
-        assert_eq!(&rejected.package, &blocked);
+        assert_eq!(&rejected.pkg, &blocked);
         assert_eq!(
             rejected.reason,
             CandidateRejectionReason::ActiveBlocker {
@@ -295,7 +295,7 @@ mod tests {
             .await;
 
         let rejected = nested_rejection(&outcome);
-        assert_eq!(&rejected.package, &owner);
+        assert_eq!(&rejected.pkg, &owner);
         assert_eq!(
             rejected.reason,
             CandidateRejectionReason::Dependency(
@@ -319,7 +319,7 @@ mod tests {
             .await;
 
         let rejected = nested_rejection(&outcome);
-        assert_eq!(&rejected.package, &child);
+        assert_eq!(&rejected.pkg, &child);
         assert_eq!(
             rejected.reason,
             CandidateRejectionReason::Dependency(

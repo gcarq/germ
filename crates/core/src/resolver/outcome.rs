@@ -52,14 +52,26 @@ impl ResolutionOutcome {
 /// Represents a rejected [`Package`] together with its [`CandidateRejectionReason`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RejectedCandidate {
-    pub package: Package,
+    pub pkg: Package,
     pub reason: CandidateRejectionReason,
 }
 
 impl RejectedCandidate {
-    /// Creates a rejected candidate for `package` with its `reason`.
-    pub const fn new(package: Package, reason: CandidateRejectionReason) -> Self {
-        Self { package, reason }
+    /// Creates a rejected candidate for `pkg` with its `reason`.
+    pub const fn new(pkg: Package, reason: CandidateRejectionReason) -> Self {
+        Self { pkg, reason }
+    }
+
+    /// Creates a rejected candidate for `pkg` due to a policy rejection.
+    pub const fn policy(pkg: Package, rejection: PolicyRejection) -> Self {
+        let reason = CandidateRejectionReason::Policy(rejection);
+        Self { pkg, reason }
+    }
+
+    /// Creates a rejected candidate for `pkg` due to an unsatisfied requirement.
+    pub const fn requirement(pkg: Package, atom: Atom) -> Self {
+        let reason = CandidateRejectionReason::Requirement(atom);
+        Self { pkg, reason }
     }
 }
 
@@ -103,7 +115,7 @@ impl fmt::Display for RequirementFailure {
             Self::Exhausted(atom, candidates) => {
                 write!(f, "no viable candidate for {atom}")?;
                 for candidate in candidates {
-                    write!(f, "\n\t{}: {}", candidate.package, candidate.reason)?;
+                    write!(f, "\n\t{}: {}", candidate.pkg, candidate.reason)?;
                 }
                 Ok(())
             }
