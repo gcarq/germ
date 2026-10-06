@@ -1,5 +1,6 @@
-use germ_pms::{Atom, Keyword};
+use germ_pms::Keyword;
 
+use super::index::AtomIndex;
 use crate::files::entry::Operation;
 use crate::files::pkgfile::{KeywordRule, PackageAcceptKeywords};
 use crate::keyword::KeywordSelector;
@@ -8,7 +9,7 @@ use crate::package::PackageView;
 /// Immutable runtime policy that determines whether a package is accepted based on its keywords.
 pub struct EffectiveKeywords {
     accept_keywords: Vec<KeywordSelector>,
-    rules: Vec<(Atom, KeywordAction)>,
+    rules: AtomIndex<KeywordAction>,
 }
 
 impl EffectiveKeywords {
@@ -17,7 +18,7 @@ impl EffectiveKeywords {
         accept_keywords: Vec<KeywordSelector>,
         package_accept_keywords: PackageAcceptKeywords,
     ) -> Self {
-        let mut rules = package_accept_keywords
+        let mut sorted = package_accept_keywords
             .into_rules()
             .flat_map(|(atom, rule)| {
                 let prec = rule.precedence();
@@ -26,14 +27,15 @@ impl EffectiveKeywords {
                     .map(move |action| (prec, atom.clone(), action))
             })
             .collect::<Vec<_>>();
-        rules.sort_by_key(|(precedence, _, _)| *precedence);
+        sorted.sort_by_key(|(precedence, _, _)| *precedence);
 
+        let rules = sorted
+            .into_iter()
+            .map(|(_, atom, action)| (atom, action))
+            .collect();
         Self {
             accept_keywords,
-            rules: rules
-                .into_iter()
-                .map(|(_, atom, action)| (atom, action))
-                .collect(),
+            rules: AtomIndex::new(rules),
         }
     }
 
@@ -78,11 +80,8 @@ impl EffectiveKeywords {
             .iter()
             .any(|selector| selector.matches(keyword));
 
-        for (atom, action) in &self.rules {
-            if pkg.matches_atom(atom) {
-                action.apply(keyword, &mut accepted);
-            }
-        }
+        self.rules
+            .visit_matches(pkg, |action| action.apply(keyword, &mut accepted));
 
         accepted
     }

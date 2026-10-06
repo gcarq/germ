@@ -1,8 +1,9 @@
 use germ_pms::Atom;
 use log::debug;
 
+use super::index::AtomIndex;
 use crate::files::PackageEntries;
-use crate::files::entry::{Entry, Operation, Precedence};
+use crate::files::entry::{Operation, Precedence};
 use crate::package::PackageView;
 use crate::utils::Inherit;
 
@@ -24,23 +25,8 @@ pub struct PortageSource {
 
 /// Immutable runtime policy that determines whether a package is masked.
 pub struct PackageMasks {
-    mask: Vec<MaskEntry>,
-    unmask: Vec<MaskEntry>,
-}
-
-struct MaskEntry {
-    atom: Atom,
-    prec: Precedence,
-}
-
-impl From<Entry<Atom>> for MaskEntry {
-    fn from(entry: Entry<Atom>) -> Self {
-        let prec = entry.prec;
-        Self {
-            atom: entry.into_inner(),
-            prec,
-        }
-    }
+    mask: AtomIndex<Precedence>,
+    unmask: AtomIndex<Precedence>,
 }
 
 impl PackageMasks {
@@ -53,44 +39,56 @@ impl PackageMasks {
         mask.inherit_from(&portage.local_mask)?;
         unmask.inherit_from(&portage.local_unmask)?;
 
-        let policy = Self {
-            mask: Self::map_from_entries(mask),
-            unmask: Self::map_from_entries(unmask),
-        };
+        let mask = Self::map_from_entries(mask);
+        let unmask = Self::map_from_entries(unmask);
         debug!(
             "Initialized MaskManager with {} masks and {} unmasks",
-            policy.mask.len(),
-            policy.unmask.len()
+            mask.len(),
+            unmask.len()
         );
-        Ok(policy)
+        Ok(Self {
+            mask: AtomIndex::new(mask),
+            unmask: AtomIndex::new(unmask),
+        })
     }
 
     /// Checks if the given `package` is masked.
     pub fn is_masked<P: PackageView>(&self, package: &P) -> bool {
-        match Self::find_match(package, &self.mask) {
-            Some(mask) => match Self::find_match(package, &self.unmask) {
-                Some(unmask) => mask.prec > unmask.prec,
+        match Self::max_precedence(&self.mask, package) {
+            Some(mask) => match Self::max_precedence(&self.unmask, package) {
+                Some(unmask) => mask > unmask,
                 None => true,
             },
             None => false,
         }
     }
 
-    /// Finds the "highest" [`MaskEntry`] that matches  `package`.
-    fn find_match<'a, P: PackageView>(pkg: &P, entries: &'a [MaskEntry]) -> Option<&'a MaskEntry> {
-        entries
-            .iter()
-            .filter(|entry| pkg.matches_atom(&entry.atom))
-            .max_by_key(|entry| entry.prec)
+    /// Returns the highest precedence among the entries matching `package`.
+    fn max_precedence<P: PackageView>(
+        index: &AtomIndex<Precedence>,
+        pkg: &P,
+    ) -> Option<Precedence> {
+        let mut max = None;
+        index.visit_matches(pkg, |prec| {
+            if max.is_none_or(|cur| *prec > cur) {
+                max = Some(*prec);
+            }
+        });
+        max
     }
 
-    /// Converts `entries` into a vector of [`MaskEntry`].
+    /// Converts `entries` into an ordered list of `(atom, precedence)` masks.
     ///
-    /// Only entries with [`Operation::Set`] are included in the resulting vector.
-    fn map_from_entries(entries: PackageEntries) -> Vec<MaskEntry> {
+    /// Only entries with [`Operation::Set`] are included in the resulting list.
+    fn map_from_entries(entries: PackageEntries) -> Vec<(Atom, Precedence)> {
         entries
             .into_iter()
-            .filter_map(|entry| matches!(entry.op, Operation::Set).then(|| entry.into()))
+            .filter_map(|entry| {
+                matches!(entry.op, Operation::Set).then(|| {
+                    let prec = entry.prec;
+                    (entry.into_inner(), prec)
+                })
+            })
             .collect()
     }
 }

@@ -3,6 +3,7 @@ use germ_pms::{Arch, UseFlag};
 
 use super::{EnvValue, IncrementalVars, MakeEnv};
 use crate::keyword::KeywordSelector;
+use crate::policy::useflag::GlobalUseRules;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::UseExpandConfig;
 
@@ -41,16 +42,13 @@ impl MakeEnvStack {
     }
 
     /// Returns the desired USE state from the resolved make env.
-    pub fn global_use(&self) -> anyhow::Result<FxHashMap<UseFlag, bool>> {
+    pub fn global_use(&self) -> anyhow::Result<GlobalUseRules> {
         let mut state = FxHashMap::default();
 
         apply_use_state(&mut state, self.makenv.get("USE")).context("invalid USE")?;
         apply_use_state(&mut state, self.user.get("USE")).context("invalid USE")?;
 
-        for (flag, enabled) in self.expand_config.materialize(&self.makenv)? {
-            state.insert(flag, enabled);
-        }
-
+        state.extend(self.expand_config.materialize(&self.makenv)?);
         let user_disabled = self
             .expand_config
             .materialize(&self.user)?
@@ -58,7 +56,7 @@ impl MakeEnvStack {
             .filter(|(_, enabled)| !enabled);
         state.extend(user_disabled);
 
-        Ok(state)
+        Ok(state.into())
     }
 
     /// Returns the resolved `ARCH`.
@@ -142,7 +140,7 @@ mod tests {
         )?;
         assert_eq!(
             stack.global_use()?,
-            FxHashMap::from_iter([(UseFlag::new("bar")?, true)])
+            FxHashMap::from_iter([(UseFlag::new("bar")?, true)]).into()
         );
 
         let stack = MakeEnvStack::new(
@@ -152,7 +150,7 @@ mod tests {
         )?;
         assert_eq!(
             stack.global_use()?,
-            FxHashMap::from_iter([(UseFlag::new("foo")?, false)])
+            FxHashMap::from_iter([(UseFlag::new("foo")?, false)]).into()
         );
 
         let stack = MakeEnvStack::new(
@@ -162,7 +160,7 @@ mod tests {
         )?;
         assert_eq!(
             stack.global_use()?,
-            FxHashMap::from_iter([(UseFlag::new("baz")?, true)])
+            FxHashMap::from_iter([(UseFlag::new("baz")?, true)]).into()
         );
 
         let stack = MakeEnvStack::new(
@@ -194,6 +192,7 @@ mod tests {
                 (UseFlag::new("video_cards_amdgpu")?, false),
                 (UseFlag::new("video_cards_radeonsi")?, true),
             ])
+            .into()
         );
         Ok(())
     }
@@ -216,6 +215,7 @@ mod tests {
                 (UseFlag::new("video_cards_radeon")?, true),
                 (UseFlag::new("video_cards_radeonsi")?, true),
             ])
+            .into()
         );
         Ok(())
     }
@@ -235,7 +235,7 @@ mod tests {
         )?;
         assert_eq!(
             stack.global_use()?,
-            FxHashMap::from_iter([(UseFlag::new("input_devices_libinput")?, true)])
+            FxHashMap::from_iter([(UseFlag::new("input_devices_libinput")?, true)]).into()
         );
         Ok(())
     }

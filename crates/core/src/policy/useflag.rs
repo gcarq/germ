@@ -1,6 +1,7 @@
 use anyhow::Context;
-use germ_pms::{Atom, ExprEval, IUseEntry, IUseState, RequiredUseFlag, UseFlag};
+use germ_pms::{ExprEval, IUseState, RequiredUseFlag, UseFlag};
 
+use super::index::AtomIndex;
 use crate::files::UseEntries;
 use crate::files::pkgfile::{MatchedUse, PackageUseRecords, UseFlags};
 use crate::package::PackageView;
@@ -18,10 +19,30 @@ pub struct LocalRecords {
     pub package_use_mask: PackageUseRecords,
 }
 
+/// Holds global USE flags and their enabled state.
+///
+/// It is a simple mapping of [`UseFlag`] to `bool` indicating
+/// whether the flag is enabled or disabled.
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+pub struct GlobalUseRules(FxHashMap<UseFlag, bool>);
+
+impl GlobalUseRules {
+    /// Returns the enabled state for the given `flag`.
+    fn state(&self, flag: &UseFlag) -> Option<bool> {
+        self.0.get(flag).copied()
+    }
+}
+
+impl From<FxHashMap<UseFlag, bool>> for GlobalUseRules {
+    fn from(map: FxHashMap<UseFlag, bool>) -> Self {
+        Self(map)
+    }
+}
+
 /// Immutable runtime policy used to calculate effective
 /// USE flags and evaluate `REQUIRED_USE`.
 pub struct UsePolicy {
-    base_use: UseRules,
+    global_use: GlobalUseRules,
     iuse_implicit: FxHashSet<UseFlag>,
 
     use_mask: FxHashSet<UseFlag>,
@@ -42,14 +63,13 @@ pub struct UsePolicy {
 impl UsePolicy {
     /// Builds [`UsePolicy`] from global, profile, and local records.
     pub fn new(
-        global_use: FxHashMap<UseFlag, bool>,
+        global_use: GlobalUseRules,
         iuse_implicit: FxHashSet<UseFlag>,
         profile: ProfileUseRecords,
         local: LocalRecords,
     ) -> anyhow::Result<Self> {
         let expand_config = profile.expand_config.clone();
         Ok(Self {
-            base_use: UseRules(global_use),
             use_mask: local
                 .use_mask
                 .inherit(&profile.use_mask)?
@@ -85,6 +105,7 @@ impl UsePolicy {
                 &expand_config,
             )
             .context("failed to resolve package.use.stable.force")?,
+            global_use,
             iuse_implicit,
             expand_config,
         })
@@ -100,9 +121,7 @@ impl UsePolicy {
         P: PackageView,
     {
         let effective_use = self.effective_for(pkg, stable_in_use);
-        let mut evaluator = ReqUseEval {
-            state: &effective_use,
-        };
+        let mut evaluator = ReqUseEval::new(&effective_use);
         let use_satisfied = pkg.metadata().required_use().view().eval(&mut evaluator)?;
         Ok((effective_use, use_satisfied))
     }
@@ -112,48 +131,37 @@ impl UsePolicy {
     where
         P: PackageView,
     {
-        let available = pkg
-            .metadata()
-            .iuse()
-            .iter()
-            .map(IUseEntry::flag)
-            .chain(self.iuse_implicit.iter())
-            .cloned()
-            .collect::<FxHashSet<_>>();
+        let mut available = FxHashSet::default();
+        let mut enabled = FxHashSet::default();
 
         let pkg_use = self.package_use.matched_for(pkg);
         let masked = self.masked_for_pkg(pkg, stable_in_use);
         let forced = self.forced_for_pkg(pkg, stable_in_use);
 
-        let enabled = available
+        let iuse = pkg
+            .metadata()
+            .iuse()
             .iter()
-            .filter(|flag| !masked.contains(*flag))
-            .filter(|flag| {
-                forced.contains(*flag) || self.desired_state(pkg, &pkg_use, flag).unwrap_or(false)
-            })
-            .cloned()
-            .collect();
+            .map(|e| (e.flag(), e.state()))
+            .chain(self.iuse_implicit.iter().map(|f| (f, None)));
+
+        for (flag, default_state) in iuse {
+            if !available.insert(flag.clone()) || masked.contains(flag) {
+                continue;
+            }
+
+            if forced.contains(flag)
+                || pkg_use
+                    .state(flag, &self.expand_config)
+                    .or_else(|| self.global_use.state(flag))
+                    .or_else(|| default_state.map(IUseState::as_bool))
+                    .unwrap_or(false)
+            {
+                enabled.insert(flag.clone());
+            }
+        }
 
         EffectiveUse::from_parts(available, enabled)
-    }
-
-    /// Returns the desired state of `flag` for `pkg`.
-    fn desired_state<P: PackageView>(
-        &self,
-        pkg: &P,
-        package_use: &MatchedUse<'_>,
-        flag: &UseFlag,
-    ) -> Option<bool> {
-        package_use
-            .state(flag, &self.expand_config)
-            .or_else(|| self.base_use.state(flag))
-            .or_else(|| {
-                pkg.metadata()
-                    .iuse()
-                    .iter()
-                    .find(|entry| entry.flag() == flag)
-                    .and_then(|entry| entry.state().map(IUseState::as_bool))
-            })
     }
 
     /// Returns all USE flags that are masked for the given [`PackageView`].
@@ -187,26 +195,12 @@ impl UsePolicy {
     }
 }
 
-/// Runtime USE policy assignments.
-///
-/// It is a simple mapping of [`UseFlag`] to `bool` indicating
-/// whether the flag is enabled or disabled.
-#[derive(Clone, Default)]
-struct UseRules(FxHashMap<UseFlag, bool>);
-
-impl UseRules {
-    /// Returns the assignment for the given `flag`.
-    fn state(&self, flag: &UseFlag) -> Option<bool> {
-        self.0.get(flag).copied()
-    }
-}
-
 /// Runtime policy to determine the effective USE flags for a package.
-struct PackageUse(Vec<(Atom, UseFlags)>);
+struct PackageUse(AtomIndex<UseFlags>);
 
 impl PackageUse {
     fn new(records: PackageUseRecords, config: &UseExpandConfig) -> anyhow::Result<Self> {
-        Ok(Self(records.expand(config)?))
+        Ok(Self(AtomIndex::new(records.expand(config)?)))
     }
 
     /// Returns USE entries that apply to the given `pkg`.
@@ -214,11 +208,7 @@ impl PackageUse {
     /// The USE policy is matched statically, atom USE deps are not considered.
     fn matched_for<'a, P: PackageView>(&'a self, pkg: &P) -> MatchedUse<'a> {
         let mut matched = MatchedUse::default();
-        for (atom, flags) in &self.0 {
-            if pkg.matches_atom(atom) {
-                matched.absorb(flags);
-            }
-        }
+        self.0.visit_matches(pkg, |flags| matched.absorb(flags));
         matched
     }
 
@@ -231,6 +221,12 @@ impl PackageUse {
 /// Evaluates `REQUIRED_USE` against the effective USE state of a given package.
 struct ReqUseEval<'a> {
     state: &'a EffectiveUse,
+}
+
+impl ReqUseEval<'_> {
+    const fn new(state: &EffectiveUse) -> ReqUseEval<'_> {
+        ReqUseEval { state }
+    }
 }
 
 impl ExprEval<RequiredUseFlag> for ReqUseEval<'_> {
@@ -262,6 +258,7 @@ mod tests {
         profile_use: &str,
         package_use: &str,
         iuse: &str,
+        implicit: &str,
         flag: &str,
     ) -> anyhow::Result<Option<bool>> {
         let global = MakeEnv::from_content(makenv)?;
@@ -276,12 +273,11 @@ mod tests {
             expand_config: UseExpandConfig::from_makenv(makenv_stack.makenv())?,
             ..Default::default()
         };
-        let policy = UsePolicy::new(
-            makenv_stack.global_use()?,
-            FxHashSet::default(),
-            profile,
-            local,
-        )?;
+        let implicit = implicit
+            .split_whitespace()
+            .map(UseFlag::new)
+            .collect::<anyhow::Result<_>>()?;
+        let policy = UsePolicy::new(makenv_stack.global_use()?, implicit, profile, local)?;
         let package = Package::new(
             cpv("dev-lang", "rust", "1.0"),
             "gentoo".parse()?,
@@ -316,7 +312,7 @@ mod tests {
                     .filter_map(|(flag, enabled)| enabled.then_some(flag.clone()))
                     .collect(),
             );
-            let mut evaluator = ReqUseEval { state: &state };
+            let mut evaluator = ReqUseEval::new(&state);
             let actual = expr.view().eval(&mut evaluator)?;
 
             assert_eq!(actual, expected, "{input}");
@@ -335,7 +331,7 @@ mod tests {
             ..Default::default()
         };
         let policy = UsePolicy::new(
-            FxHashMap::from_iter([(elogind.clone(), true), (systemd.clone(), true)]),
+            FxHashMap::from_iter([(elogind.clone(), true), (systemd.clone(), true)]).into(),
             FxHashSet::default(),
             profile,
             LocalRecords::default(),
@@ -356,7 +352,7 @@ mod tests {
     #[test]
     fn test_local_package_use_force() -> anyhow::Result<()> {
         let flag = UseFlag::new("llvm_targets_AArch64")?;
-        let use_flag = FxHashMap::from_iter([(flag.clone(), false)]);
+        let use_rules = GlobalUseRules::from(FxHashMap::from_iter([(flag.clone(), false)]));
         let expand_config =
             UseExpandConfig::from_makenv(&MakeEnv::from_content("USE_EXPAND=LLVM_TARGETS")?)?;
         let profile = ProfileUseRecords {
@@ -373,7 +369,7 @@ mod tests {
             pkg_metadata(&[("IUSE", "llvm_targets_AArch64")]),
         );
         let forced = UsePolicy::new(
-            use_flag.clone(),
+            use_rules.clone(),
             FxHashSet::default(),
             profile.clone(),
             LocalRecords::default(),
@@ -390,7 +386,7 @@ mod tests {
             )?,
             ..Default::default()
         };
-        let unforced = UsePolicy::new(use_flag, FxHashSet::default(), profile, local)?;
+        let unforced = UsePolicy::new(use_rules, FxHashSet::default(), profile, local)?;
         assert_eq!(
             unforced.effective_for(&package, false).state(&flag),
             Some(false)
@@ -408,7 +404,7 @@ mod tests {
             ..Default::default()
         };
         let policy = UsePolicy::new(
-            FxHashMap::from_iter([(elogind.clone(), true)]),
+            FxHashMap::from_iter([(elogind.clone(), true)]).into(),
             FxHashSet::default(),
             profile,
             LocalRecords::default(),
@@ -446,7 +442,7 @@ mod tests {
 
         for (flag, expected) in cases {
             assert_eq!(
-                use_state(makenv, "", "", package_use, iuse, flag)?,
+                use_state(makenv, "", "", package_use, iuse, "", flag)?,
                 Some(expected),
                 "{flag}"
             );
@@ -464,26 +460,62 @@ mod tests {
         let cases = [("llvm_targets_NVPTX", false), ("llvm_targets_AMDGPU", true)];
 
         for (flag, expected) in cases {
-            let state = use_state(makenv, "", profile_use, package_use, iuse, flag)?;
+            let state = use_state(makenv, "", profile_use, package_use, iuse, "", flag)?;
             assert_eq!(state, Some(expected), "{flag}");
         }
         Ok(())
     }
 
     #[test]
-    fn test_effective_use() {
-        // makenv, make_conf, profile_use, package_use, iuse, flag, expected
+    fn test_package_use_order() -> anyhow::Result<()> {
+        // Equal precedence across the exact and wildcard buckets: the later atom wins.
         let cases = [
-            ("USE=foo", "", "", "*/* -foo", "+foo", "foo", Some(false)),
-            ("", "USE=-foo", "", "*/* foo", "foo", "foo", Some(true)),
-            ("USE=foo", "", "", "", "", "foo", None),
-            ("", "", "", "", "+foo", "foo", Some(true)),
-            ("", "USE=-foo", "", "", "+foo", "foo", Some(false)),
+            ("*/* foo\ndev-lang/rust -foo", false),
+            ("dev-lang/rust -foo\n*/* foo", true),
+            ("dev-lang/* -foo\ndev-lang/rust foo", true),
+            ("dev-lang/rust foo\ndev-lang/* -foo", false),
+            ("*/rust foo\ndev-lang/rust -foo", false),
+            ("dev-lang/rust -foo\n*/rust foo", true),
         ];
 
-        for (makenv, make_conf, profile_use, package_use, iuse, flag, expected) in cases {
+        for (package_use, expected) in cases {
             assert_eq!(
-                use_state(makenv, make_conf, profile_use, package_use, iuse, flag).unwrap(),
+                use_state("", "", "", package_use, "foo", "", "foo")?,
+                Some(expected),
+                "{package_use}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_effective_use() {
+        // flag, makenv, make_conf, profile_use, package_use, iuse, implicit, expected
+        #[rustfmt::skip]
+        let cases = [
+            ("foo", "USE=foo", "", "", "*/* -foo", "+foo", "", Some(false)),
+            ("foo", "", "USE=-foo", "", "*/* foo", "foo", "", Some(true)),
+            ("foo", "USE=foo", "", "", "", "", "", None),
+            ("foo", "", "", "", "", "+foo", "", Some(true)),
+            ("foo", "", "USE=-foo", "", "", "+foo", "", Some(false)),
+            // An implicit flag is available without appearing in IUSE; package.use
+            // overrides the global state, otherwise it defaults to disabled.
+            ("implicit", "", "USE=-implicit", "", "dev-lang/rust implicit", "", "implicit", Some(true)),
+            ("implicit", "", "", "", "", "", "implicit", Some(false)),
+        ];
+
+        for (flag, makenv, make_conf, profile_use, package_use, iuse, implicit, expected) in cases {
+            assert_eq!(
+                use_state(
+                    makenv,
+                    make_conf,
+                    profile_use,
+                    package_use,
+                    iuse,
+                    implicit,
+                    flag
+                )
+                .unwrap(),
                 expected
             );
         }

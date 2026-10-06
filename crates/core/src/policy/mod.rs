@@ -1,3 +1,4 @@
+mod index;
 pub mod keyword;
 pub mod pkgmask;
 #[cfg(test)]

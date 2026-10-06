@@ -36,7 +36,7 @@ impl PolicyFixture {
         let keywords =
             EffectiveKeywords::new(vec![KeywordSelector::Any], PackageAcceptKeywords::default());
         let usepolicy = UsePolicy::new(
-            FxHashMap::from_iter(self.use_flags.iter().cloned().map(|flag| (flag, true))),
+            FxHashMap::from_iter(self.use_flags.iter().cloned().map(|flag| (flag, true))).into(),
             FxHashSet::default(),
             ProfileUseRecords::default(),
             LocalRecords::default(),
