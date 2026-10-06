@@ -68,7 +68,6 @@ impl UsePolicy {
         profile: ProfileUseRecords,
         local: LocalRecords,
     ) -> anyhow::Result<Self> {
-        let expand_config = profile.expand_config.clone();
         Ok(Self {
             use_mask: local
                 .use_mask
@@ -80,34 +79,34 @@ impl UsePolicy {
             use_stable_force: profile.use_stable_force.finalize().collect(),
             package_use: PackageUse::new(
                 local.package_use.inherit(&profile.package_use)?,
-                &expand_config,
+                &profile.expand_config,
             )
             .context("failed to resolve package.use")?,
             package_use_mask: PackageUse::new(
                 local.package_use_mask.inherit(&profile.package_use_mask)?,
-                &expand_config,
+                &profile.expand_config,
             )
             .context("failed to resolve package.use.mask")?,
             package_use_force: PackageUse::new(
                 local
                     .package_use_force
                     .inherit(&profile.package_use_force)?,
-                &expand_config,
+                &profile.expand_config,
             )
             .context("failed to resolve package.use.force")?,
             package_use_stable_mask: PackageUse::new(
                 profile.package_use_stable_mask,
-                &expand_config,
+                &profile.expand_config,
             )
             .context("failed to resolve package.use.stable.mask")?,
             package_use_stable_force: PackageUse::new(
                 profile.package_use_stable_force,
-                &expand_config,
+                &profile.expand_config,
             )
             .context("failed to resolve package.use.stable.force")?,
             global_use,
             iuse_implicit,
-            expand_config,
+            expand_config: profile.expand_config,
         })
     }
 
