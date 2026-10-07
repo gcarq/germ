@@ -59,11 +59,14 @@ impl ResolverFixture {
         self
     }
 
-    /// Resolves `atom` and returns the outcome.
-    pub async fn resolve(&self, atom: &Atom) -> ResolutionOutcome {
+    /// Resolves `atoms` and returns the outcome.
+    pub async fn resolve<'a>(
+        &self,
+        atoms: impl IntoIterator<Item = &'a Atom>,
+    ) -> ResolutionOutcome {
         let provider = PackageLookupFixture::new(&self.packages, &self.installed);
         let resolver = Resolver::new(provider, self.policy.build().unwrap());
-        resolver.resolve(atom).await.unwrap()
+        resolver.resolve(atoms).await.unwrap()
     }
 }
 

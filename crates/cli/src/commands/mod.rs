@@ -24,11 +24,11 @@ pub enum Command {
         #[arg(value_name = "atom")]
         atom: Option<Atom>,
     },
-    /// Install a package (this is just a placeholder!)
+    /// Install packages
     Install {
-        /// Package atom to install, e.g. dev-lang/rust
-        #[arg(value_name = "atom")]
-        atom: Atom,
+        /// One or more package atoms to install, e.g. dev-lang/rust
+        #[arg(value_name = "atom", required = true)]
+        atoms: Vec<Atom>,
     },
 
     /// Generate metadata cache for ebuild repositories
@@ -53,7 +53,7 @@ pub enum Command {
 pub async fn execute(args: &Args, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     match &args.command {
         Command::Info { atom } => info(atom.as_ref(), &sysconf)?,
-        Command::Install { atom } => install(atom, sysconf).await?,
+        Command::Install { atoms } => install(atoms, sysconf).await?,
         Command::Gencache { force, repo } => gencache(repo.as_deref(), *force, sysconf).await?,
         Command::Sync { repo } => sync(repo.as_deref(), sysconf)?,
     }
@@ -65,4 +65,17 @@ fn sync(repo: Option<&str>, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     Ok(RepoSet::new(sysconf)
         .context("unable to build repo set")?
         .maybe_sync(repo)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use crate::Args;
+
+    #[test]
+    fn test_install_requires_atom() {
+        let result = Args::try_parse_from(["germ", "install"]);
+        assert!(result.is_err());
+    }
 }

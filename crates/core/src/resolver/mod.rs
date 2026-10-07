@@ -41,12 +41,24 @@ impl<U: PackageLookup> Resolver<U> {
         }
     }
 
-    /// Resolves the given [`Atom`] and returns a [`ResolutionOutcome`].
-    pub async fn resolve(mut self, atom: &Atom) -> anyhow::Result<ResolutionOutcome> {
-        info!("Resolving candidates for {atom}...");
-        let failure = self.resolve_candidates(AtomRequirement::root(atom)).await?;
-        // TODO: don't create a plan when it couldn't be fully resolved
-        Ok(self.state.finalize(failure))
+    /// Resolves the given root [`Atom`]s and returns a [`ResolutionOutcome`].
+    ///
+    /// All roots share one [`ResolverState`] and are treated as a single transaction.
+    pub async fn resolve<'a>(
+        mut self,
+        atoms: impl IntoIterator<Item = &'a Atom>,
+    ) -> anyhow::Result<ResolutionOutcome> {
+        let traversal = self.start_traversal();
+        for atom in atoms {
+            info!("Resolving candidates for {atom}...");
+
+            if let Some(failure) = self.resolve_candidates(AtomRequirement::root(atom)).await? {
+                traversal.rollback(&mut self);
+                return Ok(self.state.finalize(Some(failure)));
+            }
+        }
+
+        Ok(self.state.finalize(None))
     }
 }
 
@@ -111,16 +123,16 @@ mod tests {
 
         let enabled = ResolverFixture::new([root(), child])
             .with_use(&["feature"])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
         assert!(enabled.is_resolved());
 
-        let disabled = ResolverFixture::new([root()]).resolve(&atom).await;
+        let disabled = ResolverFixture::new([root()]).resolve([&atom]).await;
         assert!(disabled.is_resolved());
 
         let unavailable = ResolverFixture::new([root()])
             .with_use(&["feature"])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
         assert!(!unavailable.is_resolved());
     }
@@ -137,7 +149,7 @@ mod tests {
 
         let outcome = ResolverFixture::new(packages)
             .with_mask("=app-misc/child-2")
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
         assert!(outcome.is_resolved());
     }
@@ -151,7 +163,7 @@ mod tests {
             pkg("app-misc", "child", "1", &[]),
         ];
 
-        let outcome = ResolverFixture::new(candidates).resolve(&atom).await;
+        let outcome = ResolverFixture::new(candidates).resolve([&atom]).await;
         assert!(outcome.is_resolved());
     }
 
@@ -161,7 +173,7 @@ mod tests {
         let root = pkg("app-misc", "root", "1", &[("DEPEND", "app-misc/child")]);
         let child = pkg("app-misc", "child", "1", &[("DEPEND", "app-misc/root")]);
         let outcome = ResolverFixture::new([root.clone(), child.clone()])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         assert_eq!(
@@ -199,7 +211,7 @@ mod tests {
         let outcome =
             ResolverFixture::new([new_root, old_root.clone(), first, second, fallback.clone()])
                 .with_installed([first_installed, fallback_installed])
-                .resolve(&atom)
+                .resolve([&atom])
                 .await;
 
         assert!(outcome.is_resolved());
@@ -219,7 +231,7 @@ mod tests {
         let installed = installed("root", "1", "0", &[], &[]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([installed.clone()])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         assert_eq!(
@@ -238,7 +250,7 @@ mod tests {
         let installed = installed("root", "1", "1", &[], &[]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([installed])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         let pkg = EffectivePackage::new(root, EffectiveUse::default());
@@ -258,7 +270,7 @@ mod tests {
         let blocked = pkg("app-misc", "b", "1", &[]);
         let blocked_atom = "app-misc/b".parse().unwrap();
         let outcome = ResolverFixture::new([root, owner.clone(), blocked.clone()])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         let rejected = nested_rejection(&outcome);
@@ -291,7 +303,7 @@ mod tests {
         let blocked_atom = "app-misc/b[feature?]".parse().unwrap();
         let outcome = ResolverFixture::new([root, owner.clone(), conflict.clone()])
             .with_use(&["feature"])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         let rejected = nested_rejection(&outcome);
@@ -315,7 +327,7 @@ mod tests {
         let child = pkg("app-misc", "child", "1", &[("DEPEND", "!app-misc/root")]);
         let blocked_atom = "app-misc/root".parse().unwrap();
         let outcome = ResolverFixture::new([root.clone(), child.clone()])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         let rejected = nested_rejection(&outcome);
@@ -339,7 +351,7 @@ mod tests {
         let other = installed("other", "1", "0", &[], &[]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([other.clone()])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         assert!(outcome.is_resolved());
@@ -359,7 +371,7 @@ mod tests {
         let installed = installed("root", "1", "0", &[], &[]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([installed.clone()])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         let pkg = EffectivePackage::new(root, EffectiveUse::default());
@@ -379,7 +391,7 @@ mod tests {
         let disabled = installed("other", "1", "0", &["flag"], &[]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([disabled])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         let pkg = EffectivePackage::new(root.clone(), EffectiveUse::default());
@@ -389,7 +401,7 @@ mod tests {
         let enabled = installed("other", "1", "0", &["flag"], &["flag"]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([enabled.clone()])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         let pkg = EffectivePackage::new(root, EffectiveUse::default());
@@ -413,7 +425,7 @@ mod tests {
         let outcome = ResolverFixture::new([root.clone()])
             .with_use(&["feature"])
             .with_installed([disabled, enabled.clone()])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         let pkg = EffectivePackage::new(root, effective(&["feature"], &["feature"]));
@@ -432,7 +444,7 @@ mod tests {
         let atom = "app-misc/root".parse().unwrap();
         let root = pkg("app-misc", "root", "1", &[("DEPEND", "app-misc/missing")]);
         let missing = "app-misc/missing".parse().unwrap();
-        let outcome = ResolverFixture::new([root.clone()]).resolve(&atom).await;
+        let outcome = ResolverFixture::new([root.clone()]).resolve([&atom]).await;
         let expected = RequirementFailure::Exhausted(
             atom,
             vec![RejectedCandidate::new(
@@ -451,7 +463,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_missing_root_candidate() {
         let atom = "app-misc/missing".parse().unwrap();
-        let outcome = ResolverFixture::new([]).resolve(&atom).await;
+        let outcome = ResolverFixture::new([]).resolve([&atom]).await;
 
         assert_eq!(
             outcome.failure(),
@@ -466,7 +478,7 @@ mod tests {
         let child = pkg("app-misc", "child", "1", &[]);
         let outcome = ResolverFixture::new([root.clone(), child.clone()])
             .with_mask("app-misc/child")
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
         let expected = RequirementFailure::Exhausted(
             atom,
@@ -493,7 +505,7 @@ mod tests {
         let atom = "app-misc/root".parse().unwrap();
         let root = pkg("app-misc", "root", "1", &[("DEPEND", "!!app-misc/blocked")]);
         let blocked = "app-misc/blocked".parse().unwrap();
-        let outcome = ResolverFixture::new([root.clone()]).resolve(&atom).await;
+        let outcome = ResolverFixture::new([root.clone()]).resolve([&atom]).await;
         let expected = RequirementFailure::Exhausted(
             atom,
             vec![RejectedCandidate::new(
@@ -515,7 +527,7 @@ mod tests {
         let root = pkg("app-misc", "root", "1", &metadata);
         let first = "app-misc/first".parse().unwrap();
         let second = "app-misc/second".parse().unwrap();
-        let outcome = ResolverFixture::new([root.clone()]).resolve(&atom).await;
+        let outcome = ResolverFixture::new([root.clone()]).resolve([&atom]).await;
         let expected = RequirementFailure::Exhausted(
             atom,
             vec![RejectedCandidate::new(
@@ -547,7 +559,7 @@ mod tests {
         let child_installed = installed("child", "1", "1", &[], &[]);
         let outcome = ResolverFixture::new([root.clone(), abandoned, child.clone()])
             .with_installed([abandoned_installed, child_installed])
-            .resolve(&atom)
+            .resolve([&atom])
             .await;
 
         assert!(outcome.is_resolved());
@@ -556,6 +568,26 @@ mod tests {
             &[
                 PackageOperation::Merge(EffectivePackage::new(child, EffectiveUse::default())),
                 PackageOperation::Merge(EffectivePackage::new(root, EffectiveUse::default())),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_multiple_roots() {
+        let a = "app-misc/a".parse().unwrap();
+        let b = "app-misc/b".parse().unwrap();
+        let pkg_a = pkg("app-misc", "a", "1", &[]);
+        let pkg_b = pkg("app-misc", "b", "1", &[]);
+        let outcome = ResolverFixture::new([pkg_a.clone(), pkg_b.clone()])
+            .resolve([&a, &b])
+            .await;
+
+        assert!(outcome.is_resolved());
+        assert_eq!(
+            outcome.plan().operations(),
+            &[
+                PackageOperation::Merge(EffectivePackage::new(pkg_a, EffectiveUse::default())),
+                PackageOperation::Merge(EffectivePackage::new(pkg_b, EffectiveUse::default())),
             ]
         );
     }

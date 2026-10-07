@@ -13,9 +13,9 @@ use germ_core::useflag::{EffectiveUse, UseExpandConfig};
 use germ_core::vdb::Vdb;
 use germ_pms::{Atom, UseFlag};
 
-/// Installs the best matching package for the given `atom`.
+/// Installs the best matching package for each of the given `atoms`.
 /// TODO: this is just a placeholder for now.
-pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
+pub async fn install(atoms: &[Atom], sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     let reposet = RepoSet::new(sysconf.clone()).context("unable to build repo set")?;
     let conf = PortageConf::new(&reposet, &sysconf)?;
     let policy = PackagePolicy::new(
@@ -26,7 +26,7 @@ pub async fn install(atom: &Atom, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
 
     let vdb = Vdb::from_path(sysconf.vdb_path()).context("unable to read VDB")?;
     let outcome = Resolver::new(PackageProvider::new(&reposet, vdb), policy)
-        .resolve(atom)
+        .resolve(atoms)
         .await?;
     if let Some(failure) = outcome.failure() {
         bail!("unable to produce an install plan: {failure}");
