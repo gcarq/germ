@@ -82,11 +82,12 @@ impl EffectivePackage {
 
 #[cfg(test)]
 mod tests {
-    use germ_pms::DependencyField;
+    use germ_pms::{BlockerStrength, DependencyField};
 
     use super::test_support::{ResolverFixture, installed};
     use super::*;
     use crate::policy::PolicyRejection;
+    use crate::resolver::PackageOperation::{Merge, Replace, Unmerge, Upgrade};
     use crate::test_support::pkg;
     use crate::useflag::EffectiveUse;
     use crate::useflag::test_support::effective;
@@ -179,8 +180,8 @@ mod tests {
         assert_eq!(
             outcome.plan().operations(),
             &[
-                PackageOperation::Merge(EffectivePackage::new(child, EffectiveUse::default())),
-                PackageOperation::Merge(EffectivePackage::new(root, EffectiveUse::default())),
+                Merge(EffectivePackage::new(child, EffectiveUse::default())),
+                Merge(EffectivePackage::new(root, EffectiveUse::default())),
             ]
         );
     }
@@ -218,8 +219,8 @@ mod tests {
         assert_eq!(
             outcome.plan().operations(),
             &[
-                PackageOperation::Merge(EffectivePackage::new(fallback, EffectiveUse::default(),)),
-                PackageOperation::Merge(EffectivePackage::new(old_root, EffectiveUse::default(),)),
+                Merge(EffectivePackage::new(fallback, EffectiveUse::default(),)),
+                Merge(EffectivePackage::new(old_root, EffectiveUse::default(),)),
             ]
         );
     }
@@ -236,7 +237,7 @@ mod tests {
 
         assert_eq!(
             outcome.plan().operations(),
-            &[PackageOperation::Replace(
+            &[Replace(
                 EffectivePackage::new(root, EffectiveUse::default()),
                 installed,
             )]
@@ -254,172 +255,198 @@ mod tests {
             .await;
 
         let pkg = EffectivePackage::new(root, EffectiveUse::default());
-        assert_eq!(outcome.plan().operations(), &[PackageOperation::Merge(pkg)]);
+        assert_eq!(outcome.plan().operations(), &[Merge(pkg)]);
     }
 
     #[tokio::test]
-    async fn test_resolve_active_weak_blocker() {
+    async fn test_resolve_active_blocker() {
         let atom = "app-misc/root".parse().unwrap();
-        let root = pkg(
-            "app-misc",
-            "root",
-            "1",
-            &[("DEPEND", "app-misc/a app-misc/b")],
-        );
-        let owner = pkg("app-misc", "a", "1", &[("DEPEND", "!app-misc/b")]);
-        let blocked = pkg("app-misc", "b", "1", &[]);
-        let blocked_atom = "app-misc/b".parse().unwrap();
-        let outcome = ResolverFixture::new([root, owner.clone(), blocked.clone()])
-            .resolve([&atom])
-            .await;
+        for prefix in ["!", "!!"] {
+            let root = pkg(
+                "app-misc",
+                "root",
+                "1",
+                &[("DEPEND", "app-misc/a app-misc/b")],
+            );
+            let depend = format!("{prefix}app-misc/b");
+            let owner = pkg("app-misc", "a", "1", &[("DEPEND", depend.as_str())]);
+            let blocked = pkg("app-misc", "b", "1", &[]);
+            let blocked_atom = "app-misc/b".parse().unwrap();
+            let outcome = ResolverFixture::new([root, owner.clone(), blocked.clone()])
+                .resolve([&atom])
+                .await;
 
-        let rejected = nested_rejection(&outcome);
-        assert_eq!(&rejected.pkg, &blocked);
-        assert_eq!(
-            rejected.reason,
-            CandidateRejectionReason::ActiveBlocker {
-                atom: blocked_atom,
-                owner: Box::new(owner),
+            let rejected = nested_rejection(&outcome);
+            assert_eq!(&rejected.pkg, &blocked);
+            assert_eq!(
+                rejected.reason,
+                CandidateRejectionReason::ActiveBlocker {
+                    atom: blocked_atom,
+                    owner: Box::new(owner),
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_blocker_in_graph() {
+        for (prefix, strength) in [
+            ("!", BlockerStrength::Weak),
+            ("!!", BlockerStrength::Strong),
+        ] {
+            let atom = "app-misc/root".parse().unwrap();
+
+            let depend = format!("{prefix}app-misc/b");
+            let root = pkg(
+                "app-misc",
+                "root",
+                "1",
+                &[("DEPEND", "app-misc/b app-misc/a")],
+            );
+            let owner = pkg("app-misc", "a", "1", &[("DEPEND", depend.as_str())]);
+            let conflict = pkg("app-misc", "b", "1", &[]);
+            let outcome = ResolverFixture::new([root, owner.clone(), conflict.clone()])
+                .resolve([&atom])
+                .await;
+
+            let rejected = nested_rejection(&outcome);
+            assert_eq!(&rejected.pkg, &owner);
+            assert_eq!(
+                rejected.reason,
+                CandidateRejectionReason::Dependency(
+                    DependencyField::Depend,
+                    Box::new(RequirementFailure::Blocker {
+                        strength,
+                        atom: "app-misc/b".parse().unwrap(),
+                        conflict: Box::new(conflict),
+                    }),
+                )
+            );
+
+            let depend = format!("{prefix}app-misc/root");
+            let root = pkg("app-misc", "root", "1", &[("DEPEND", "app-misc/child")]);
+            let child = pkg("app-misc", "child", "1", &[("DEPEND", depend.as_str())]);
+            let outcome = ResolverFixture::new([root.clone(), child.clone()])
+                .resolve([&atom])
+                .await;
+
+            let rejected = nested_rejection(&outcome);
+            assert_eq!(&rejected.pkg, &child);
+            assert_eq!(
+                rejected.reason,
+                CandidateRejectionReason::Dependency(
+                    DependencyField::Depend,
+                    Box::new(RequirementFailure::Blocker {
+                        strength,
+                        atom: "app-misc/root".parse().unwrap(),
+                        conflict: Box::new(root),
+                    }),
+                )
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_blocker_installed() {
+        for (prefix, strength) in [
+            ("!", BlockerStrength::Weak),
+            ("!!", BlockerStrength::Strong),
+        ] {
+            let atom = "app-misc/root".parse().unwrap();
+            let depend = format!("{prefix}app-misc/other");
+            let root = pkg("app-misc", "root", "1", &[("DEPEND", depend.as_str())]);
+            let other = installed("other", "1", "0", &[], &[]);
+            let outcome = ResolverFixture::new([root.clone()])
+                .with_installed([other.clone()])
+                .resolve([&atom])
+                .await;
+
+            match strength {
+                BlockerStrength::Weak => {
+                    assert!(outcome.is_resolved());
+                    assert_eq!(
+                        outcome.plan().operations(),
+                        &[
+                            Merge(EffectivePackage::new(root, EffectiveUse::default(),)),
+                            Unmerge(other),
+                        ]
+                    );
+                }
+                BlockerStrength::Strong => {
+                    let expected = RequirementFailure::Exhausted(
+                        atom,
+                        vec![RejectedCandidate::new(
+                            root,
+                            CandidateRejectionReason::Dependency(
+                                DependencyField::Depend,
+                                Box::new(RequirementFailure::Blocker {
+                                    strength,
+                                    atom: "app-misc/other".parse().unwrap(),
+                                    conflict: Box::new(pkg("app-misc", "other", "1", &[])),
+                                }),
+                            ),
+                        )],
+                    );
+                    assert_eq!(outcome.failure(), Some(&expected));
+                }
             }
-        );
+        }
     }
 
     #[tokio::test]
-    async fn test_resolve_weak_blocker_selected() {
+    async fn test_resolve_blocker_same_slot() {
         let atom = "app-misc/root".parse().unwrap();
+        for depend in ["!app-misc/root", "!!<app-misc/root-2"] {
+            let root = pkg("app-misc", "root", "2", &[("DEPEND", depend)]);
+            let installed = installed("root", "1", "0", &[], &[]);
+            let outcome = ResolverFixture::new([root.clone()])
+                .with_installed([installed.clone()])
+                .resolve([&atom])
+                .await;
+
+            let pkg = EffectivePackage::new(root, EffectiveUse::default());
+            assert!(outcome.is_resolved());
+            assert_eq!(outcome.plan().operations(), &[Upgrade(pkg, installed)]);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_blocker_use() {
+        let atom = "app-misc/root".parse().unwrap();
+
         let root = pkg(
             "app-misc",
             "root",
             "1",
-            &[("DEPEND", "app-misc/b app-misc/a")],
+            &[("DEPEND", "!app-misc/other[flag]")],
         );
-        let owner = pkg(
-            "app-misc",
-            "a",
-            "1",
-            &[("IUSE", "feature"), ("DEPEND", "!app-misc/b[feature?]")],
-        );
-        let conflict = pkg("app-misc", "b", "1", &[("IUSE", "feature")]);
-        let blocked_atom = "app-misc/b[feature?]".parse().unwrap();
-        let outcome = ResolverFixture::new([root, owner.clone(), conflict.clone()])
-            .with_use(&["feature"])
-            .resolve([&atom])
-            .await;
-
-        let rejected = nested_rejection(&outcome);
-        assert_eq!(&rejected.pkg, &owner);
-        assert_eq!(
-            rejected.reason,
-            CandidateRejectionReason::Dependency(
-                DependencyField::Depend,
-                Box::new(RequirementFailure::WeakBlocker {
-                    atom: blocked_atom,
-                    conflict: Box::new(conflict),
-                }),
-            )
-        );
-    }
-
-    #[tokio::test]
-    async fn test_resolve_weak_blocker_visiting() {
-        let atom = "app-misc/root".parse().unwrap();
-        let root = pkg("app-misc", "root", "1", &[("DEPEND", "app-misc/child")]);
-        let child = pkg("app-misc", "child", "1", &[("DEPEND", "!app-misc/root")]);
-        let blocked_atom = "app-misc/root".parse().unwrap();
-        let outcome = ResolverFixture::new([root.clone(), child.clone()])
-            .resolve([&atom])
-            .await;
-
-        let rejected = nested_rejection(&outcome);
-        assert_eq!(&rejected.pkg, &child);
-        assert_eq!(
-            rejected.reason,
-            CandidateRejectionReason::Dependency(
-                DependencyField::Depend,
-                Box::new(RequirementFailure::WeakBlocker {
-                    atom: blocked_atom,
-                    conflict: Box::new(root),
-                }),
-            )
-        );
-    }
-
-    #[tokio::test]
-    async fn test_resolve_weak_blocker_removal() {
-        let atom = "app-misc/root".parse().unwrap();
-        let root = pkg("app-misc", "root", "1", &[("DEPEND", "!app-misc/other")]);
-        let other = installed("other", "1", "0", &[], &[]);
-        let outcome = ResolverFixture::new([root.clone()])
-            .with_installed([other.clone()])
-            .resolve([&atom])
-            .await;
-
-        assert!(outcome.is_resolved());
-        assert_eq!(
-            outcome.plan().operations(),
-            &[
-                PackageOperation::Merge(EffectivePackage::new(root, EffectiveUse::default())),
-                PackageOperation::Unmerge(other),
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn test_resolve_weak_blocker_removal_self() {
-        let atom = "app-misc/root".parse().unwrap();
-        let root = pkg("app-misc", "root", "2", &[("DEPEND", "!app-misc/root")]);
-        let installed = installed("root", "1", "0", &[], &[]);
-        let outcome = ResolverFixture::new([root.clone()])
-            .with_installed([installed.clone()])
-            .resolve([&atom])
-            .await;
-
-        let pkg = EffectivePackage::new(root, EffectiveUse::default());
-        assert!(outcome.is_resolved());
-        assert_eq!(
-            outcome.plan().operations(),
-            &[PackageOperation::Upgrade(pkg, installed,)]
-        );
-    }
-
-    #[tokio::test]
-    async fn test_resolve_weak_blocker_removal_use_dep() {
-        let atom = "app-misc/root".parse().unwrap();
-        let metadata = [("DEPEND", "!app-misc/other[flag]")];
-        let root = pkg("app-misc", "root", "1", &metadata);
-
         let disabled = installed("other", "1", "0", &["flag"], &[]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([disabled])
             .resolve([&atom])
             .await;
-
-        let pkg = EffectivePackage::new(root.clone(), EffectiveUse::default());
+        let merged = EffectivePackage::new(root.clone(), EffectiveUse::default());
         assert!(outcome.is_resolved());
-        assert_eq!(outcome.plan().operations(), &[PackageOperation::Merge(pkg)]);
+        assert_eq!(outcome.plan().operations(), &[Merge(merged)]);
 
         let enabled = installed("other", "1", "0", &["flag"], &["flag"]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([enabled.clone()])
             .resolve([&atom])
             .await;
-
-        let pkg = EffectivePackage::new(root, EffectiveUse::default());
+        let merged = EffectivePackage::new(root.clone(), EffectiveUse::default());
         assert!(outcome.is_resolved());
         assert_eq!(
             outcome.plan().operations(),
-            &[
-                PackageOperation::Merge(pkg),
-                PackageOperation::Unmerge(enabled),
-            ]
+            &[Merge(merged), Unmerge(enabled),]
         );
-    }
 
-    #[tokio::test]
-    async fn test_resolve_weak_blocker_removal_owner_use() {
-        let atom = "app-misc/root".parse().unwrap();
-        let metadata = [("IUSE", "feature"), ("DEPEND", "!app-misc/other[feature?]")];
-        let root = pkg("app-misc", "root", "1", &metadata);
+        let root = pkg(
+            "app-misc",
+            "root",
+            "1",
+            &[("IUSE", "feature"), ("DEPEND", "!app-misc/other[feature?]")],
+        );
         let enabled = installed("other", "2", "0", &["feature"], &["feature"]);
         let disabled = installed("other", "1", "0", &["feature"], &[]);
         let outcome = ResolverFixture::new([root.clone()])
@@ -427,15 +454,11 @@ mod tests {
             .with_installed([disabled, enabled.clone()])
             .resolve([&atom])
             .await;
-
-        let pkg = EffectivePackage::new(root, effective(&["feature"], &["feature"]));
+        let merged = EffectivePackage::new(root, effective(&["feature"], &["feature"]));
         assert!(outcome.is_resolved());
         assert_eq!(
             outcome.plan().operations(),
-            &[
-                PackageOperation::Merge(pkg),
-                PackageOperation::Unmerge(enabled),
-            ]
+            &[Merge(merged), Unmerge(enabled),]
         );
     }
 
@@ -501,23 +524,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_strong_block() {
+    async fn test_resolve_strong_blocker() {
         let atom = "app-misc/root".parse().unwrap();
         let root = pkg("app-misc", "root", "1", &[("DEPEND", "!!app-misc/blocked")]);
-        let blocked = "app-misc/blocked".parse().unwrap();
         let outcome = ResolverFixture::new([root.clone()]).resolve([&atom]).await;
-        let expected = RequirementFailure::Exhausted(
-            atom,
-            vec![RejectedCandidate::new(
-                root,
-                CandidateRejectionReason::Dependency(
-                    DependencyField::Depend,
-                    RequirementFailure::StrongBlocker(blocked).into(),
-                ),
-            )],
-        );
 
-        assert_eq!(outcome.failure(), Some(&expected));
+        assert!(outcome.is_resolved());
+        assert_eq!(
+            outcome.plan().operations(),
+            &[Merge(EffectivePackage::new(root, EffectiveUse::default(),))]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_any_of_rollback_blocker() {
+        for prefix in ["!", "!!"] {
+            let atom = "app-misc/root".parse().unwrap();
+            let depend = format!(
+                "|| ( ( app-misc/abandoned {prefix}app-misc/child app-misc/missing ) app-misc/child )"
+            );
+            let root = pkg("app-misc", "root", "1", &[("DEPEND", depend.as_str())]);
+            let abandoned = pkg("app-misc", "abandoned", "1", &[]);
+            let child = pkg("app-misc", "child", "1", &[]);
+            let abandoned_installed = installed("abandoned", "0", "0", &[], &[]);
+            let child_installed = installed("child", "1", "1", &[], &[]);
+            let outcome = ResolverFixture::new([root.clone(), abandoned, child.clone()])
+                .with_installed([abandoned_installed, child_installed])
+                .resolve([&atom])
+                .await;
+
+            assert!(outcome.is_resolved());
+            assert_eq!(
+                outcome.plan().operations(),
+                &[
+                    Merge(EffectivePackage::new(child, EffectiveUse::default())),
+                    Merge(EffectivePackage::new(root, EffectiveUse::default())),
+                ]
+            );
+        }
     }
 
     #[tokio::test]
@@ -538,8 +582,8 @@ mod tests {
         assert_eq!(
             outcome.plan().operations(),
             &[
-                PackageOperation::Merge(EffectivePackage::new(second, EffectiveUse::default())),
-                PackageOperation::Merge(EffectivePackage::new(root, EffectiveUse::default())),
+                Merge(EffectivePackage::new(second, EffectiveUse::default())),
+                Merge(EffectivePackage::new(root, EffectiveUse::default())),
             ]
         );
     }
@@ -570,33 +614,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_any_of_rollback_removal() {
-        let atom = "app-misc/root".parse().unwrap();
-        let metadata = [(
-            "DEPEND",
-            "|| ( ( app-misc/abandoned !app-misc/child app-misc/missing ) app-misc/child )",
-        )];
-        let root = pkg("app-misc", "root", "1", &metadata);
-        let abandoned = pkg("app-misc", "abandoned", "1", &[]);
-        let child = pkg("app-misc", "child", "1", &[]);
-        let abandoned_installed = installed("abandoned", "0", "0", &[], &[]);
-        let child_installed = installed("child", "1", "1", &[], &[]);
-        let outcome = ResolverFixture::new([root.clone(), abandoned, child.clone()])
-            .with_installed([abandoned_installed, child_installed])
-            .resolve([&atom])
-            .await;
-
-        assert!(outcome.is_resolved());
-        assert_eq!(
-            outcome.plan().operations(),
-            &[
-                PackageOperation::Merge(EffectivePackage::new(child, EffectiveUse::default())),
-                PackageOperation::Merge(EffectivePackage::new(root, EffectiveUse::default())),
-            ]
-        );
-    }
-
-    #[tokio::test]
     async fn test_resolve_multiple_roots() {
         let a = "app-misc/a".parse().unwrap();
         let b = "app-misc/b".parse().unwrap();
@@ -610,8 +627,8 @@ mod tests {
         assert_eq!(
             outcome.plan().operations(),
             &[
-                PackageOperation::Merge(EffectivePackage::new(pkg_a, EffectiveUse::default())),
-                PackageOperation::Merge(EffectivePackage::new(pkg_b, EffectiveUse::default())),
+                Merge(EffectivePackage::new(pkg_a, EffectiveUse::default())),
+                Merge(EffectivePackage::new(pkg_b, EffectiveUse::default())),
             ]
         );
     }

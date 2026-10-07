@@ -322,27 +322,28 @@ impl Default for AtomKind {
     }
 }
 
-/// There are two ways to block an atom from being installed.
-///  * Weak: Two blocking packages can co-exist during installation.
-///  * Strong: The block is enforced as long as the packages is installed.
+/// The strength of a package blocker.
+///
+/// Weak: Two blocking packages can co-exist during installation.
+/// Strong: The block is enforced as long as the packages is installed.
 ///
 /// See: https://devmanual.gentoo.org/general-concepts/dependencies/#blockers
 #[derive(
     Archive, Serialize, Deserialize, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug,
 )]
-pub enum AtomBlocker {
+pub enum BlockerStrength {
     Weak,
     Strong,
 }
 
-impl AtomBlocker {
+impl BlockerStrength {
     /// Returns `true` if the blocker is weak.
     pub const fn is_weak(&self) -> bool {
         matches!(self, Self::Weak)
     }
 }
 
-impl fmt::Display for AtomBlocker {
+impl fmt::Display for BlockerStrength {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Weak => f.write_char('!'),

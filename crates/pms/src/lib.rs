@@ -14,7 +14,7 @@ pub mod useflag;
 mod test_support;
 
 pub use arch::Arch;
-pub use atom::{Atom, AtomBlocker, SlotConstraint, VersionConstraint};
+pub use atom::{Atom, BlockerStrength, SlotConstraint, VersionConstraint};
 pub use deps::{
     AtomDep, DepExpr, Expr, ExprEval, ExprItem, ExprKind, ExprNodes, ExprTree, RequiredUseFlag,
 };

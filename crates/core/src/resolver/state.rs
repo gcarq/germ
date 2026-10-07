@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use germ_pms::{Atom, CPV, RepoName};
+use germ_pms::{Atom, BlockerStrength, CPV, RepoName};
 use log::info;
 
 use super::outcome::{RequirementFailure, ResolutionOutcome};
@@ -12,7 +12,7 @@ use crate::vdb::package::InstalledPackage;
 
 /// Holds the current resolver state.
 ///
-/// All blockers must be resolved in the final state.
+/// Every package blocker must hold in the final state.
 #[derive(Debug, Default)]
 pub struct ResolverState {
     /// Holds packages that have been selected for installation.
@@ -21,9 +21,9 @@ pub struct ResolverState {
     visiting: FxIndexMap<PackageKey, EffectivePackage>,
     /// Holds rejected candidates.
     rejected: FxIndexMap<PackageKey, PolicyRejection>,
-    /// Holds weak blockers that need to be resolved.
+    /// Holds active blockers that need to be resolved.
     blockers: Vec<ActiveBlocker>,
-    /// Holds installed packages that are planned for removal.
+    /// Holds installed packages that are planned for removal after the owner is merged.
     removals: FxIndexSet<InstalledPackage>,
     /// Holds installed package versions that should be replaced.
     replacements: FxIndexMap<PackageKey, InstalledPackage>,
@@ -88,51 +88,51 @@ impl ResolverState {
         self.rejected.get(key)
     }
 
-    /// Returns the first selected or visiting package that conflicts with `atom`.
-    pub fn weak_blocker_conflict(
-        &self,
-        owner: &EffectivePackage,
-        atom: &Atom,
-    ) -> anyhow::Result<Option<&Package>> {
-        let requirement = AtomRequirement::dependency(atom, &owner.effective_use);
-        let iter = self.selected.values().chain(self.visiting.values());
-        for candidate in iter {
-            if candidate.pkg != owner.pkg && candidate.matches(&requirement)? {
-                return Ok(Some(&candidate.pkg));
-            }
-        }
-        Ok(None)
-    }
-
-    /// Registers a weak blocker and plans removals for matching installed packages.
-    pub fn register_weak_blocker(
+    /// Registers a package blocker, or returns a package that conflicts with it.
+    ///
+    /// A blocker conflicts with a selected, visiting, or installed package that matches its
+    /// atom. A weak blocker excludes its own package and is resolved by removing each
+    /// matching installed package; a strong blocker in the same slot is handled automatically,
+    /// in any other case it needs to be resolved manually.
+    pub fn register_blocker(
         &mut self,
         owner: &EffectivePackage,
         atom: &Atom,
+        strength: BlockerStrength,
         installed: impl IntoIterator<Item = InstalledPackage>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<Package>> {
         let requirement = AtomRequirement::dependency(atom, &owner.effective_use);
+        for candidate in self.selected.values().chain(self.visiting.values()) {
+            if strength == BlockerStrength::Weak && candidate.pkg == owner.pkg {
+                continue;
+            }
+            if candidate.matches(&requirement)? {
+                return Ok(Some(candidate.pkg.clone()));
+            }
+        }
         for pkg in installed {
             if pkg.matches_package_slot(&owner.pkg) {
                 continue;
             }
-            if requirement.satisfied_by(&pkg, pkg.effective_use())? {
-                info!(
-                    "{}: planning removal of {pkg} for weak blocker {atom}",
-                    owner.pkg
-                );
-                self.removals.insert(pkg);
+            if !requirement.satisfied_by(&pkg, pkg.effective_use())? {
+                continue;
+            }
+            match strength {
+                BlockerStrength::Weak => {
+                    info!(
+                        "{}: planning removal of {pkg} for blocker !{atom}",
+                        owner.pkg
+                    );
+                    self.removals.insert(pkg);
+                }
+                BlockerStrength::Strong => return Ok(Some(pkg.into())),
             }
         }
-
-        self.blockers.push(ActiveBlocker {
-            owner: owner.clone(),
-            atom: atom.clone(),
-        });
-        Ok(())
+        self.blockers.push(ActiveBlocker::new(owner, atom));
+        Ok(None)
     }
 
-    /// Returns the first active weak blocker that matches `candidate`.
+    /// Returns the first active blocker that matches `candidate`.
     pub fn matching_active_blocker(
         &self,
         candidate: &EffectivePackage,
@@ -209,7 +209,7 @@ impl PackageKey {
     }
 }
 
-/// Defines an active weak blocker in a dependency expression.
+/// Defines an active package blocker in a dependency expression.
 #[derive(Clone, Debug)]
 struct ActiveBlocker {
     owner: EffectivePackage,
@@ -217,6 +217,13 @@ struct ActiveBlocker {
 }
 
 impl ActiveBlocker {
+    fn new(owner: &EffectivePackage, atom: &Atom) -> Self {
+        Self {
+            owner: owner.clone(),
+            atom: atom.clone(),
+        }
+    }
+
     fn matches(&self, candidate: &EffectivePackage) -> anyhow::Result<bool> {
         AtomRequirement::dependency(&self.atom, &self.owner.effective_use)
             .satisfied_by(&candidate.pkg, &candidate.effective_use)
@@ -229,7 +236,6 @@ mod tests {
     use crate::resolver::test_support::installed;
     use crate::test_support::pkg;
     use crate::useflag::EffectiveUse;
-    use crate::useflag::test_support::effective;
 
     fn selected_state(package: Package, replacement: Option<InstalledPackage>) -> ResolverState {
         let key = PackageKey::new(&package);
@@ -301,87 +307,6 @@ mod tests {
                 EffectivePackage::new(pkg, EffectiveUse::default()),
                 installed,
             )]
-        );
-    }
-
-    #[test]
-    fn test_finalize_unmerge() {
-        let owner =
-            EffectivePackage::new(pkg("app-misc", "owner", "1", &[]), EffectiveUse::default());
-        let atom = "app-misc/foo".parse().unwrap();
-        let installed = installed("foo", "1", "0", &[], &[]);
-        let mut state = ResolverState::default();
-        state
-            .register_weak_blocker(&owner, &atom, [installed.clone()])
-            .unwrap();
-        let outcome = state.finalize(None);
-
-        assert_eq!(
-            outcome.plan().operations(),
-            &[PackageOperation::Unmerge(installed)]
-        );
-    }
-
-    #[test]
-    fn test_weak_block_conflict_selected_before_visiting() {
-        let owner = pkg("app-misc", "owner", "1", &[]);
-        let selected = pkg("app-misc", "foo", "1", &[]);
-        let visiting = pkg("app-misc", "foo", "2", &[]);
-        let atom = "app-misc/foo".parse().unwrap();
-        let mut state = ResolverState::default();
-
-        let owner_key = PackageKey::new(&owner);
-        state.visit(
-            owner_key.clone(),
-            &EffectivePackage::new(owner.clone(), EffectiveUse::default()),
-        );
-        state.select(owner_key);
-        let selected_key = PackageKey::new(&selected);
-        state.visit(
-            selected_key.clone(),
-            &EffectivePackage::new(selected.clone(), EffectiveUse::default()),
-        );
-        state.select(selected_key);
-        state.visit(
-            PackageKey::new(&visiting),
-            &EffectivePackage::new(visiting, EffectiveUse::default()),
-        );
-
-        assert_eq!(
-            state
-                .weak_blocker_conflict(
-                    &EffectivePackage::new(owner, EffectiveUse::default()),
-                    &atom,
-                )
-                .unwrap(),
-            Some(&selected)
-        );
-    }
-
-    #[test]
-    fn test_matching_active_blocker_first() {
-        let owner = EffectivePackage::new(
-            pkg("app-misc", "owner", "1", &[]),
-            effective(&["feature"], &["feature"]),
-        );
-        let later_owner = EffectivePackage::new(
-            pkg("app-misc", "later-owner", "1", &[]),
-            effective(&["feature"], &["feature"]),
-        );
-        let target = EffectivePackage::new(
-            pkg("app-misc", "target", "1", &[("IUSE", "feature")]),
-            effective(&["feature"], &["feature"]),
-        );
-        let atom = "app-misc/target[feature?]".parse().unwrap();
-        let mut state = ResolverState::default();
-        state.register_weak_blocker(&owner, &atom, []).unwrap();
-        state
-            .register_weak_blocker(&later_owner, &atom, [])
-            .unwrap();
-
-        assert_eq!(
-            state.matching_active_blocker(&target).unwrap(),
-            Some((&atom, &owner.pkg))
         );
     }
 

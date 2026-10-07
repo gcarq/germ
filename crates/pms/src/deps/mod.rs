@@ -7,7 +7,7 @@ use std::str::FromStr;
 pub use expr::{Expr, ExprEval, ExprNodes, ExprTree};
 use rkyv::{Archive, Deserialize, Serialize};
 
-use crate::atom::{Atom, AtomBlocker};
+use crate::atom::{Atom, BlockerStrength};
 use crate::deps::parser::ExprParser;
 use crate::deps::parser::arena::{ExprArena, ExprEntry};
 use crate::useflag::UseFlag;
@@ -69,13 +69,11 @@ pub trait ExprItem: FromStr<Err = anyhow::Error> + fmt::Display {
 /// Extends an [`Atom`] with an optional blocker, e.g.:
 /// `!<app-misc/foo-1.3` or `!!app-misc/foo`.
 ///
-/// [`AtomBlocker`] only makes sense when used a dependency, and is not part of the atom itself.
-#[derive(
-    Archive, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug,
-)]
+/// [`BlockerStrength`] only makes sense when used a dependency, and is not part of the atom itself.
+#[derive(Archive, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct AtomDep {
     atom: Atom,
-    blocker: Option<AtomBlocker>,
+    blocker: Option<BlockerStrength>,
 }
 
 impl AtomDep {
@@ -85,7 +83,7 @@ impl AtomDep {
     }
 
     /// Returns the blocker, if any.
-    pub const fn blocker(&self) -> Option<AtomBlocker> {
+    pub const fn blocker(&self) -> Option<BlockerStrength> {
         self.blocker
     }
 }
@@ -98,8 +96,8 @@ impl FromStr for AtomDep {
     fn from_str(value: &str) -> anyhow::Result<Self> {
         let (blocker, atom) = match value.strip_prefix('!') {
             Some(atom) => match atom.strip_prefix("!") {
-                Some(atom) => (Some(AtomBlocker::Strong), atom),
-                None => (Some(AtomBlocker::Weak), atom),
+                Some(atom) => (Some(BlockerStrength::Strong), atom),
+                None => (Some(BlockerStrength::Weak), atom),
             },
             None => (None, value),
         };

@@ -1,6 +1,5 @@
 use futures_util::future::LocalBoxFuture;
-use germ_pms::{Atom, AtomBlocker, AtomDep, DependencyField, Expr, ExprNodes};
-use log::debug;
+use germ_pms::{Atom, AtomDep, BlockerStrength, DependencyField, Expr, ExprNodes};
 
 use super::outcome::RequirementFailure;
 use super::provider::PackageLookup;
@@ -113,42 +112,32 @@ impl<U: PackageLookup> Resolver<U> {
         owner: &EffectivePackage,
         atom: &AtomDep,
     ) -> anyhow::Result<Option<RequirementFailure>> {
-        if let Some(blocker) = atom.blocker() {
-            self.handle_blocker(owner, atom.inner(), blocker).await
+        if let Some(strength) = atom.blocker() {
+            self.handle_blocker(owner, atom.inner(), strength).await
         } else {
             let requirement = AtomRequirement::dependency(atom.inner(), &owner.effective_use);
             self.resolve_candidates(requirement).await
         }
     }
 
-    /// Handles the given `atom` with its `blocker` and updates the state.
+    /// Handles the given `atom` with its `strength` and updates the state.
     async fn handle_blocker(
         &mut self,
         owner: &EffectivePackage,
         atom: &Atom,
-        blocker: AtomBlocker,
+        strength: BlockerStrength,
     ) -> anyhow::Result<Option<RequirementFailure>> {
-        match blocker {
-            AtomBlocker::Weak => {
-                if let Some(conflict) = self.state.weak_blocker_conflict(owner, atom)? {
-                    return Ok(Some(RequirementFailure::WeakBlocker {
-                        atom: atom.clone(),
-                        conflict: conflict.clone().into(),
-                    }));
-                }
-
-                let installed = self.provider.vdb_match_by_atom(atom).await?;
-                self.state.register_weak_blocker(owner, atom, installed)?;
-                Ok(None)
-            }
-            AtomBlocker::Strong => {
-                // TODO: implement me
-                debug!(
-                    "{}: cannot satisfy due to strong blocker {blocker}{atom}",
-                    owner.pkg
-                );
-                Ok(Some(RequirementFailure::StrongBlocker(atom.clone())))
-            }
+        let installed = self.provider.vdb_match_by_atom(atom).await?;
+        match self
+            .state
+            .register_blocker(owner, atom, strength, installed)?
+        {
+            Some(conflict) => Ok(Some(RequirementFailure::Blocker {
+                strength,
+                atom: atom.clone(),
+                conflict: conflict.into(),
+            })),
+            None => Ok(None),
         }
     }
 }

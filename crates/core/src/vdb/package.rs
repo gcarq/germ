@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use germ_pms::{CPV, MetaVar, PackageMetadata, RepoName, UseFlag};
 
 use crate::eapi::is_supported_for_ebuilds;
-use crate::package::PackageView;
+use crate::package::{Package, PackageView};
 use crate::useflag::EffectiveUse;
 
 /// Represents a package that is currently installed on the system.
@@ -91,6 +91,12 @@ impl hash::Hash for InstalledPackage {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         self.cpv.hash(state);
         self.repo.hash(state);
+    }
+}
+
+impl From<InstalledPackage> for Package {
+    fn from(pkg: InstalledPackage) -> Self {
+        Package::new(pkg.cpv, pkg.repo, pkg.metadata)
     }
 }
 

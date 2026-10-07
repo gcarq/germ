@@ -1,6 +1,6 @@
 use std::fmt;
 
-use germ_pms::{Atom, DependencyField};
+use germ_pms::{Atom, BlockerStrength, DependencyField};
 
 use super::ExecutionPlan;
 use super::state::PackageKey;
@@ -103,8 +103,11 @@ impl fmt::Display for CandidateRejectionReason {
 pub enum RequirementFailure {
     NoCandidate(Atom),
     Exhausted(Atom, Vec<RejectedCandidate>),
-    WeakBlocker { atom: Atom, conflict: Box<Package> },
-    StrongBlocker(Atom),
+    Blocker {
+        strength: BlockerStrength,
+        atom: Atom,
+        conflict: Box<Package>,
+    },
     AnyOf(Vec<RequirementFailure>),
 }
 
@@ -119,10 +122,14 @@ impl fmt::Display for RequirementFailure {
                 }
                 Ok(())
             }
-            Self::WeakBlocker { atom, conflict } => {
-                write!(f, "weak blocker {atom} conflicts with {conflict}")
-            }
-            Self::StrongBlocker(atom) => write!(f, "unsupported strong blocker !!{atom}"),
+            Self::Blocker {
+                strength,
+                atom,
+                conflict,
+            } => match strength {
+                BlockerStrength::Weak => write!(f, "!{atom} conflicts with {conflict}"),
+                BlockerStrength::Strong => write!(f, "!!{atom} conflicts with {conflict}"),
+            },
             Self::AnyOf(failures) => {
                 f.write_str("no alternative is satisfiable")?;
                 for failure in failures {
