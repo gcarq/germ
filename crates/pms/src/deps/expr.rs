@@ -174,6 +174,7 @@ impl<T: ExprItem> fmt::Display for Expr<'_, T> {
 }
 
 /// An iterator over the expressions of an [`ExprTree`].
+#[derive(Clone)]
 pub struct ExprNodes<'a, T: ExprItem> {
     tree: ExprTree<'a, T>,
     nodes: slice::Iter<'a, ExprId>,

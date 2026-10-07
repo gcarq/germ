@@ -73,11 +73,22 @@ impl<U: PackageLookup> Resolver<U> {
     }
 
     /// Resolves alternatives in an any-of group until one succeeds.
+    ///
+    /// Already satisfied dependencies are preferred.
     async fn resolve_group_any(
         &mut self,
         owner: &EffectivePackage,
         nodes: ExprNodes<'_, AtomDep>,
     ) -> anyhow::Result<Option<RequirementFailure>> {
+        for expr in nodes.clone() {
+            if let Expr::Item(atom) = expr {
+                let requirement = AtomRequirement::dependency(atom.inner(), &owner.effective_use);
+                if self.state.already_satisfied(&requirement)? {
+                    return Ok(None);
+                }
+            }
+        }
+
         let mut failures = Vec::new();
         for expr in nodes {
             let traversal = self.start_traversal();

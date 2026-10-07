@@ -521,6 +521,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_resolve_any_of_prefers_selected() {
+        let atom = "app-misc/root".parse().unwrap();
+        let metadata = [(
+            "DEPEND",
+            "app-misc/second || ( app-misc/first app-misc/second )",
+        )];
+        let root = pkg("app-misc", "root", "1", &metadata);
+        let first = pkg("app-misc", "first", "1", &[]);
+        let second = pkg("app-misc", "second", "1", &[]);
+        let outcome = ResolverFixture::new([root.clone(), first, second.clone()])
+            .resolve([&atom])
+            .await;
+
+        assert!(outcome.is_resolved());
+        assert_eq!(
+            outcome.plan().operations(),
+            &[
+                PackageOperation::Merge(EffectivePackage::new(second, EffectiveUse::default())),
+                PackageOperation::Merge(EffectivePackage::new(root, EffectiveUse::default())),
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn test_resolve_any_of_failures() {
         let atom = "app-misc/root".parse().unwrap();
         let metadata = [("DEPEND", "|| ( app-misc/first app-misc/second )")];

@@ -42,6 +42,16 @@ impl ResolverState {
             .map_or(Ok(false), |pkg| pkg.matches(requirement))
     }
 
+    /// Returns whether a selected or visiting package satisfies `requirement`.
+    pub fn already_satisfied(&self, requirement: &AtomRequirement<'_>) -> anyhow::Result<bool> {
+        for candidate in self.selected.values().chain(self.visiting.values()) {
+            if candidate.matches(requirement)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// Marks the package for the given `key` as selected.
     pub fn select(&mut self, key: PackageKey) {
         let pkg = self
