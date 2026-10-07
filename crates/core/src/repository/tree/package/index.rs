@@ -193,8 +193,9 @@ impl DiscoveryState {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::test_support::cpv;
+
     use super::*;
-    use crate::test_support::cpv;
 
     #[test]
     fn test_discovery_coverage() {

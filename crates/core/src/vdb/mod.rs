@@ -11,9 +11,8 @@ use anyhow::{Context, anyhow};
 use either::Either;
 use fancy_regex::Regex;
 use germ_pms::grammar::{PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
-use germ_pms::{Atom, CPV, CatName, PackageVersion};
+use germ_pms::{Atom, CPV, CatName, PackageVersion, PackageView};
 
-use crate::package::PackageView;
 use crate::types::FxHashMap;
 use crate::vdb::package::InstalledPackage;
 
@@ -177,9 +176,10 @@ impl Vdb {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::test_support::{cpv, pkg};
+
     use super::test_support::VdbFixture;
     use super::*;
-    use crate::test_support::{cpv, pkg};
 
     #[test]
     fn test_vdb_from_path_missing() {

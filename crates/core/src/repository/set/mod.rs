@@ -9,7 +9,7 @@ use std::{fs, io};
 
 use anyhow::anyhow;
 use either::Either;
-use germ_pms::{Arch, Atom, RepoName};
+use germ_pms::{Arch, Atom, PackageView, RepoName};
 use log::{debug, error, warn};
 
 use self::config::RepoSetConfig;
@@ -17,7 +17,6 @@ pub use self::error::RepoSetError;
 use self::sync::{SyncHandler, build_sync_handler};
 use super::tree::{PackageResult, Repository, RepositoryError};
 use crate::SysConf;
-use crate::package::PackageView;
 use crate::policy::pkgmask::RepositorySource;
 use crate::profile::Profile;
 use crate::types::{FxHashMap, FxIndexMap};

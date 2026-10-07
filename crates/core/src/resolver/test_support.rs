@@ -1,10 +1,9 @@
-use germ_pms::Atom;
+use germ_pms::test_support::{cpv, pkg_metadata};
+use germ_pms::{Atom, Package, PackageView};
 
 use super::provider::PackageLookup;
 use super::{ResolutionOutcome, Resolver};
-use crate::package::{Package, PackageView};
 use crate::policy::test_support::PolicyFixture;
-use crate::test_support::{cpv, pkg_metadata};
 use crate::useflag::test_support::effective;
 use crate::vdb::package::InstalledPackage;
 

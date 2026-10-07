@@ -156,9 +156,10 @@ impl fmt::Display for Ebuild<'_> {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::test_support::cpv;
+
     use super::*;
     use crate::repository::test_support::RepoBuilder;
-    use crate::test_support::cpv;
 
     #[test]
     fn test_eapi_declarations() {

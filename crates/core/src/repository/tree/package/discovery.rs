@@ -99,8 +99,9 @@ fn cpv_from_fs_parts(category: &CatName, package: PkgName, ebuild_filename: &str
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::test_support::cpv;
+
     use super::*;
-    use crate::test_support::cpv;
 
     #[test]
     fn test_cpv_from_ebuild_ok() {

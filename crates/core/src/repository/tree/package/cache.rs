@@ -152,8 +152,9 @@ impl MetadataCache {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::test_support::{cpv, pkg_metadata};
+
     use super::*;
-    use crate::test_support::{cpv, pkg_metadata};
 
     #[test]
     fn test_metadata_cache_get_missing_table() {

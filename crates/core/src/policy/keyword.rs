@@ -1,10 +1,9 @@
-use germ_pms::Keyword;
+use germ_pms::{Keyword, PackageView};
 
 use super::index::AtomIndex;
 use crate::files::entry::Operation;
 use crate::files::pkgfile::{KeywordRule, PackageAcceptKeywords};
 use crate::keyword::KeywordSelector;
-use crate::package::PackageView;
 
 /// Immutable runtime policy that determines whether a package is accepted based on its keywords.
 pub struct EffectiveKeywords {
@@ -148,10 +147,11 @@ impl KeywordAction {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::Package;
+    use germ_pms::test_support::{cpv, pkg, pkg_metadata};
+
     use super::*;
     use crate::files::entry::Precedence;
-    use crate::package::Package;
-    use crate::test_support::{cpv, pkg, pkg_metadata};
     use crate::useflag::EffectiveUse;
     use crate::utils::Inherit;
     use crate::vdb::package::InstalledPackage;

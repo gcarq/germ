@@ -1,10 +1,9 @@
 use std::fmt;
 
-use germ_pms::{Atom, BlockerStrength, DependencyField};
+use germ_pms::{Atom, BlockerStrength, DependencyField, Package};
 
 use super::ExecutionPlan;
 use super::state::PackageKey;
-use crate::package::Package;
 use crate::policy::PolicyRejection;
 use crate::types::FxIndexMap;
 

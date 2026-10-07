@@ -1,6 +1,5 @@
-use germ_pms::{Atom, CatName, PkgName};
+use germ_pms::{Atom, CatName, PackageView, PkgName};
 
-use crate::package::PackageView;
 use crate::types::FxHashMap;
 
 /// Exact `(category, package)` buckets, keyed by category then package.

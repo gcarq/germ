@@ -50,6 +50,7 @@ mod tests {
     use std::path::PathBuf;
 
     use germ_pms::Eapi;
+    use germ_pms::test_support::cpv;
 
     use super::*;
     use crate::ebuild::Ebuild;
@@ -57,7 +58,6 @@ mod tests {
     use crate::ebuild::handler::{EbuildPhase, EbuildPhaseHandler};
     use crate::makenv::MakeEnv;
     use crate::repository::test_support::{RepoBuilder, repo_set};
-    use crate::test_support::cpv;
 
     fn with_handler(eapi: Eapi, test: impl FnOnce(&EbuildPhaseHandler)) {
         let reposet = repo_set(vec![RepoBuilder::new("repo")]).unwrap();

@@ -11,7 +11,7 @@ pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;
 
-use germ_pms::Atom;
+use germ_pms::{Atom, Package};
 use log::info;
 
 pub use self::outcome::{
@@ -21,11 +21,10 @@ pub use self::plan::{ExecutionPlan, PackageOperation};
 pub use self::provider::{PackageLookup, PackageProvider};
 pub use self::requirement::AtomRequirement;
 use self::state::ResolverState;
-use crate::package::Package;
 use crate::policy::PackagePolicy;
 use crate::useflag::EffectiveUse;
 
-/// Orchestrates dependency resolution for [`Package`](crate::package::Package)s.
+/// Orchestrates dependency resolution for [`Package`]s.
 ///
 /// Packages are fetched from the given [`PackageLookup`]
 /// and evaluated against [`PackagePolicy`].

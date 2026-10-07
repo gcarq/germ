@@ -24,6 +24,7 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+germ-pms = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
 [lints]

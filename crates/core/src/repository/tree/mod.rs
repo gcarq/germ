@@ -15,7 +15,7 @@ pub use eclass::{Eclass, Eclasses};
 use either::Either;
 pub use error::RepositoryError;
 use futures_util::{StreamExt, TryStreamExt, stream};
-use germ_pms::{Arch, Atom, CPV, CatName, RepoName};
+use germ_pms::{Arch, Atom, CPV, CatName, Package, PackageView, RepoName};
 pub use layout::{Layout, LayoutError};
 use log::{debug, warn};
 pub use package::cache::CacheError;
@@ -33,7 +33,6 @@ use crate::eapi::read_eapi;
 use crate::ebuild::Ebuild;
 use crate::files::PackageEntries;
 use crate::files::entry::Precedence;
-use crate::package::{Package, PackageView};
 use crate::types::FxHashSet;
 use crate::utils::{Inherit, is_blank_or_comment, md5sum};
 
@@ -423,10 +422,11 @@ impl Default for Repository {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::test_support::{cpv, pkg_metadata};
+
     use super::super::test_support::RepoBuilder;
     use super::*;
     use crate::conf::test_support::build_sysconf;
-    use crate::test_support::{cpv, pkg_metadata};
 
     #[tokio::test]
     async fn test_repository_resolves_cached_metadata() {

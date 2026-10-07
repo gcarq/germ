@@ -4,10 +4,9 @@ use std::str::FromStr;
 use std::{fmt, fs, hash, io};
 
 use anyhow::{Context, bail};
-use germ_pms::{CPV, MetaVar, PackageMetadata, RepoName, UseFlag};
+use germ_pms::{CPV, MetaVar, Package, PackageMetadata, PackageView, RepoName, UseFlag};
 
 use crate::eapi::is_supported_for_ebuilds;
-use crate::package::{Package, PackageView};
 use crate::useflag::EffectiveUse;
 
 /// Represents a package that is currently installed on the system.
@@ -148,9 +147,22 @@ impl fmt::Display for InstalledPackage {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::test_support::{assert_package_view_matches_atoms, cpv, pkg_metadata};
+
     use super::*;
-    use crate::test_support::{cpv, pkg_metadata};
     use crate::useflag::test_support::effective;
+
+    #[test]
+    fn test_installed_package_matches_atoms() {
+        let pkg = InstalledPackage::from_parts(
+            cpv("sys-devel", "gcc", "15.2.1_p20251122-r1"),
+            "gentoo".parse().unwrap(),
+            pkg_metadata(&[("SLOT", "15")]),
+            EffectiveUse::default(),
+        );
+        assert_package_view_matches_atoms(&pkg);
+        assert_eq!(pkg.qualified_name(), "sys-devel/gcc");
+    }
 
     #[test]
     fn test_installed_package_fmt() {

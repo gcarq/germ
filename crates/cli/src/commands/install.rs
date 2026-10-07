@@ -4,14 +4,13 @@ use std::sync::Arc;
 use anyhow::{Context, bail};
 use germ_core::SysConf;
 use germ_core::conf::portage::PortageConf;
-use germ_core::package::PackageView;
 use germ_core::policy::PackagePolicy;
 use germ_core::policy::pkgmask::PackageMasks;
 use germ_core::repository::RepoSet;
 use germ_core::resolver::{ExecutionPlan, PackageOperation, PackageProvider, Resolver};
 use germ_core::useflag::{EffectiveUse, UseExpandConfig};
 use germ_core::vdb::Vdb;
-use germ_pms::{Atom, UseFlag};
+use germ_pms::{Atom, PackageView, UseFlag};
 
 /// Installs the best matching package for each of the given `atoms`.
 /// TODO: this is just a placeholder for now.

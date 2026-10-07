@@ -193,8 +193,9 @@ fn parse_range(range: &str, max: usize) -> anyhow::Result<(usize, usize)> {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::test_support::cpv;
+
     use super::*;
-    use crate::test_support::cpv;
 
     #[test]
     fn test_ver_cut_ok() {

@@ -1,10 +1,9 @@
-use germ_pms::Atom;
+use germ_pms::{Atom, PackageView};
 use log::debug;
 
 use super::index::AtomIndex;
 use crate::files::PackageEntries;
 use crate::files::entry::{Operation, Precedence};
-use crate::package::PackageView;
 use crate::utils::Inherit;
 
 /// Simple DTO used to build [`PackageMasks`] from repo entries.
@@ -95,9 +94,10 @@ impl PackageMasks {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::test_support::pkg;
+
     use super::*;
     use crate::files::entry::Precedence;
-    use crate::test_support::pkg;
 
     #[test]
     fn test_is_masked() -> anyhow::Result<()> {

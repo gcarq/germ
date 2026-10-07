@@ -1,8 +1,7 @@
 mod set;
-mod tree;
-
 #[cfg(test)]
 pub(crate) mod test_support;
+mod tree;
 
 pub use set::{RepoSet, RepoSetError};
 pub use tree::{

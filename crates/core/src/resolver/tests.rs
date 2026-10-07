@@ -1,10 +1,10 @@
+use germ_pms::test_support::pkg;
 use germ_pms::{BlockerStrength, DependencyField};
 
 use super::test_support::{ResolverFixture, installed};
 use super::*;
 use crate::policy::PolicyRejection;
 use crate::resolver::PackageOperation::{Merge, Replace, Unmerge, Upgrade};
-use crate::test_support::pkg;
 use crate::useflag::EffectiveUse;
 use crate::useflag::test_support::effective;
 

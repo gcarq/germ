@@ -46,8 +46,9 @@ mod tests {
     use std::io;
     use std::path::PathBuf;
 
+    use germ_pms::test_support::cpv;
+
     use super::*;
-    use crate::test_support::cpv;
 
     #[test]
     fn test_promote() {

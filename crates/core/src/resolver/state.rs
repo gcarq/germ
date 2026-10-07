@@ -1,12 +1,11 @@
 use std::cmp::Ordering;
 
-use germ_pms::{Atom, BlockerStrength, CPV, RepoName};
+use germ_pms::{Atom, BlockerStrength, CPV, Package, PackageView, RepoName};
 use log::info;
 
 use super::outcome::{RequirementFailure, ResolutionOutcome};
 use super::requirement::AtomRequirement;
 use super::{EffectivePackage, ExecutionPlan, PackageOperation};
-use crate::package::{Package, PackageView};
 use crate::policy::PolicyRejection;
 use crate::types::{FxIndexMap, FxIndexSet};
 use crate::vdb::package::InstalledPackage;
@@ -233,9 +232,10 @@ impl ActiveBlocker {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::test_support::pkg;
+
     use super::*;
     use crate::resolver::test_support::installed;
-    use crate::test_support::pkg;
     use crate::useflag::EffectiveUse;
 
     fn selected_state(package: Package, replacement: Option<InstalledPackage>) -> ResolverState {

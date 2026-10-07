@@ -1,11 +1,10 @@
 use futures_util::future::LocalBoxFuture;
-use germ_pms::{Atom, AtomDep, BlockerStrength, DependencyField, Expr, ExprNodes};
+use germ_pms::{Atom, AtomDep, BlockerStrength, DependencyField, Expr, ExprNodes, PackageView};
 
 use super::outcome::RequirementFailure;
 use super::provider::PackageLookup;
 use super::requirement::AtomRequirement;
 use super::{EffectivePackage, Resolver};
-use crate::package::PackageView;
 
 impl<U: PackageLookup> Resolver<U> {
     /// Resolves every dependency field for the given `owner` [`EffectivePackage`].

@@ -1,6 +1,5 @@
-use germ_pms::{Atom, UseDep, UseDepDefault, UseDepKind};
+use germ_pms::{Atom, PackageView, UseDep, UseDepDefault, UseDepKind};
 
-use crate::package::PackageView;
 use crate::useflag::EffectiveUse;
 
 /// Represents an [`Atom`] with the effective USE state of the package expressing it.
@@ -87,9 +86,9 @@ fn use_dep_satisfied_by(
 #[cfg(test)]
 mod tests {
     use germ_pms::UseDep;
+    use germ_pms::test_support::pkg;
 
     use super::*;
-    use crate::test_support::pkg;
     use crate::useflag::test_support::effective;
 
     #[test]

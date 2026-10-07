@@ -1,10 +1,9 @@
 use anyhow::Context;
-use germ_pms::{ExprEval, IUseState, RequiredUseFlag, UseFlag};
+use germ_pms::{ExprEval, IUseState, PackageView, RequiredUseFlag, UseFlag};
 
 use super::index::AtomIndex;
 use crate::files::UseEntries;
 use crate::files::pkgfile::{MatchedUse, PackageUseRecords, UseFlags};
-use crate::package::PackageView;
 use crate::profile::ProfileUseRecords;
 use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::{EffectiveUse, UseExpandConfig};
@@ -243,13 +242,12 @@ impl ExprEval<RequiredUseFlag> for ReqUseEval<'_> {
 
 #[cfg(test)]
 mod tests {
-    use germ_pms::{DepExpr, ExprKind};
+    use germ_pms::test_support::{cpv, pkg_metadata};
+    use germ_pms::{DepExpr, ExprKind, Package};
 
     use super::*;
     use crate::files::entry::Precedence;
     use crate::makenv::{MakeEnv, MakeEnvStack};
-    use crate::package::Package;
-    use crate::test_support::{cpv, pkg_metadata};
 
     fn use_state(
         makenv: &str,

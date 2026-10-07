@@ -5,13 +5,11 @@ pub mod eapi;
 pub mod eclass;
 pub mod grammar;
 pub mod keyword;
-
 pub mod package;
 pub mod repository;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 pub mod useflag;
-
-#[cfg(test)]
-mod test_support;
 
 pub use arch::Arch;
 pub use atom::{Atom, BlockerStrength, SlotConstraint, VersionConstraint};
@@ -25,8 +23,8 @@ pub use package::metadata::{
     DependencyField, MetaVar, PackageMetadata, PackageMetadataError, RawPackageMetadata,
 };
 pub use package::{
-    CPV, CatName, NumberComponent, PackageRevision, PackageSlot, PackageVersion, PkgName, SlotName,
-    VersionNumber,
+    CPV, CatName, NumberComponent, Package, PackageRevision, PackageSlot, PackageVersion,
+    PackageView, PkgName, SlotName, VersionNumber,
 };
 pub use repository::RepoName;
 pub use useflag::{IUseEntry, IUseState, UseDep, UseDepDefault, UseDepKind, UseFlag};

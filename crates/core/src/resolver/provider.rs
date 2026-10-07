@@ -1,7 +1,6 @@
-use germ_pms::Atom;
+use germ_pms::{Atom, Package};
 use log::warn;
 
-use crate::package::Package;
 use crate::repository::RepoSet;
 use crate::vdb::Vdb;
 use crate::vdb::package::InstalledPackage;

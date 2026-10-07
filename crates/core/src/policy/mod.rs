@@ -8,11 +8,11 @@ pub mod useflag;
 use std::fmt;
 
 use anyhow::Context;
+use germ_pms::PackageView;
 
 use self::keyword::EffectiveKeywords;
 use self::pkgmask::PackageMasks;
 use self::useflag::UsePolicy;
-use crate::package::PackageView;
 use crate::useflag::EffectiveUse;
 
 /// Defines the outcome of the package evaluation against the policies.
