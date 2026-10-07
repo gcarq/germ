@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "germ"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "germ-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "either",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "germ-pms"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "fancy-regex",
