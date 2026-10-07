@@ -113,7 +113,7 @@ impl ResolverState {
     ) -> anyhow::Result<()> {
         let requirement = AtomRequirement::dependency(atom, &owner.effective_use);
         for pkg in installed {
-            if pkg.cpv() == owner.pkg.cpv() {
+            if pkg.matches_package_slot(&owner.pkg) {
                 continue;
             }
             if requirement.satisfied_by(&pkg, pkg.effective_use())? {

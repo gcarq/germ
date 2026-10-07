@@ -367,7 +367,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_weak_blocker_removal_self() {
         let atom = "app-misc/root".parse().unwrap();
-        let root = pkg("app-misc", "root", "1", &[("DEPEND", "!app-misc/root")]);
+        let root = pkg("app-misc", "root", "2", &[("DEPEND", "!app-misc/root")]);
         let installed = installed("root", "1", "0", &[], &[]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([installed.clone()])
@@ -378,7 +378,7 @@ mod tests {
         assert!(outcome.is_resolved());
         assert_eq!(
             outcome.plan().operations(),
-            &[PackageOperation::Replace(pkg, installed,)]
+            &[PackageOperation::Upgrade(pkg, installed,)]
         );
     }
 
