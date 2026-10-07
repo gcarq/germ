@@ -4,8 +4,9 @@ use germ_pms::{Atom, BlockerStrength, CPV, RepoName};
 use log::info;
 
 use super::outcome::{RequirementFailure, ResolutionOutcome};
+use super::requirement::AtomRequirement;
 use super::{EffectivePackage, ExecutionPlan, PackageOperation};
-use crate::package::{AtomRequirement, Package, PackageView};
+use crate::package::{Package, PackageView};
 use crate::policy::PolicyRejection;
 use crate::types::{FxIndexMap, FxIndexSet};
 use crate::vdb::package::InstalledPackage;

@@ -1,11 +1,8 @@
-mod requirement;
-
 use std::{fmt, hash};
 
 use germ_pms::{
     Atom, CPV, CatName, PackageMetadata, PackageSlot, PackageVersion, PkgName, RepoName,
 };
-pub use requirement::AtomRequirement;
 
 /// Provides a trait for [`Package`] and [`InstalledPackage`] used for common operations
 /// like comparison and atom matching.

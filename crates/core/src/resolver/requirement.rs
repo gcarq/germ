@@ -1,6 +1,6 @@
 use germ_pms::{Atom, UseDep, UseDepDefault, UseDepKind};
 
-use super::PackageView;
+use crate::package::PackageView;
 use crate::useflag::EffectiveUse;
 
 /// Represents an [`Atom`] with the effective USE state of the package expressing it.

@@ -2,9 +2,10 @@ use log::{debug, info, trace, warn};
 
 use super::outcome::{CandidateRejectionReason, RejectedCandidate, RequirementFailure};
 use super::provider::PackageLookup;
+use super::requirement::AtomRequirement;
 use super::state::PackageKey;
 use super::{EffectivePackage, Resolver};
-use crate::package::{AtomRequirement, PackageView};
+use crate::package::PackageView;
 use crate::policy::PolicyResult;
 
 impl<U: PackageLookup> Resolver<U> {
