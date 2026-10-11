@@ -1,5 +1,6 @@
+use germ_pms::BlockerStrength;
+use germ_pms::deps::{Depend, ExprKind};
 use germ_pms::test_support::pkg;
-use germ_pms::{BlockerStrength, DependencyField};
 
 use super::test_support::{ResolverFixture, installed};
 use super::*;
@@ -230,7 +231,7 @@ async fn test_resolve_blocker_in_graph() {
         assert_eq!(
             rejected.reason,
             CandidateRejectionReason::Dependency(
-                DependencyField::Depend,
+                Depend::VAR,
                 Box::new(RequirementFailure::Blocker {
                     strength,
                     atom: "app-misc/b".parse().unwrap(),
@@ -251,7 +252,7 @@ async fn test_resolve_blocker_in_graph() {
         assert_eq!(
             rejected.reason,
             CandidateRejectionReason::Dependency(
-                DependencyField::Depend,
+                Depend::VAR,
                 Box::new(RequirementFailure::Blocker {
                     strength,
                     atom: "app-misc/root".parse().unwrap(),
@@ -294,7 +295,7 @@ async fn test_resolve_blocker_installed() {
                     vec![RejectedCandidate::new(
                         root,
                         CandidateRejectionReason::Dependency(
-                            DependencyField::Depend,
+                            Depend::VAR,
                             Box::new(RequirementFailure::Blocker {
                                 strength,
                                 atom: "app-misc/other".parse().unwrap(),
@@ -389,7 +390,7 @@ async fn test_resolve_missing_dependency_candidate() {
         vec![RejectedCandidate::new(
             root,
             CandidateRejectionReason::Dependency(
-                DependencyField::Depend,
+                Depend::VAR,
                 RequirementFailure::NoCandidate(missing).into(),
             ),
         )],
@@ -424,7 +425,7 @@ async fn test_resolve_rejected_dependency_candidates() {
         vec![RejectedCandidate::new(
             root,
             CandidateRejectionReason::Dependency(
-                DependencyField::Depend,
+                Depend::VAR,
                 Box::new(RequirementFailure::Exhausted(
                     "app-misc/child".parse().unwrap(),
                     vec![RejectedCandidate::new(
@@ -517,7 +518,7 @@ async fn test_resolve_any_of_failures() {
         vec![RejectedCandidate::new(
             root,
             CandidateRejectionReason::Dependency(
-                DependencyField::Depend,
+                Depend::VAR,
                 Box::new(RequirementFailure::AnyOf(vec![
                     RequirementFailure::NoCandidate(first),
                     RequirementFailure::NoCandidate(second),

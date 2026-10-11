@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use TestExpression::{AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Item, Use};
 
 use crate::deps::ExprItem;
-use crate::deps::expr::{Expr, ExprNodes, ExprTree};
+use crate::deps::tree::{Expr, ExprNodes, ExprTree};
 use crate::useflag::UseFlag;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -30,7 +30,7 @@ pub fn assert_expr<T: ExprItem + Debug + PartialEq>(
 
 /// Creates a [`TestExpression`] from the given `input`.
 pub fn item<T: ExprItem>(input: &str) -> TestExpression<T> {
-    Item(T::parse(input).unwrap())
+    Item(input.parse().unwrap())
 }
 
 fn assert_expression<T: ExprItem + Debug + PartialEq>(

@@ -91,6 +91,14 @@ impl SlotConstraint {
         }
     }
 
+    /// Returns `true` if `Self` uses the equals slot operatory (`:=`, `:SLOT=`).
+    pub const fn is_rebuild_sensitive(&self) -> bool {
+        matches!(
+            self,
+            Self::AnyRebuild | Self::SlotRebuild(_) | Self::SlotSubSlotRebuild(_, _)
+        )
+    }
+
     fn new(value: &str) -> anyhow::Result<Self> {
         match value {
             "*" => return Ok(Self::Any),

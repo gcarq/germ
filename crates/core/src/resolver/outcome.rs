@@ -1,6 +1,6 @@
 use std::fmt;
 
-use germ_pms::{Atom, BlockerStrength, DependencyField, Package};
+use germ_pms::{Atom, BlockerStrength, MetaVar, Package};
 
 use super::ExecutionPlan;
 use super::state::PackageKey;
@@ -80,7 +80,7 @@ pub enum CandidateRejectionReason {
     Policy(PolicyRejection),
     Requirement(Atom),
     ActiveBlocker { atom: Atom, owner: Box<Package> },
-    Dependency(DependencyField, Box<RequirementFailure>),
+    Dependency(MetaVar, Box<RequirementFailure>),
 }
 
 impl fmt::Display for CandidateRejectionReason {
@@ -89,7 +89,7 @@ impl fmt::Display for CandidateRejectionReason {
             Self::Policy(rejection) => write!(f, "{rejection}"),
             Self::Requirement(atom) => write!(f, "does not satisfy requirement {atom}"),
             Self::ActiveBlocker { atom, owner } => write!(f, "blocked by {atom} from {owner}"),
-            Self::Dependency(kind, failure) => write!(f, "unsatisfied {kind}: {failure}"),
+            Self::Dependency(field, failure) => write!(f, "unsatisfied {field}: {failure}"),
         }
     }
 }

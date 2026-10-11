@@ -13,18 +13,12 @@ pub mod useflag;
 
 pub use arch::Arch;
 pub use atom::{Atom, BlockerStrength, SlotConstraint, VersionConstraint};
-pub use deps::{
-    AtomDep, DepExpr, Expr, ExprEval, ExprItem, ExprKind, ExprNodes, ExprTree, RequiredUseFlag,
-};
 pub use eapi::{Eapi, EapiError};
 pub use eclass::EclassName;
 pub use keyword::Keyword;
-pub use package::metadata::{
-    DependencyField, MetaVar, PackageMetadata, PackageMetadataError, RawPackageMetadata,
-};
+pub use package::metadata::{MetaVar, PackageMetadata, PackageMetadataError, RawPackageMetadata};
 pub use package::{
-    CPV, CatName, NumberComponent, Package, PackageRevision, PackageSlot, PackageVersion,
-    PackageView, PkgName, SlotName, VersionNumber,
+    CPV, CatName, Package, PackageSlot, PackageVersion, PackageView, PkgName, SlotName,
 };
 pub use repository::RepoName;
 pub use useflag::{IUseEntry, IUseState, UseDep, UseDepDefault, UseDepKind, UseFlag};

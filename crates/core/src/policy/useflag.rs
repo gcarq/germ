@@ -1,5 +1,6 @@
 use anyhow::Context;
-use germ_pms::{ExprEval, IUseState, PackageView, RequiredUseFlag, UseFlag};
+use germ_pms::deps::{ExprEval, RequiredUseFlag};
+use germ_pms::{IUseState, PackageView, UseFlag};
 
 use super::index::AtomIndex;
 use crate::files::UseEntries;
@@ -242,8 +243,9 @@ impl ExprEval<RequiredUseFlag> for ReqUseEval<'_> {
 
 #[cfg(test)]
 mod tests {
+    use germ_pms::Package;
+    use germ_pms::deps::{DepExpr, RequiredUse};
     use germ_pms::test_support::{cpv, pkg_metadata};
-    use germ_pms::{DepExpr, ExprKind, Package};
 
     use super::*;
     use crate::files::entry::Precedence;
@@ -301,7 +303,7 @@ mod tests {
         let bar = UseFlag::new("bar")?;
         let available = FxHashSet::from_iter([foo.clone(), bar.clone()]);
         for (input, foo_state, bar_state, expected) in cases {
-            let expr = DepExpr::<RequiredUseFlag>::parse(ExprKind::RequiredUse, input)?;
+            let expr = DepExpr::<RequiredUse>::parse(input)?;
             let state = EffectiveUse::from_parts(
                 available.clone(),
                 [(&foo, foo_state), (&bar, bar_state)]

@@ -1,9 +1,9 @@
 use std::ops::Range;
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use rkyv::{Archive, Deserialize, Serialize};
 
-use crate::deps::{ExprItem, ExprKind};
+use crate::deps::ExprItem;
 use crate::useflag::UseFlag;
 
 /// Represents an arena entry, this can be an `Item` (USE Flag, Atom, URI, ...),
@@ -24,19 +24,6 @@ pub enum ExprEntry<T: ExprItem> {
         negated: bool,
         nodes: Range<u32>,
     },
-}
-
-impl<T: ExprItem> ExprEntry<T> {
-    pub const fn name(&self) -> &'static str {
-        match self {
-            Self::Item(_) => "item",
-            Self::AllOf(_) => "all-of",
-            Self::AnyOf(_) => "any-of",
-            Self::ExactlyOneOf(_) => "exactly-one-of",
-            Self::AtMostOneOf(_) => "at-most-one-of",
-            Self::Use { .. } => "USE-conditional",
-        }
-    }
 }
 
 /// This is a basic wrapper around `u32` that distinguishes between expression ids
@@ -96,37 +83,6 @@ impl<T: ExprItem> ExprArena<T> {
     /// Returns the children for the given `range`.
     pub fn get_children(&self, range: &Range<u32>) -> &[ExprId] {
         &self.children[range.start as usize..range.end as usize]
-    }
-
-    /// Validates the expression against the given `kind`.
-    ///
-    /// Returns `Err` when a group, negation, blocker, or required-use operator is not valid
-    /// for the selected EAPI and expression context.
-    pub fn validate(&self, kind: ExprKind) -> anyhow::Result<()> {
-        self.validate_range(&self.roots, kind)
-    }
-
-    fn validate_range(&self, range: &Range<u32>, kind: ExprKind) -> anyhow::Result<()> {
-        for node in self.get_children(range) {
-            self.validate_expr(*node, kind)?;
-        }
-        Ok(())
-    }
-
-    fn validate_expr(&self, id: ExprId, kind: ExprKind) -> anyhow::Result<()> {
-        let expression = self.get_expr(&id);
-        if !kind.supports_expr(expression) {
-            bail!("{} is not valid in {kind} expressions", expression.name());
-        }
-
-        match expression {
-            ExprEntry::Item(_) => Ok(()),
-            ExprEntry::AllOf(nodes)
-            | ExprEntry::AnyOf(nodes)
-            | ExprEntry::ExactlyOneOf(nodes)
-            | ExprEntry::AtMostOneOf(nodes)
-            | ExprEntry::Use { nodes, .. } => self.validate_range(nodes, kind),
-        }
     }
 }
 

@@ -7,9 +7,7 @@ pub mod version;
 use std::{fmt, hash};
 
 pub use cpv::CPV;
-pub use metadata::{
-    DependencyField, MetaVar, PackageMetadata, PackageMetadataError, RawPackageMetadata,
-};
+pub use metadata::{MetaVar, PackageMetadata, PackageMetadataError, RawPackageMetadata};
 pub use names::{CatName, PkgName};
 pub use slot::{PackageSlot, SlotName};
 pub use version::{

@@ -2,7 +2,7 @@ use std::ops::Range;
 use std::{fmt, slice};
 
 use super::ExprItem;
-use super::parser::arena::{ExprArena, ExprEntry, ExprId};
+use super::arena::{ExprArena, ExprEntry, ExprId};
 use crate::useflag::UseFlag;
 
 /// A borrowed view of [`ExprArena`].
@@ -21,7 +21,7 @@ impl<'a, T: ExprItem> ExprTree<'a, T> {
     where
         E: ExprEval<T>,
     {
-        eval_all(evaluator, self.roots())
+        eval_group_all(evaluator, self.roots())
     }
 }
 
@@ -56,8 +56,8 @@ where
 {
     match expr {
         Expr::Item(item) => evaluator.eval_item(item),
-        Expr::AllOf(nodes) => eval_all(evaluator, nodes),
-        Expr::AnyOf(nodes) => eval_any(evaluator, nodes),
+        Expr::AllOf(nodes) => eval_group_all(evaluator, nodes),
+        Expr::AnyOf(nodes) => eval_group_any(evaluator, nodes),
         Expr::ExactlyOneOf(nodes) => Ok(eval_up_to_two(evaluator, nodes)? == 1),
         Expr::AtMostOneOf(nodes) => Ok(eval_up_to_two(evaluator, nodes)? < 2),
         Expr::Use {
@@ -66,13 +66,13 @@ where
             nodes,
         } => match evaluator.is_use_enabled(flag)? == negated {
             true => Ok(true),
-            false => eval_all(evaluator, nodes),
+            false => eval_group_all(evaluator, nodes),
         },
     }
 }
 
 /// Evaluates an all-of group `( foo bar )`.
-fn eval_all<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<bool>
+fn eval_group_all<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<bool>
 where
     T: ExprItem,
     E: ExprEval<T>,
@@ -86,7 +86,7 @@ where
 }
 
 /// Evaluates an any-of group `|| ( foo bar )`.
-fn eval_any<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<bool>
+fn eval_group_any<T, E>(evaluator: &mut E, nodes: ExprNodes<'_, T>) -> anyhow::Result<bool>
 where
     T: ExprItem,
     E: ExprEval<T>,
@@ -132,6 +132,18 @@ pub enum Expr<'a, T: ExprItem> {
 }
 
 impl<'a, T: ExprItem> Expr<'a, T> {
+    /// Returns the name of this expression.
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Item(_) => "item",
+            Self::AllOf(_) => "all-of",
+            Self::AnyOf(_) => "any-of",
+            Self::ExactlyOneOf(_) => "exactly-one-of",
+            Self::AtMostOneOf(_) => "at-most-one-of",
+            Self::Use { .. } => "USE-conditional",
+        }
+    }
+
     /// Creates a new expression from the given `tree` and `id`.
     fn new(tree: ExprTree<'a, T>, id: &ExprId) -> Self {
         match tree.arena.get_expr(id) {
@@ -216,8 +228,8 @@ impl<T: ExprItem> ExprArena<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::parser::ExprParser;
     use super::*;
+    use crate::deps::parser::ExprParser;
     use crate::deps::{AtomDep, RequiredUseFlag};
 
     struct TestEvaluator {

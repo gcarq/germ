@@ -1,4 +1,3 @@
-pub mod arena;
 mod lexer;
 #[cfg(test)]
 mod test_support;
@@ -7,8 +6,8 @@ use std::ops::Range;
 
 use anyhow::bail;
 
-use self::arena::{ExprArena, ExprEntry, ExprId};
 use self::lexer::{Lexer, Token};
+use super::arena::{ExprArena, ExprEntry, ExprId};
 use crate::deps::ExprItem;
 use crate::useflag::UseFlag;
 
@@ -58,7 +57,7 @@ impl<'a, T: ExprItem> ExprParser<'a, T> {
     /// Parses an expression based on given [`Token`].
     fn parse_expression(&mut self, token: Token) -> anyhow::Result<ExprId> {
         let node = match token {
-            Token::Ident(ident) => ExprEntry::Item(T::parse(ident)?),
+            Token::Ident(ident) => ExprEntry::Item(ident.parse()?),
             Token::LParen => ExprEntry::AllOf(self.parse_group()?),
             Token::ExactlyOneOf => {
                 self.expect_separated(Token::LParen)?;

@@ -123,6 +123,12 @@ impl Atom {
         self.slot.as_ref()
     }
 
+    /// Returns `true` if the atom carries an equals slot operator (`:=`, `:SLOT=`).
+    pub fn has_rebuild_slot(&self) -> bool {
+        self.slot()
+            .is_some_and(SlotConstraint::is_rebuild_sensitive)
+    }
+
     /// Returns `true` if the given `cpv` matches this atom.
     pub fn matches(&self, cpv: &CPV) -> bool {
         match &self.kind {

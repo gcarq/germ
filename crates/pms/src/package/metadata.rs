@@ -6,7 +6,9 @@ use fxhash::FxHashMap;
 use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::deps::{AtomDep, DepExpr, ExprItem, ExprKind, RequiredUseFlag};
+use crate::deps::{
+    AtomDep, BDepend, DepExpr, Depend, ExprKind, ExprTree, IDepend, PDepend, RDepend, RequiredUse,
+};
 use crate::eapi::Eapi;
 use crate::keyword::Keyword;
 use crate::package::slot::PackageSlot;
@@ -89,28 +91,6 @@ impl fmt::Display for MetaVar {
     }
 }
 
-/// Identifies the dependency field being evaluated.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DependencyField {
-    Depend,
-    BDepend,
-    IDepend,
-    RDepend,
-    PDepend,
-}
-
-impl fmt::Display for DependencyField {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Depend => f.write_str("DEPEND"),
-            Self::BDepend => f.write_str("BDEPEND"),
-            Self::IDepend => f.write_str("IDEPEND"),
-            Self::RDepend => f.write_str("RDEPEND"),
-            Self::PDepend => f.write_str("PDEPEND"),
-        }
-    }
-}
-
 /// Errors returned when parsing package metadata variables.
 #[derive(Debug, Error)]
 pub enum PackageMetadataError {
@@ -150,13 +130,13 @@ pub struct PackageMetadata {
     restrict: String,
     defined_phases: Vec<String>,
     iuse: Vec<IUseEntry>,
-    required_use: DepExpr<RequiredUseFlag>,
+    required_use: DepExpr<RequiredUse>,
     slot: PackageSlot,
-    depend: DepExpr<AtomDep>,
-    bdepend: DepExpr<AtomDep>,
-    idepend: DepExpr<AtomDep>,
-    pdepend: DepExpr<AtomDep>,
-    rdepend: DepExpr<AtomDep>,
+    depend: DepExpr<Depend>,
+    bdepend: DepExpr<BDepend>,
+    idepend: DepExpr<IDepend>,
+    pdepend: DepExpr<PDepend>,
+    rdepend: DepExpr<RDepend>,
 }
 
 impl PackageMetadata {
@@ -204,7 +184,7 @@ impl PackageMetadata {
         &self.iuse
     }
 
-    pub const fn required_use(&self) -> &DepExpr<RequiredUseFlag> {
+    pub const fn required_use(&self) -> &DepExpr<RequiredUse> {
         &self.required_use
     }
 
@@ -212,24 +192,36 @@ impl PackageMetadata {
         &self.slot
     }
 
-    pub const fn depend(&self) -> &DepExpr<AtomDep> {
+    pub const fn depend(&self) -> &DepExpr<Depend> {
         &self.depend
     }
 
-    pub const fn bdepend(&self) -> &DepExpr<AtomDep> {
+    pub const fn bdepend(&self) -> &DepExpr<BDepend> {
         &self.bdepend
     }
 
-    pub const fn idepend(&self) -> &DepExpr<AtomDep> {
+    pub const fn idepend(&self) -> &DepExpr<IDepend> {
         &self.idepend
     }
 
-    pub const fn pdepend(&self) -> &DepExpr<AtomDep> {
+    pub const fn pdepend(&self) -> &DepExpr<PDepend> {
         &self.pdepend
     }
 
-    pub const fn rdepend(&self) -> &DepExpr<AtomDep> {
+    pub const fn rdepend(&self) -> &DepExpr<RDepend> {
         &self.rdepend
+    }
+
+    /// Returns each package dependency field with its associated [`MetaVar`].
+    pub fn dependencies(&self) -> impl Iterator<Item = (MetaVar, ExprTree<'_, AtomDep>)> {
+        [
+            (self.depend.var(), self.depend.view()),
+            (self.bdepend.var(), self.bdepend.view()),
+            (self.idepend.var(), self.idepend.view()),
+            (self.rdepend.var(), self.rdepend.view()),
+            (self.pdepend.var(), self.pdepend.view()),
+        ]
+        .into_iter()
     }
 
     /// Builds validated metadata from the given raw `variables`.
@@ -271,24 +263,20 @@ impl PackageMetadata {
                 .to_owned(),
             defined_phases: vars.words(MetaVar::DefinedPhases)?,
             iuse: vars.words(MetaVar::IUse)?,
-            required_use: vars.expression(ExprKind::RequiredUse, MetaVar::RequiredUse)?,
+            required_use: vars.expression::<RequiredUse>(MetaVar::RequiredUse)?,
             slot: vars
                 .required(MetaVar::Slot)?
                 .parse()
                 .map_err(|err| invalid(MetaVar::Slot, err))?,
-            depend: vars.expression(ExprKind::Dependency, MetaVar::Depend)?,
-            bdepend: eapi
-                .supports_bdepend()
-                .then(|| vars.expression(ExprKind::Dependency, MetaVar::BDepend))
-                .transpose()?
-                .unwrap_or_default(),
+            depend: vars.expression::<Depend>(MetaVar::Depend)?,
+            bdepend: vars.expression::<BDepend>(MetaVar::BDepend)?,
             idepend: eapi
                 .supports_idepend()
-                .then(|| vars.expression(ExprKind::Dependency, MetaVar::IDepend))
+                .then(|| vars.expression::<IDepend>(MetaVar::IDepend))
                 .transpose()?
                 .unwrap_or_default(),
-            pdepend: vars.expression(ExprKind::Dependency, MetaVar::PDepend)?,
-            rdepend: vars.expression(ExprKind::Dependency, MetaVar::RDepend)?,
+            pdepend: vars.expression::<PDepend>(MetaVar::PDepend)?,
+            rdepend: vars.expression::<RDepend>(MetaVar::RDepend)?,
         })
     }
 }
@@ -372,13 +360,9 @@ impl<'a> RawPackageMetadata<'a> {
             .collect()
     }
 
-    /// Parses the value of `var` as a dependency expression of the given `kind`.
-    fn expression<T: ExprItem>(
-        &self,
-        kind: ExprKind,
-        var: MetaVar,
-    ) -> Result<DepExpr<T>, PackageMetadataError> {
-        DepExpr::parse(kind, optional(self.get(var))).map_err(|err| invalid(var, err))
+    /// Parses the value of `var` as an expression of the field `F`.
+    fn expression<F: ExprKind>(&self, var: MetaVar) -> Result<DepExpr<F>, PackageMetadataError> {
+        DepExpr::parse(optional(self.get(var))).map_err(|err| invalid(var, err))
     }
 }
 

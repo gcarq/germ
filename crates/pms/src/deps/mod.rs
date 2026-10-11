@@ -1,202 +1,62 @@
-pub mod expr;
+mod arena;
+mod item;
+mod kind;
 mod parser;
+mod tree;
 
 use std::fmt;
-use std::str::FromStr;
 
-pub use expr::{Expr, ExprEval, ExprNodes, ExprTree};
 use rkyv::{Archive, Deserialize, Serialize};
 
-use crate::atom::{Atom, BlockerStrength};
-use crate::deps::parser::ExprParser;
-use crate::deps::parser::arena::{ExprArena, ExprEntry};
-use crate::useflag::UseFlag;
+use self::arena::ExprArena;
+pub use self::item::{AtomDep, ExprItem, RequiredUseFlag};
+pub use self::kind::{BDepend, Depend, ExprKind, IDepend, PDepend, RDepend, RequiredUse};
+use self::parser::ExprParser;
+pub use self::tree::{Expr, ExprEval, ExprNodes, ExprTree};
+use crate::MetaVar;
 
-/// Selects the expression context for validation.
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum ExprKind {
-    Dependency,
-    RequiredUse,
-    Homepage,
-    SrcUri,
-    License,
-    Properties,
-    Restrict,
-}
-
-impl ExprKind {
-    /// Returns `true` if the given `expression` is valid for this kind.
-    const fn supports_expr<T: ExprItem>(self, expression: &ExprEntry<T>) -> bool {
-        match expression {
-            ExprEntry::Item(_) | ExprEntry::AllOf(_) => true,
-            ExprEntry::Use { .. } => true,
-            ExprEntry::AnyOf(_) => {
-                matches!(self, Self::Dependency | Self::License | Self::RequiredUse)
-            }
-            ExprEntry::ExactlyOneOf(_) | ExprEntry::AtMostOneOf(_) => {
-                matches!(self, Self::RequiredUse)
-            }
-        }
-    }
-
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Dependency => "dependency",
-            Self::RequiredUse => "REQUIRED_USE",
-            Self::Homepage => "HOMEPAGE",
-            Self::SrcUri => "SRC_URI",
-            Self::License => "LICENSE",
-            Self::Properties => "PROPERTIES",
-            Self::Restrict => "RESTRICT",
-        }
-    }
-}
-
-impl fmt::Display for ExprKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name())
-    }
-}
-
-/// This trait defines an item that can be used in a dependency expression,
-/// such as [`RequiredUseFlag`] and [`AtomDep`].
-pub trait ExprItem: FromStr<Err = anyhow::Error> + fmt::Display {
-    fn parse(input: &str) -> anyhow::Result<Self> {
-        Self::from_str(input)
-    }
-}
-
-/// Extends an [`Atom`] with an optional blocker, e.g.:
-/// `!<app-misc/foo-1.3` or `!!app-misc/foo`.
-///
-/// [`BlockerStrength`] only makes sense when used a dependency, and is not part of the atom itself.
-#[derive(Archive, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct AtomDep {
-    atom: Atom,
-    blocker: Option<BlockerStrength>,
-}
-
-impl AtomDep {
-    /// Returns the inner [`Atom`].
-    pub const fn inner(&self) -> &Atom {
-        &self.atom
-    }
-
-    /// Returns the blocker, if any.
-    pub const fn blocker(&self) -> Option<BlockerStrength> {
-        self.blocker
-    }
-}
-
-impl ExprItem for AtomDep {}
-
-impl FromStr for AtomDep {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> anyhow::Result<Self> {
-        let (blocker, atom) = match value.strip_prefix('!') {
-            Some(atom) => match atom.strip_prefix("!") {
-                Some(atom) => (Some(BlockerStrength::Strong), atom),
-                None => (Some(BlockerStrength::Weak), atom),
-            },
-            None => (None, value),
-        };
-        let atom = Atom::new(atom)?;
-        Ok(Self { blocker, atom })
-    }
-}
-
-impl fmt::Display for AtomDep {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(blocker) = &self.blocker {
-            write!(f, "{blocker}")?;
-        }
-        write!(f, "{}", self.atom)
-    }
-}
-
-/// Represents a required USE flag in a dependency expression.
-///
-/// Additional to the [`UseFlag`] it has the ability to be disabled.
-#[derive(Archive, Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Debug)]
-pub struct RequiredUseFlag {
-    flag: UseFlag,
-    negated: bool,
-}
-
-impl RequiredUseFlag {
-    /// Returns the inner [`UseFlag`].
-    pub const fn inner(&self) -> &UseFlag {
-        &self.flag
-    }
-
-    /// Returns `true` if this required USE flag is negated.
-    pub const fn is_negated(&self) -> bool {
-        self.negated
-    }
-}
-
-impl ExprItem for RequiredUseFlag {}
-
-impl FromStr for RequiredUseFlag {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> anyhow::Result<Self> {
-        let (flag, negated) = match value.strip_prefix('!') {
-            Some(flag) => (flag, true),
-            None => (value, false),
-        };
-        let flag = UseFlag::new(flag)?;
-        Ok(Self { flag, negated })
-    }
-}
-
-impl fmt::Display for RequiredUseFlag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.negated {
-            f.write_str("!")?;
-        }
-        self.flag.fmt(f)
-    }
-}
-
-/// Holds a dependency expression parsed into an expression arena.
+/// Holds a metadata field expression parsed into an expression arena.
 /// See PMS 8.2 for the dependency specification format.
 #[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Clone, Debug)]
-pub struct DepExpr<T: ExprItem> {
-    arena: ExprArena<T>,
+pub struct DepExpr<F: ExprKind> {
+    arena: ExprArena<F::Item>,
 }
 
-impl<T: ExprItem> DepExpr<T> {
-    /// Parses `input` as an expression of the given [`ExprKind`].
+impl<F: ExprKind> DepExpr<F> {
+    /// Parses `input` as an expression of the field `F`.
     ///
     /// # Errors
     ///
     /// Returns an error when `input` is syntactically invalid or when the parsed expression
-    /// violates the context restrictions.
-    pub fn parse(kind: ExprKind, input: &str) -> anyhow::Result<Self> {
+    /// violates the field restrictions.
+    pub fn parse(input: &str) -> anyhow::Result<Self> {
         if input.trim().is_empty() {
             return Ok(Self::default());
         }
 
-        let arena = ExprParser::parse(input)?;
-        arena.validate(kind)?;
+        let arena = ExprParser::<F::Item>::parse(input)?;
+        F::validate(arena.view())?;
         Ok(Self { arena })
     }
 
     /// Returns a view of the expression.
-    pub const fn view(&self) -> ExprTree<'_, T> {
+    pub const fn view(&self) -> ExprTree<'_, F::Item> {
         self.arena.view()
+    }
+
+    /// Returns the metadata variable.
+    pub const fn var(&self) -> MetaVar {
+        F::VAR
     }
 }
 
-impl<T: ExprItem> fmt::Display for DepExpr<T> {
+impl<F: ExprKind> fmt::Display for DepExpr<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.view().fmt(f)
     }
 }
 
-impl<T: ExprItem> Default for DepExpr<T> {
+impl<F: ExprKind> Default for DepExpr<F> {
     fn default() -> Self {
         Self {
             arena: ExprArena::default(),
@@ -239,7 +99,7 @@ mod tests {
     #[test]
     fn test_required_use_flag() {
         for (input, flag, negated) in [("foo", "foo", false), ("!foo", "foo", true)] {
-            let parsed = RequiredUseFlag::from_str(input).unwrap();
+            let parsed = input.parse::<RequiredUseFlag>().unwrap();
             assert_eq!(parsed.to_string(), input);
             assert_eq!(parsed.inner().to_string(), flag);
             assert_eq!(parsed.is_negated(), negated);
@@ -247,7 +107,7 @@ mod tests {
 
         for input in ["", "!", "!!foo", "foo!"] {
             assert!(
-                RequiredUseFlag::from_str(input).is_err(),
+                input.parse::<RequiredUseFlag>().is_err(),
                 "expected error for '{input}'"
             );
         }
@@ -255,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty() {
-        let expression = DepExpr::<AtomDep>::parse(ExprKind::Dependency, " \t").unwrap();
+        let expression = DepExpr::<Depend>::parse(" \t").unwrap();
         assert_eq!(expression.to_string(), "");
     }
 
@@ -266,21 +126,53 @@ mod tests {
             ("!!cat/pkg", true),
             ("^^ ( cat/pkg cat/other )", false),
         ] {
-            let result = DepExpr::<AtomDep>::parse(ExprKind::Dependency, input);
+            let result = DepExpr::<Depend>::parse(input);
             assert_eq!(result.is_ok(), valid, "dependency: {input}");
         }
 
-        for (kind, input, valid) in [
-            (ExprKind::RequiredUse, "^^ ( foo bar )", true),
-            (ExprKind::RequiredUse, "?? ( foo bar )", true),
-            (ExprKind::RequiredUse, "!foo", true),
-            (ExprKind::RequiredUse, "!!foo", false),
-            (ExprKind::License, "|| ( GPL-2 MIT )", true),
-            (ExprKind::Restrict, "( fetch mirror )", true),
-            (ExprKind::Restrict, "|| ( fetch mirror )", false),
+        for (input, valid) in [
+            ("^^ ( foo bar )", true),
+            ("?? ( foo bar )", true),
+            ("!foo", true),
+            ("!!foo", false),
         ] {
-            let result = DepExpr::<RequiredUseFlag>::parse(kind, input);
-            assert_eq!(result.is_ok(), valid, "{kind}: {input}");
+            let result = DepExpr::<RequiredUse>::parse(input);
+            assert_eq!(result.is_ok(), valid, "REQUIRED_USE: {input}");
         }
+    }
+
+    #[test]
+    fn test_atom_dep_validate_ok() {
+        let cases = [
+            "dev-lang/rust",
+            "=dev-lang/rust-1.70.0:1.70",
+            "dev-lang/rust[foo(-)]",
+            "!dev-lang/rust",
+            "!!dev-lang/rust",
+            "=dev-lang/rust-1*",
+        ];
+
+        for input in cases {
+            let result = DepExpr::<Depend>::parse(input);
+            assert!(result.is_ok(), "expected valid dependency: {input}");
+        }
+    }
+
+    #[test]
+    fn test_atom_dep_validate_err() {
+        for input in ["*/*", "dev-lang/*", "*/rust", "dev-lang/rust::gentoo"] {
+            let result = DepExpr::<Depend>::parse(input);
+            assert!(result.is_err(), "expected invalid dependency: {input}");
+        }
+    }
+
+    #[test]
+    fn test_slot_operator_placement() {
+        assert!(DepExpr::<Depend>::parse("dev-lang/rust:=").is_ok());
+        assert!(DepExpr::<Depend>::parse("|| ( dev-lang/rust:= dev-lang/go )").is_err());
+        assert!(DepExpr::<PDepend>::parse("dev-lang/rust:=").is_err());
+        assert!(DepExpr::<PDepend>::parse("dev-lang/rust:0").is_ok());
+        assert!(DepExpr::<Depend>::parse("dev-lang/rust:0/1=").is_ok());
+        assert!(DepExpr::<PDepend>::parse("|| ( dev-lang/rust:0/1= dev-lang/go )").is_err());
     }
 }

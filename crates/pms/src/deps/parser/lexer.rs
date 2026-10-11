@@ -9,7 +9,7 @@ pub enum Token<'a> {
     AnyOf,                   // syntax: ||
     AtMostOneOf,             // syntax: ??
     UseConditional(&'a str), // syntax: foo? - holds a USE flag
-    Ident(&'a str),          // holds an atom or USE flag
+    Ident(&'a str),          // holds an identifier (atom, URI, etc.)
     LParen,
     RParen,
     Illegal(char),

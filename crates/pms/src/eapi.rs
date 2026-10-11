@@ -41,11 +41,6 @@ impl Eapi {
         Ok(version)
     }
 
-    /// Returns `true` if this EAPI supports the `BDEPEND` metadata variable.
-    pub const fn supports_bdepend(&self) -> bool {
-        matches!(self, Self::Seven | Self::Eight | Self::Nine)
-    }
-
     /// Returns `true` if this EAPI supports the `IDEPEND` metadata variable.
     pub const fn supports_idepend(&self) -> bool {
         matches!(self, Self::Eight | Self::Nine)
@@ -138,17 +133,10 @@ mod tests {
     }
 
     #[test]
-    fn test_eapi_metadata_dependency_support() {
-        // eapi, supports_bdepend, supports_idepend
-        let test_cases = [
-            (Eapi::Seven, true, false),
-            (Eapi::Eight, true, true),
-            (Eapi::Nine, true, true),
-        ];
-        for (eapi, exp_bdepend, exp_idepend) in test_cases {
-            assert_eq!(eapi.supports_bdepend(), exp_bdepend);
-            assert_eq!(eapi.supports_idepend(), exp_idepend);
-        }
+    fn test_eapi_idepend() {
+        assert!(!Eapi::Seven.supports_idepend());
+        assert!(Eapi::Eight.supports_idepend());
+        assert!(Eapi::Nine.supports_idepend());
     }
 
     #[test]

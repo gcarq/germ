@@ -1,5 +1,6 @@
 use futures_util::future::LocalBoxFuture;
-use germ_pms::{Atom, AtomDep, BlockerStrength, DependencyField, Expr, ExprNodes, PackageView};
+use germ_pms::deps::{AtomDep, Expr, ExprNodes};
+use germ_pms::{Atom, BlockerStrength, MetaVar, PackageView};
 
 use super::outcome::RequirementFailure;
 use super::provider::PackageLookup;
@@ -11,18 +12,11 @@ impl<U: PackageLookup> Resolver<U> {
     pub(super) async fn resolve_dependencies(
         &mut self,
         owner: &EffectivePackage,
-    ) -> anyhow::Result<Option<(DependencyField, RequirementFailure)>> {
+    ) -> anyhow::Result<Option<(MetaVar, RequirementFailure)>> {
         let metadata = owner.pkg.metadata();
-        let dependencies = [
-            (DependencyField::Depend, metadata.depend().view()),
-            (DependencyField::BDepend, metadata.bdepend().view()),
-            (DependencyField::IDepend, metadata.idepend().view()),
-            (DependencyField::RDepend, metadata.rdepend().view()),
-            (DependencyField::PDepend, metadata.pdepend().view()),
-        ];
-        for (kind, tree) in dependencies {
+        for (field, tree) in metadata.dependencies() {
             if let Some(failure) = self.resolve_group_all(owner, tree.roots()).await? {
-                return Ok(Some((kind, failure)));
+                return Ok(Some((field, failure)));
             }
         }
         Ok(None)
