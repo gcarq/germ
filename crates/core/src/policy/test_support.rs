@@ -3,7 +3,7 @@ use germ_pms::UseFlag;
 use super::PackagePolicy;
 use super::keyword::EffectiveKeywords;
 use super::pkgmask::{PackageMasks, PortageSource, RepositorySource};
-use super::useflag::{LocalRecords, UsePolicy};
+use super::useflag::{LocalUseRecords, UsePolicy};
 use crate::files::PackageEntries;
 use crate::files::entry::Precedence;
 use crate::files::pkgfile::PackageAcceptKeywords;
@@ -39,7 +39,7 @@ impl PolicyFixture {
             FxHashMap::from_iter(self.use_flags.iter().cloned().map(|flag| (flag, true))).into(),
             FxHashSet::default(),
             ProfileUseRecords::default(),
-            LocalRecords::default(),
+            LocalUseRecords::default(),
         )?;
         let pkgmasks = PackageMasks::new(
             &RepositorySource::default(),

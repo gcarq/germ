@@ -157,11 +157,11 @@ mod tests {
     use super::test_support::TestExpression::{AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Use};
     use super::test_support::{TestExpression, assert_expr, item};
     use super::*;
-    use crate::deps::{AtomDep, RequiredUseFlag};
+    use crate::deps::{DepAtom, RequiredUseFlag};
 
     #[test]
     fn test_parser_structure() {
-        let cases: [(&str, Vec<TestExpression<AtomDep>>); 6] = [
+        let cases: [(&str, Vec<TestExpression<DepAtom>>); 6] = [
             (
                 "( sys-libs/db app-misc/foo )",
                 vec![AllOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
@@ -196,7 +196,7 @@ mod tests {
         ];
 
         for (input, expected) in cases {
-            let expr = ExprParser::<AtomDep>::parse(input).unwrap();
+            let expr = ExprParser::<DepAtom>::parse(input).unwrap();
             assert_expr(expr.view(), &expected);
         }
     }
@@ -214,7 +214,7 @@ mod tests {
             !!<dev-perl/Mail-Box-3
         ";
 
-        let expr = ExprParser::<AtomDep>::parse(input).unwrap();
+        let expr = ExprParser::<DepAtom>::parse(input).unwrap();
         assert_expr(
             expr.view(),
             &[
@@ -273,7 +273,7 @@ mod tests {
             "!! cat/pkg",
         ] {
             assert!(
-                ExprParser::<AtomDep>::parse(input).is_err(),
+                ExprParser::<DepAtom>::parse(input).is_err(),
                 "expected invalid expression: {input}"
             );
         }
@@ -294,7 +294,7 @@ mod tests {
             ("bar? sys-libs/db )", "expected '(', got 'sys-libs/db'"),
         ];
         for (input, expected_err) in test_data {
-            let err = ExprParser::<AtomDep>::parse(input).unwrap_err();
+            let err = ExprParser::<DepAtom>::parse(input).unwrap_err();
             assert_eq!(err.to_string(), expected_err, "failure for input: {input}");
         }
     }

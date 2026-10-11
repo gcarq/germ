@@ -51,7 +51,7 @@ pub enum PhaseExecutionError {
     Invariant(#[source] anyhow::Error),
 }
 
-/// Errors returned when generating package metadata for a [`CPV`].
+/// Errors returned when generating package metadata for a [`Cpv`].
 #[derive(Debug, Error)]
 pub enum MetadataGenerationError {
     #[error(transparent)]

@@ -7,7 +7,8 @@ use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::deps::{
-    AtomDep, BDepend, DepExpr, Depend, ExprKind, ExprTree, IDepend, PDepend, RDepend, RequiredUse,
+    BDepend, DepAtom, Depend, ExprKind, ExprTree, IDepend, PDepend, ParsedExpr, RDepend,
+    RequiredUse,
 };
 use crate::eapi::Eapi;
 use crate::keyword::Keyword;
@@ -117,26 +118,26 @@ pub enum PackageMetadataError {
 pub struct PackageMetadata {
     eapi: Eapi,
     description: String,
-    // TODO: should be parsed as DepExpr
+    // TODO: should be parsed as ParsedExpr
     homepage: Vec<String>,
-    // TODO: should be parsed as DepExpr
+    // TODO: should be parsed as ParsedExpr
     src_uri: Vec<String>,
-    // TODO: enforce valid license identifiers and parse as DepExpr
+    // TODO: enforce valid license identifiers and parse as ParsedExpr
     license: Vec<String>,
     properties: Vec<String>,
     keywords: Vec<Keyword>,
     inherit: Vec<String>,
-    // TODO: Use something like DepExpr<String>
+    // TODO: Use something like ParsedExpr<String>
     restrict: String,
     defined_phases: Vec<String>,
     iuse: Vec<IUseEntry>,
-    required_use: DepExpr<RequiredUse>,
+    required_use: ParsedExpr<RequiredUse>,
     slot: PackageSlot,
-    depend: DepExpr<Depend>,
-    bdepend: DepExpr<BDepend>,
-    idepend: DepExpr<IDepend>,
-    pdepend: DepExpr<PDepend>,
-    rdepend: DepExpr<RDepend>,
+    depend: ParsedExpr<Depend>,
+    bdepend: ParsedExpr<BDepend>,
+    idepend: ParsedExpr<IDepend>,
+    pdepend: ParsedExpr<PDepend>,
+    rdepend: ParsedExpr<RDepend>,
 }
 
 impl PackageMetadata {
@@ -184,7 +185,7 @@ impl PackageMetadata {
         &self.iuse
     }
 
-    pub const fn required_use(&self) -> &DepExpr<RequiredUse> {
+    pub const fn required_use(&self) -> &ParsedExpr<RequiredUse> {
         &self.required_use
     }
 
@@ -192,28 +193,28 @@ impl PackageMetadata {
         &self.slot
     }
 
-    pub const fn depend(&self) -> &DepExpr<Depend> {
+    pub const fn depend(&self) -> &ParsedExpr<Depend> {
         &self.depend
     }
 
-    pub const fn bdepend(&self) -> &DepExpr<BDepend> {
+    pub const fn bdepend(&self) -> &ParsedExpr<BDepend> {
         &self.bdepend
     }
 
-    pub const fn idepend(&self) -> &DepExpr<IDepend> {
+    pub const fn idepend(&self) -> &ParsedExpr<IDepend> {
         &self.idepend
     }
 
-    pub const fn pdepend(&self) -> &DepExpr<PDepend> {
+    pub const fn pdepend(&self) -> &ParsedExpr<PDepend> {
         &self.pdepend
     }
 
-    pub const fn rdepend(&self) -> &DepExpr<RDepend> {
+    pub const fn rdepend(&self) -> &ParsedExpr<RDepend> {
         &self.rdepend
     }
 
     /// Returns each package dependency field with its associated [`MetaVar`].
-    pub fn dependencies(&self) -> impl Iterator<Item = (MetaVar, ExprTree<'_, AtomDep>)> {
+    pub fn dependencies(&self) -> impl Iterator<Item = (MetaVar, ExprTree<'_, DepAtom>)> {
         [
             (self.depend.var(), self.depend.view()),
             (self.bdepend.var(), self.bdepend.view()),
@@ -361,8 +362,8 @@ impl<'a> RawPackageMetadata<'a> {
     }
 
     /// Parses the value of `var` as an expression of the field `F`.
-    fn expression<F: ExprKind>(&self, var: MetaVar) -> Result<DepExpr<F>, PackageMetadataError> {
-        DepExpr::parse(optional(self.get(var))).map_err(|err| invalid(var, err))
+    fn expression<F: ExprKind>(&self, var: MetaVar) -> Result<ParsedExpr<F>, PackageMetadataError> {
+        ParsedExpr::parse(optional(self.get(var))).map_err(|err| invalid(var, err))
     }
 }
 

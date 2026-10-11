@@ -6,7 +6,7 @@ pub mod version;
 
 use std::{fmt, hash};
 
-pub use cpv::CPV;
+pub use cpv::Cpv;
 pub use metadata::{MetaVar, PackageMetadata, PackageMetadataError, RawPackageMetadata};
 pub use names::{CatName, PkgName};
 pub use slot::{PackageSlot, SlotName};
@@ -21,7 +21,7 @@ use crate::repository::RepoName;
 /// Provides a trait for package types used for common operations like comparison and atom
 /// matching.
 pub trait PackageView {
-    fn cpv(&self) -> &CPV;
+    fn cpv(&self) -> &Cpv;
     fn repo(&self) -> &RepoName;
     fn metadata(&self) -> &PackageMetadata;
 
@@ -79,14 +79,14 @@ pub trait PackageView {
 /// repository's tree.
 #[derive(Clone, Debug)]
 pub struct Package {
-    cpv: CPV,
+    cpv: Cpv,
     repo: RepoName,
     metadata: PackageMetadata,
 }
 
 impl Package {
     /// Creates a new [`Package`] from the given `cpv`, `repo` and `metadata`.
-    pub const fn new(cpv: CPV, repo: RepoName, metadata: PackageMetadata) -> Self {
+    pub const fn new(cpv: Cpv, repo: RepoName, metadata: PackageMetadata) -> Self {
         Self {
             cpv,
             repo,
@@ -96,7 +96,7 @@ impl Package {
 }
 
 impl PackageView for Package {
-    fn cpv(&self) -> &CPV {
+    fn cpv(&self) -> &Cpv {
         &self.cpv
     }
 

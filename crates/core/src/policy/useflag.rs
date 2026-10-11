@@ -12,7 +12,7 @@ use crate::utils::Inherit;
 
 /// Simple DTO used to build [`UsePolicy`] from user configured USE entries.
 #[derive(Default)]
-pub struct LocalRecords {
+pub struct LocalUseRecords {
     pub package_use: PackageUseRecords,
     pub package_use_force: PackageUseRecords,
     pub use_mask: UseEntries,
@@ -66,7 +66,7 @@ impl UsePolicy {
         global_use: GlobalUseRules,
         iuse_implicit: FxHashSet<UseFlag>,
         profile: ProfileUseRecords,
-        local: LocalRecords,
+        local: LocalUseRecords,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             use_mask: local
@@ -244,7 +244,7 @@ impl ExprEval<RequiredUseFlag> for ReqUseEval<'_> {
 #[cfg(test)]
 mod tests {
     use germ_pms::Package;
-    use germ_pms::deps::{DepExpr, RequiredUse};
+    use germ_pms::deps::{ParsedExpr, RequiredUse};
     use germ_pms::test_support::{cpv, pkg_metadata};
 
     use super::*;
@@ -263,7 +263,7 @@ mod tests {
         let global = MakeEnv::from_content(makenv)?;
         let user = MakeEnv::from_content(make_conf)?;
         let makenv_stack = MakeEnvStack::new(global, MakeEnv::default(), user)?;
-        let local = LocalRecords {
+        let local = LocalUseRecords {
             package_use: PackageUseRecords::from_content(package_use, Precedence::User)?,
             ..Default::default()
         };
@@ -303,7 +303,7 @@ mod tests {
         let bar = UseFlag::new("bar")?;
         let available = FxHashSet::from_iter([foo.clone(), bar.clone()]);
         for (input, foo_state, bar_state, expected) in cases {
-            let expr = DepExpr::<RequiredUse>::parse(input)?;
+            let expr = ParsedExpr::<RequiredUse>::parse(input)?;
             let state = EffectiveUse::from_parts(
                 available.clone(),
                 [(&foo, foo_state), (&bar, bar_state)]
@@ -333,7 +333,7 @@ mod tests {
             FxHashMap::from_iter([(elogind.clone(), true), (systemd.clone(), true)]).into(),
             FxHashSet::default(),
             profile,
-            LocalRecords::default(),
+            LocalUseRecords::default(),
         )?;
         let package = Package::new(
             cpv("sys-libs", "pam", "1.0"),
@@ -371,14 +371,14 @@ mod tests {
             use_rules.clone(),
             FxHashSet::default(),
             profile.clone(),
-            LocalRecords::default(),
+            LocalUseRecords::default(),
         )?;
         assert_eq!(
             forced.effective_for(&package, false).state(&flag),
             Some(true)
         );
 
-        let local = LocalRecords {
+        let local = LocalUseRecords {
             package_use_force: PackageUseRecords::from_content(
                 "*/* LLVM_TARGETS: -AArch64",
                 Precedence::User,
@@ -406,7 +406,7 @@ mod tests {
             FxHashMap::from_iter([(elogind.clone(), true)]).into(),
             FxHashSet::default(),
             profile,
-            LocalRecords::default(),
+            LocalUseRecords::default(),
         )?;
         let package = Package::new(
             cpv("sys-libs", "pam", "1.0"),

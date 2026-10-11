@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use fancy_regex::Regex;
 use germ_pms::grammar::{REVISION, VERSION, VERSION_SUFFIXES};
-use germ_pms::{CPV, CatName, PackageVersion, PkgName};
+use germ_pms::{CatName, Cpv, PackageVersion, PkgName};
 use log::debug;
 
 /// Regex to validate and parse `version`, `suffixes` and the `revision` from an ebuild file name.
@@ -15,21 +15,21 @@ static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// Resolves all [`CPV`] from the given repository path and categories.
+/// Resolves all [`Cpv`] from the given repository path and categories.
 pub fn resolve_from_repo_path<'r>(
     repo_path: &'r Path,
     categories: impl IntoIterator<Item = &'r CatName>,
-) -> impl Iterator<Item = CPV> {
+) -> impl Iterator<Item = Cpv> {
     categories
         .into_iter()
         .flat_map(|cat| resolve_from_category_path(cat, &repo_path.join(cat.as_str())))
 }
 
-/// Resolves all [`CPV`] from the given category path.
+/// Resolves all [`Cpv`] from the given category path.
 pub fn resolve_from_category_path<'c>(
     category: &'c CatName,
     cat_path: &Path,
-) -> impl Iterator<Item = CPV> + use<'c> {
+) -> impl Iterator<Item = Cpv> + use<'c> {
     fs::read_dir(cat_path)
         .into_iter()
         .flatten()
@@ -44,12 +44,12 @@ pub fn resolve_from_category_path<'c>(
         .flatten()
 }
 
-/// Resolves all [`CPV`] from the given package path.
+/// Resolves all [`Cpv`] from the given package path.
 pub fn resolve_from_pkg_path<'c>(
     category: &'c CatName,
     package: PkgName,
     pkg_path: &Path,
-) -> impl Iterator<Item = CPV> + use<'c> {
+) -> impl Iterator<Item = Cpv> + use<'c> {
     fs::read_dir(pkg_path)
         .into_iter()
         .flatten()
@@ -64,14 +64,14 @@ pub fn resolve_from_pkg_path<'c>(
         })
 }
 
-/// Parses a [`CPV`] from the given `category`, `package` and `ebuild_filename`.
+/// Parses a [`Cpv`] from the given `category`, `package` and `ebuild_filename`.
 ///
 /// Returns `None` if the file is not a valid ebuild or the package name doesn't match the ebuild name.
 ///
 /// # Panics
 ///
 /// Will panic if the regex engine fails e.g. backtracking limit is exceeded.
-fn cpv_from_fs_parts(category: &CatName, package: PkgName, ebuild_filename: &str) -> Option<CPV> {
+fn cpv_from_fs_parts(category: &CatName, package: PkgName, ebuild_filename: &str) -> Option<Cpv> {
     let Some(version) = ebuild_filename
         .strip_suffix(".ebuild")?
         .strip_prefix(package.as_str())
@@ -92,7 +92,7 @@ fn cpv_from_fs_parts(category: &CatName, package: PkgName, ebuild_filename: &str
 
     let revision = caps.name("revision").map(|m| m.as_str());
     match PackageVersion::new(&caps["version"], Some(&caps["suffixes"]), revision) {
-        Ok(version) => Some(CPV::new(category.clone(), package, version)),
+        Ok(version) => Some(Cpv::new(category.clone(), package, version)),
         Err(_) => None,
     }
 }

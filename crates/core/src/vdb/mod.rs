@@ -11,7 +11,7 @@ use anyhow::{Context, anyhow};
 use either::Either;
 use fancy_regex::Regex;
 use germ_pms::grammar::{PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
-use germ_pms::{Atom, CPV, CatName, PackageVersion, PackageView};
+use germ_pms::{Atom, CatName, Cpv, PackageVersion, PackageView};
 
 use crate::types::FxHashMap;
 use crate::vdb::package::InstalledPackage;
@@ -167,7 +167,7 @@ impl Vdb {
             Some(&caps["suffixes"]),
             caps.name("revision").map(|m| m.as_str()),
         )?;
-        let cpv = CPV::new(category.clone(), package, version);
+        let cpv = Cpv::new(category.clone(), package, version);
         let pkg = InstalledPackage::from_path(cpv, path)
             .with_context(|| format!("failed to collect package from {}", path.display()))?;
         Ok(Some(pkg))

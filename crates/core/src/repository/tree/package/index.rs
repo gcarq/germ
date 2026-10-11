@@ -1,21 +1,21 @@
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use either::Either;
-use germ_pms::{Atom, CPV, CatName, PkgName};
+use germ_pms::{Atom, CatName, Cpv, PkgName};
 
 use crate::types::{FxHashMap, FxHashSet};
 
 /// Holds all available packages in a repository, grouped by category and package name.
 #[derive(Default, Debug)]
-pub struct CPVIndex {
+pub struct CpvIndex {
     state: RwLock<IndexState>,
 }
 
-impl CPVIndex {
+impl CpvIndex {
     /// Updates the cache with the given `cpvs` and marks `atom` as discovered.
     ///
-    /// Already cached [`CPV`] will be ignored.
-    pub fn update(&self, atom: &Atom, cpvs: impl IntoIterator<Item = CPV>) {
+    /// Already cached [`Cpv`] will be ignored.
+    pub fn update(&self, atom: &Atom, cpvs: impl IntoIterator<Item = Cpv>) {
         let mut state = self.write();
         for cpv in cpvs {
             state.insert(cpv);
@@ -24,7 +24,7 @@ impl CPVIndex {
     }
 
     /// Returns all indexed CPVs.
-    pub fn entries(&self) -> Vec<CPV> {
+    pub fn entries(&self) -> Vec<Cpv> {
         self.read().iter().cloned().collect()
     }
 
@@ -34,7 +34,7 @@ impl CPVIndex {
     }
 
     /// Returns all cached CPVs matching the given [`Atom`].
-    pub fn matching_entries(&self, atom: &Atom) -> Vec<CPV> {
+    pub fn matching_entries(&self, atom: &Atom) -> Vec<Cpv> {
         self.read().matching_entries(atom).cloned().collect()
     }
 
@@ -47,28 +47,28 @@ impl CPVIndex {
     fn write(&self) -> RwLockWriteGuard<'_, IndexState> {
         self.state
             .write()
-            .expect("failed to acquire write lock on CPVIndex")
+            .expect("failed to acquire write lock on CpvIndex")
     }
 
     /// Returns a read lock on the index state.
     fn read(&self) -> RwLockReadGuard<'_, IndexState> {
         self.state
             .read()
-            .expect("failed to acquire read lock on CPVIndex")
+            .expect("failed to acquire read lock on CpvIndex")
     }
 }
 
 #[derive(Default, Debug)]
 struct IndexState {
-    indexed: FxHashMap<CatName, FxHashMap<PkgName, Vec<CPV>>>,
+    indexed: FxHashMap<CatName, FxHashMap<PkgName, Vec<Cpv>>>,
     discovery: DiscoveryState,
 }
 
 impl IndexState {
-    /// Inserts the given [`CPV`].
+    /// Inserts the given [`Cpv`].
     ///
     /// Already known entries will be ignored.
-    fn insert(&mut self, cpv: CPV) {
+    fn insert(&mut self, cpv: Cpv) {
         match self.indexed.get_mut(cpv.category()) {
             Some(pkgs) => match pkgs.get_mut(cpv.package()) {
                 Some(existing) => match existing.binary_search_by(|e| e.cmp(&cpv).reverse()) {
@@ -89,7 +89,7 @@ impl IndexState {
     }
 
     /// Returns all cached CPVs matching the given [`Atom`].
-    fn matching_entries(&self, atom: &Atom) -> impl Iterator<Item = &CPV> {
+    fn matching_entries(&self, atom: &Atom) -> impl Iterator<Item = &Cpv> {
         let iter = match (atom.category(), atom.package()) {
             (Some(cat), Some(pkg)) => Either::Left(
                 self.indexed
@@ -117,7 +117,7 @@ impl IndexState {
     }
 
     /// Returns all indexed CPVs.
-    fn iter(&self) -> impl Iterator<Item = &CPV> {
+    fn iter(&self) -> impl Iterator<Item = &Cpv> {
         self.indexed
             .values()
             .flat_map(|pkgs| pkgs.values())
@@ -131,7 +131,7 @@ impl IndexState {
     }
 }
 
-/// Defines the discovery state for [`CPVIndex`].
+/// Defines the discovery state for [`CpvIndex`].
 ///
 /// When lazy loading the index we must be able to distinguish
 /// from CPVs that are not loaded yet or just don't exist.
@@ -211,7 +211,7 @@ mod tests {
         ];
 
         for (discovered, queried, expected) in test_cases {
-            let index = CPVIndex::default();
+            let index = CpvIndex::default();
             index.update(&Atom::new(discovered).unwrap(), []);
             assert_eq!(
                 index.is_discovered(&Atom::new(queried).unwrap()),
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_matching_entries_exact() {
-        let index = CPVIndex::default();
+        let index = CpvIndex::default();
         let python_3_13 = cpv("dev-lang", "python", "3.13.12");
         let python3_14 = cpv("dev-lang", "python", "3.14.3");
         let rust = cpv("dev-lang", "rust", "1.94.0");
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_matching_entries_wildcards() {
-        let index = CPVIndex::default();
+        let index = CpvIndex::default();
         index.update(
             &Atom::default(),
             [
@@ -266,7 +266,7 @@ mod tests {
         let explicit = cpv("dev-libs", "pkg", "1.0-r0");
         let r1 = cpv("dev-libs", "pkg", "1.0-r1");
 
-        let index = CPVIndex::default();
+        let index = CpvIndex::default();
         index.update(&Atom::default(), [explicit, implicit, r1]);
 
         let atom = Atom::new("dev-libs/pkg").unwrap();

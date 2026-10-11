@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use germ_pms::{Atom, BlockerStrength, CPV, Package, PackageView, RepoName};
+use germ_pms::{Atom, BlockerStrength, Cpv, Package, PackageView, RepoName};
 use log::info;
 
 use super::outcome::{RequirementFailure, ResolutionOutcome};
@@ -16,29 +16,29 @@ use crate::vdb::package::InstalledPackage;
 #[derive(Debug, Default)]
 pub struct ResolverState {
     /// Holds packages that have been selected for installation.
-    selected: FxIndexMap<PackageKey, EffectivePackage>,
+    selected: FxIndexMap<PackageId, EffectivePackage>,
     /// Holds temporary packages that are currently being visited.
-    visiting: FxIndexMap<PackageKey, EffectivePackage>,
+    visiting: FxIndexMap<PackageId, EffectivePackage>,
     /// Holds rejected candidates.
-    rejected: FxIndexMap<PackageKey, PolicyRejection>,
+    rejected: FxIndexMap<PackageId, PolicyRejection>,
     /// Holds active blockers that need to be resolved.
     blockers: Vec<ActiveBlocker>,
     /// Holds installed packages that are planned for removal after the owner is merged.
     removals: FxIndexSet<InstalledPackage>,
     /// Holds installed package versions that should be replaced.
-    replacements: FxIndexMap<PackageKey, InstalledPackage>,
+    replacements: FxIndexMap<PackageId, InstalledPackage>,
 }
 
 impl ResolverState {
-    /// Returns whether a selected or visiting package with `key` satisfies `requirement`.
+    /// Returns whether a selected or visiting package with `id` satisfies `requirement`.
     pub fn satisfies(
         &self,
-        key: &PackageKey,
+        id: &PackageId,
         requirement: &AtomRequirement<'_>,
     ) -> anyhow::Result<bool> {
         self.selected
-            .get(key)
-            .or_else(|| self.visiting.get(key))
+            .get(id)
+            .or_else(|| self.visiting.get(id))
             .map_or(Ok(false), |pkg| pkg.matches(requirement))
     }
 
@@ -52,40 +52,40 @@ impl ResolverState {
         Ok(false)
     }
 
-    /// Marks the package for the given `key` as selected.
-    pub fn select(&mut self, key: PackageKey) {
+    /// Marks the package for the given `id` as selected.
+    pub fn select(&mut self, id: PackageId) {
         let pkg = self
             .visiting
-            .shift_remove(&key)
+            .shift_remove(&id)
             .expect("BUG: selected package must be visited");
-        self.selected.insert(key, pkg);
+        self.selected.insert(id, pkg);
     }
 
-    /// Checks if a package with the given `key` is already selected.
-    pub fn is_selected(&self, key: &PackageKey) -> bool {
-        self.selected.contains_key(key)
+    /// Checks if a package with the given `id` is already selected.
+    pub fn is_selected(&self, id: &PackageId) -> bool {
+        self.selected.contains_key(id)
     }
 
-    /// Checks if a package with the given `key` is currently being visited.
-    pub fn is_visiting(&self, key: &PackageKey) -> bool {
-        self.visiting.contains_key(key)
+    /// Checks if a package with the given `id` is currently being visited.
+    pub fn is_visiting(&self, id: &PackageId) -> bool {
+        self.visiting.contains_key(id)
     }
 
     /// Marks a package as being visited.
-    pub fn visit(&mut self, key: PackageKey, candidate: &EffectivePackage) {
-        self.visiting.insert(key, candidate.clone());
+    pub fn visit(&mut self, id: PackageId, candidate: &EffectivePackage) {
+        self.visiting.insert(id, candidate.clone());
     }
 
     /// Marks a package as rejected.
-    pub fn reject(&mut self, key: PackageKey, reason: PolicyRejection) {
-        if !self.rejected.contains_key(&key) {
-            self.rejected.insert(key, reason);
+    pub fn reject(&mut self, id: PackageId, reason: PolicyRejection) {
+        if !self.rejected.contains_key(&id) {
+            self.rejected.insert(id, reason);
         }
     }
 
-    /// Returns the candidate rejection for `key`.
-    pub fn rejection(&self, key: &PackageKey) -> Option<&PolicyRejection> {
-        self.rejected.get(key)
+    /// Returns the candidate rejection for `id`.
+    pub fn rejection(&self, id: &PackageId) -> Option<&PolicyRejection> {
+        self.rejected.get(id)
     }
 
     /// Registers a package blocker, or returns a package that conflicts with it.
@@ -165,16 +165,16 @@ impl ResolverState {
         self.replacements.truncate(checkpoint.replacements);
     }
 
-    /// Records `installed` as replaced by the selected package with `key`.
-    pub fn insert_replacement(&mut self, key: PackageKey, installed: InstalledPackage) {
-        self.replacements.insert(key, installed);
+    /// Records `installed` as replaced by the selected package with `id`.
+    pub fn insert_replacement(&mut self, id: PackageId, installed: InstalledPackage) {
+        self.replacements.insert(id, installed);
     }
 
     /// Consumes the state and creates a [`ResolutionOutcome`].
     pub fn finalize(mut self, failure: Option<RequirementFailure>) -> ResolutionOutcome {
         let mut ops = Vec::with_capacity(self.selected.len() + self.removals.len());
-        for (key, sel) in self.selected {
-            let op = match self.replacements.shift_remove(&key) {
+        for (id, sel) in self.selected {
+            let op = match self.replacements.shift_remove(&id) {
                 Some(installed) => match sel.pkg.cpv().cmp(installed.cpv()) {
                     Ordering::Equal => PackageOperation::Replace(sel, installed),
                     Ordering::Greater => PackageOperation::Upgrade(sel, installed),
@@ -199,11 +199,11 @@ pub struct StateCheckpoint {
     replacements: usize,
 }
 
-/// Represents a unique key for a package based on its CPV and repo name.
+/// Represents a unique identifier for a package based on its CPV and repo name.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct PackageKey((CPV, RepoName));
+pub struct PackageId((Cpv, RepoName));
 
-impl PackageKey {
+impl PackageId {
     pub fn new<P: PackageView>(pkg: &P) -> Self {
         Self((pkg.cpv().clone(), pkg.repo().clone()))
     }
@@ -239,15 +239,15 @@ mod tests {
     use crate::useflag::EffectiveUse;
 
     fn selected_state(package: Package, replacement: Option<InstalledPackage>) -> ResolverState {
-        let key = PackageKey::new(&package);
+        let id = PackageId::new(&package);
         let mut state = ResolverState::default();
         state.visit(
-            key.clone(),
+            id.clone(),
             &EffectivePackage::new(package, EffectiveUse::default()),
         );
-        state.select(key.clone());
+        state.select(id.clone());
         if let Some(installed) = replacement {
-            state.insert_replacement(key, installed);
+            state.insert_replacement(id, installed);
         }
         state
     }
@@ -316,19 +316,19 @@ mod tests {
         let foo = pkg("app-misc", "foo", "1", &[]);
         let bar = pkg("app-misc", "bar", "1", &[]);
         let mask = pkg("app-misc", "mask", "1", &[]);
-        let foo_key = PackageKey::new(&foo);
-        let mask_key = PackageKey::new(&mask);
+        let foo_id = PackageId::new(&foo);
+        let mask_id = PackageId::new(&mask);
         let installed = installed("foo", "0", "0", &[], &[]);
         let effective = EffectivePackage::new(foo, EffectiveUse::default());
         let mut state = ResolverState {
-            selected: [(foo_key.clone(), effective.clone())].into_iter().collect(),
+            selected: [(foo_id.clone(), effective.clone())].into_iter().collect(),
             visiting: [(
-                PackageKey::new(&bar),
+                PackageId::new(&bar),
                 EffectivePackage::new(bar, EffectiveUse::default()),
             )]
             .into_iter()
             .collect(),
-            rejected: [(mask_key.clone(), PolicyRejection::Masked)]
+            rejected: [(mask_id.clone(), PolicyRejection::Masked)]
                 .into_iter()
                 .collect(),
             blockers: vec![ActiveBlocker {
@@ -336,7 +336,7 @@ mod tests {
                 atom: "app-misc/baz".parse().unwrap(),
             }],
             removals: [installed.clone()].into_iter().collect(),
-            replacements: [(foo_key, installed)].into_iter().collect(),
+            replacements: [(foo_id, installed)].into_iter().collect(),
         };
         let checkpoint = ResolverState::default().checkpoint();
 
@@ -347,6 +347,6 @@ mod tests {
         assert!(state.blockers.is_empty());
         assert!(state.removals.is_empty());
         assert!(state.replacements.is_empty());
-        assert_eq!(state.rejection(&mask_key), Some(&PolicyRejection::Masked));
+        assert_eq!(state.rejection(&mask_id), Some(&PolicyRejection::Masked));
     }
 }

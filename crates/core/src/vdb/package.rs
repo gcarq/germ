@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::{fmt, fs, hash, io};
 
 use anyhow::{Context, bail};
-use germ_pms::{CPV, MetaVar, Package, PackageMetadata, PackageView, RepoName, UseFlag};
+use germ_pms::{Cpv, MetaVar, Package, PackageMetadata, PackageView, RepoName, UseFlag};
 
 use crate::eapi::is_supported_for_ebuilds;
 use crate::useflag::EffectiveUse;
@@ -12,17 +12,17 @@ use crate::useflag::EffectiveUse;
 /// Represents a package that is currently installed on the system.
 #[derive(Debug, Clone)]
 pub struct InstalledPackage {
-    cpv: CPV,
+    cpv: Cpv,
     repo: RepoName,
     metadata: PackageMetadata,
     iuse_effective: EffectiveUse,
 }
 
 impl InstalledPackage {
-    /// Creates a new [`InstalledPackage`] from the given `CPV` and `path`.
+    /// Creates a new [`InstalledPackage`] from the given `Cpv` and `path`.
     ///
     /// `path` is expected to be the VDB directory where additional metadata is stored.
-    pub fn from_path(cpv: CPV, path: &Path) -> anyhow::Result<Self> {
+    pub fn from_path(cpv: Cpv, path: &Path) -> anyhow::Result<Self> {
         let iuse_effective = EffectiveUse::from_parts(
             read_meta(&path.join("IUSE_EFFECTIVE"))?
                 .split_whitespace()
@@ -47,7 +47,7 @@ impl InstalledPackage {
 
     /// Creates a new [`InstalledPackage`] from the given parts.
     pub const fn from_parts(
-        cpv: CPV,
+        cpv: Cpv,
         repo: RepoName,
         metadata: PackageMetadata,
         iuse_effective: EffectiveUse,
@@ -126,7 +126,7 @@ fn read_meta(path: &Path) -> anyhow::Result<String> {
 }
 
 impl PackageView for InstalledPackage {
-    fn cpv(&self) -> &CPV {
+    fn cpv(&self) -> &Cpv {
         &self.cpv
     }
 

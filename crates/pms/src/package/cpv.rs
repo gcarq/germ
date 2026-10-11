@@ -10,15 +10,15 @@ use crate::package::version::PackageVersion;
 /// NOTE: `fqn` holds the fully qualified name and is also used in the [`Display`] implementation
 /// for performance reasons, so `category`, `package` and `version` must NOT be changed.
 #[derive(Clone, Debug)]
-pub struct CPV {
+pub struct Cpv {
     category: CatName,
     package: PkgName,
     version: PackageVersion,
     fqn: Box<str>,
 }
 
-impl CPV {
-    /// Creates a new [`CPV`] from the given `category`, `package` and `version`.
+impl Cpv {
+    /// Creates a new [`Cpv`] from the given `category`, `package` and `version`.
     pub fn new(category: CatName, package: PkgName, version: PackageVersion) -> Self {
         let fqn = format!("{category}/{package}-{version}").into();
         Self {
@@ -87,15 +87,15 @@ impl CPV {
     }
 }
 
-impl Eq for CPV {}
+impl Eq for Cpv {}
 
-impl PartialEq for CPV {
+impl PartialEq for Cpv {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl Ord for CPV {
+impl Ord for Cpv {
     fn cmp(&self, other: &Self) -> Ordering {
         (&self.category, &self.package, &self.version).cmp(&(
             &other.category,
@@ -105,13 +105,13 @@ impl Ord for CPV {
     }
 }
 
-impl PartialOrd for CPV {
+impl PartialOrd for Cpv {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl hash::Hash for CPV {
+impl hash::Hash for Cpv {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         self.category.hash(state);
         self.package.hash(state);
@@ -119,7 +119,7 @@ impl hash::Hash for CPV {
     }
 }
 
-impl fmt::Display for CPV {
+impl fmt::Display for Cpv {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.fqn)
     }

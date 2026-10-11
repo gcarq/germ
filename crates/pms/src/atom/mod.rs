@@ -10,7 +10,7 @@ use fancy_regex::{Captures, Regex};
 use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::grammar::{CATEGORY, PACKAGE, REPOSITORY, REVISION, VERSION, VERSION_SUFFIXES};
-use crate::package::cpv::CPV;
+use crate::package::cpv::Cpv;
 use crate::package::names::{CatName, PkgName};
 use crate::package::version::PackageVersion;
 use crate::repository::RepoName;
@@ -130,7 +130,7 @@ impl Atom {
     }
 
     /// Returns `true` if the given `cpv` matches this atom.
-    pub fn matches(&self, cpv: &CPV) -> bool {
+    pub fn matches(&self, cpv: &Cpv) -> bool {
         match &self.kind {
             AtomKind::Basic { category, package } => match (category, package) {
                 (Some(cat), Some(pkg)) => cat == cpv.category() && cpv.package() == pkg,

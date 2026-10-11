@@ -10,7 +10,7 @@ use crate::files::{PackageEntries, UseEntries};
 use crate::makenv::{MakeEnv, MakeEnvStack};
 use crate::policy::keyword::EffectiveKeywords;
 use crate::policy::pkgmask::PortageSource as PackageMaskSource;
-use crate::policy::useflag::{LocalRecords as UseLocalRecords, UsePolicy};
+use crate::policy::useflag::{LocalUseRecords, UsePolicy};
 use crate::profile::Profile;
 use crate::repository::RepoSet;
 use crate::useflag::UseExpandConfig;
@@ -99,7 +99,7 @@ impl PortageConf {
             self.makenv_stack.global_use()?,
             self.makenv_stack.iuse_implicit()?,
             self.profile.use_records.clone(),
-            UseLocalRecords {
+            LocalUseRecords {
                 package_use: PackageUseRecords::from_path(
                     &self.path.join("package.use"),
                     Precedence::User,

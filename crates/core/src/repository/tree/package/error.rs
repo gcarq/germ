@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use germ_pms::CPV;
+use germ_pms::Cpv;
 use thiserror::Error;
 
 use crate::ebuild::EbuildError;
@@ -10,13 +10,13 @@ use crate::repository::RepositoryError;
 #[derive(Debug, Error)]
 #[error("resolving metadata for {cpv} failed")]
 pub struct PackageResolutionError {
-    pub cpv: Box<CPV>, // Boxed due to the large size
+    pub cpv: Box<Cpv>, // Boxed due to the large size
     #[source]
     pub source: MetadataGenerationError,
 }
 
 impl PackageResolutionError {
-    pub fn new(cpv: CPV, source: MetadataGenerationError) -> Self {
+    pub fn new(cpv: Cpv, source: MetadataGenerationError) -> Self {
         Self {
             cpv: cpv.into(),
             source,

@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 
 use anyhow::anyhow;
 use fancy_regex::Regex;
-use germ_pms::{CPV, Eapi, EapiError, PackageMetadata, RawPackageMetadata};
+use germ_pms::{Cpv, Eapi, EapiError, PackageMetadata, RawPackageMetadata};
 use thiserror::Error;
 
 use crate::eapi::is_supported_for_ebuilds;
@@ -53,15 +53,15 @@ pub enum EbuildError {
 pub struct Ebuild<'r> {
     pub path: PathBuf,
     pub eapi: Eapi,
-    pub cpv: &'r CPV,
+    pub cpv: &'r Cpv,
     pub repo: &'r Repository,
 }
 
 impl<'r> Ebuild<'r> {
-    /// Creates an [`Ebuild`] from the given `path` and [`CPV`] it relates to.
+    /// Creates an [`Ebuild`] from the given `path` and [`Cpv`] it relates to.
     ///
     /// Returns an [`EbuildError`] if the ebuild is malformed.
-    pub fn new(cpv: &'r CPV, repo: &'r Repository) -> Result<Self, EbuildError> {
+    pub fn new(cpv: &'r Cpv, repo: &'r Repository) -> Result<Self, EbuildError> {
         let path = repo
             .location()
             .join(cpv.category().as_ref())

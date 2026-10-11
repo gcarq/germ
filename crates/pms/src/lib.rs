@@ -18,7 +18,7 @@ pub use eclass::EclassName;
 pub use keyword::Keyword;
 pub use package::metadata::{MetaVar, PackageMetadata, PackageMetadataError, RawPackageMetadata};
 pub use package::{
-    CPV, CatName, Package, PackageSlot, PackageVersion, PackageView, PkgName, SlotName,
+    CatName, Cpv, Package, PackageSlot, PackageVersion, PackageView, PkgName, SlotName,
 };
 pub use repository::RepoName;
 pub use useflag::{IUseEntry, IUseState, UseDep, UseDepDefault, UseDepKind, UseFlag};

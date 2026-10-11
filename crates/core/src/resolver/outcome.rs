@@ -3,7 +3,7 @@ use std::fmt;
 use germ_pms::{Atom, BlockerStrength, MetaVar, Package};
 
 use super::ExecutionPlan;
-use super::state::PackageKey;
+use super::state::PackageId;
 use crate::policy::PolicyRejection;
 use crate::types::FxIndexMap;
 
@@ -12,14 +12,14 @@ use crate::types::FxIndexMap;
 pub struct ResolutionOutcome {
     failure: Option<RequirementFailure>,
     plan: ExecutionPlan,
-    rejected: FxIndexMap<PackageKey, PolicyRejection>,
+    rejected: FxIndexMap<PackageId, PolicyRejection>,
 }
 
 impl ResolutionOutcome {
     pub const fn new(
         failure: Option<RequirementFailure>,
         plan: ExecutionPlan,
-        rejected: FxIndexMap<PackageKey, PolicyRejection>,
+        rejected: FxIndexMap<PackageId, PolicyRejection>,
     ) -> Self {
         Self {
             failure,
@@ -43,7 +43,7 @@ impl ResolutionOutcome {
     }
 
     /// Returns the map of rejected candidates with their reasons.
-    pub const fn rejected(&self) -> &FxIndexMap<PackageKey, PolicyRejection> {
+    pub const fn rejected(&self) -> &FxIndexMap<PackageId, PolicyRejection> {
         &self.rejected
     }
 }

@@ -1,7 +1,7 @@
 use anyhow::bail;
 use rkyv::{Archive, Deserialize, Serialize};
 
-use super::item::{AtomDep, ExprItem, RequiredUseFlag};
+use super::item::{DepAtom, ExprItem, RequiredUseFlag};
 use super::tree::{Expr, ExprNodes, ExprTree};
 use crate::MetaVar;
 
@@ -36,7 +36,7 @@ pub trait ExprKind {
 pub struct Depend;
 
 impl ExprKind for Depend {
-    type Item = AtomDep;
+    type Item = DepAtom;
     const VAR: MetaVar = MetaVar::Depend;
 
     fn validate_expr(expr: &Expr<'_, Self::Item>, in_any_of: bool) -> anyhow::Result<()> {
@@ -57,7 +57,7 @@ impl ExprKind for Depend {
 pub struct BDepend;
 
 impl ExprKind for BDepend {
-    type Item = AtomDep;
+    type Item = DepAtom;
     const VAR: MetaVar = MetaVar::BDepend;
 
     fn validate_expr(expr: &Expr<'_, Self::Item>, in_any_of: bool) -> anyhow::Result<()> {
@@ -78,7 +78,7 @@ impl ExprKind for BDepend {
 pub struct IDepend;
 
 impl ExprKind for IDepend {
-    type Item = AtomDep;
+    type Item = DepAtom;
     const VAR: MetaVar = MetaVar::IDepend;
 
     fn validate_expr(expr: &Expr<'_, Self::Item>, in_any_of: bool) -> anyhow::Result<()> {
@@ -99,7 +99,7 @@ impl ExprKind for IDepend {
 pub struct RDepend;
 
 impl ExprKind for RDepend {
-    type Item = AtomDep;
+    type Item = DepAtom;
     const VAR: MetaVar = MetaVar::RDepend;
 
     fn validate_expr(expr: &Expr<'_, Self::Item>, in_any_of: bool) -> anyhow::Result<()> {
@@ -120,7 +120,7 @@ impl ExprKind for RDepend {
 pub struct PDepend;
 
 impl ExprKind for PDepend {
-    type Item = AtomDep;
+    type Item = DepAtom;
     const VAR: MetaVar = MetaVar::PDepend;
 
     fn validate_expr(expr: &Expr<'_, Self::Item>, _in_any_of: bool) -> anyhow::Result<()> {

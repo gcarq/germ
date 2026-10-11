@@ -6,11 +6,11 @@ use std::hash::{Hash, Hasher};
 
 use crate::atom::Atom;
 use crate::package::{
-    CPV, Package, PackageMetadata, PackageVersion, PackageView, RawPackageMetadata,
+    Cpv, Package, PackageMetadata, PackageVersion, PackageView, RawPackageMetadata,
 };
 
-pub fn cpv(category: &str, package: &str, version: &str) -> CPV {
-    CPV::new(
+pub fn cpv(category: &str, package: &str, version: &str) -> Cpv {
+    Cpv::new(
         category.parse().unwrap(),
         package.parse().unwrap(),
         PackageVersion::try_from(version).unwrap(),

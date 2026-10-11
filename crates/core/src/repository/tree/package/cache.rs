@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
-use germ_pms::{CPV, PackageMetadata};
+use germ_pms::{Cpv, PackageMetadata};
 use once_cell::sync::OnceCell;
 use redb::{Database, ReadableDatabase, TableDefinition};
 use rkyv::rancor;
@@ -57,7 +57,7 @@ impl MetadataCache {
     /// Inserts the given `entries` into the cache.
     pub fn insert_batch<'r>(
         &self,
-        entries: impl IntoIterator<Item = (&'r CPV, &'r PackageMetadata)>,
+        entries: impl IntoIterator<Item = (&'r Cpv, &'r PackageMetadata)>,
     ) -> Result<(), CacheError> {
         let tx = self.db()?.begin_write().map_err(redb::Error::from)?;
         {
@@ -74,7 +74,7 @@ impl MetadataCache {
     }
 
     /// Retrieves the metadata for the specified `cpv` from the cache.
-    pub fn get(&self, cpv: &CPV) -> Result<Option<PackageMetadata>, CacheError> {
+    pub fn get(&self, cpv: &Cpv) -> Result<Option<PackageMetadata>, CacheError> {
         let key = cpv.fqn();
 
         let tx = self.db()?.begin_read().map_err(redb::Error::from)?;
@@ -98,8 +98,8 @@ impl MetadataCache {
     }
 
     /// Retains only the metadata for the specified `cpvs`.
-    pub fn retain<'r>(&self, cpvs: impl IntoIterator<Item = &'r CPV>) -> Result<(), CacheError> {
-        let known = cpvs.into_iter().map(CPV::fqn).collect::<FxHashSet<_>>();
+    pub fn retain<'r>(&self, cpvs: impl IntoIterator<Item = &'r Cpv>) -> Result<(), CacheError> {
+        let known = cpvs.into_iter().map(Cpv::fqn).collect::<FxHashSet<_>>();
         let tx = self.db()?.begin_write().map_err(redb::Error::from)?;
         tx.open_table(METADATA_TABLE)
             .map_err(redb::Error::from)?
@@ -110,7 +110,7 @@ impl MetadataCache {
     }
 
     /// Removes the metadata for the specified `cpv` from the cache.
-    pub fn remove(&self, cpv: &CPV) -> Result<(), CacheError> {
+    pub fn remove(&self, cpv: &Cpv) -> Result<(), CacheError> {
         let key = cpv.fqn();
 
         let tx = self.db()?.begin_write().map_err(redb::Error::from)?;

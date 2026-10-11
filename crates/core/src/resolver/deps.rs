@@ -1,5 +1,5 @@
 use futures_util::future::LocalBoxFuture;
-use germ_pms::deps::{AtomDep, Expr, ExprNodes};
+use germ_pms::deps::{DepAtom, Expr, ExprNodes};
 use germ_pms::{Atom, BlockerStrength, MetaVar, PackageView};
 
 use super::outcome::RequirementFailure;
@@ -26,7 +26,7 @@ impl<U: PackageLookup> Resolver<U> {
     fn resolve_expr<'a>(
         &'a mut self,
         owner: &'a EffectivePackage,
-        expr: Expr<'a, AtomDep>,
+        expr: Expr<'a, DepAtom>,
     ) -> LocalBoxFuture<'a, anyhow::Result<Option<RequirementFailure>>> {
         Box::pin(async move {
             match expr {
@@ -55,7 +55,7 @@ impl<U: PackageLookup> Resolver<U> {
     async fn resolve_group_all(
         &mut self,
         owner: &EffectivePackage,
-        nodes: ExprNodes<'_, AtomDep>,
+        nodes: ExprNodes<'_, DepAtom>,
     ) -> anyhow::Result<Option<RequirementFailure>> {
         for expr in nodes {
             if let Some(failure) = self.resolve_expr(owner, expr).await? {
@@ -71,7 +71,7 @@ impl<U: PackageLookup> Resolver<U> {
     async fn resolve_group_any(
         &mut self,
         owner: &EffectivePackage,
-        nodes: ExprNodes<'_, AtomDep>,
+        nodes: ExprNodes<'_, DepAtom>,
     ) -> anyhow::Result<Option<RequirementFailure>> {
         for expr in nodes.clone() {
             if let Expr::Item(atom) = expr {
@@ -104,7 +104,7 @@ impl<U: PackageLookup> Resolver<U> {
     async fn resolve_atom(
         &mut self,
         owner: &EffectivePackage,
-        atom: &AtomDep,
+        atom: &DepAtom,
     ) -> anyhow::Result<Option<RequirementFailure>> {
         if let Some(strength) = atom.blocker() {
             self.handle_blocker(owner, atom.inner(), strength).await

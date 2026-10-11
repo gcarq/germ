@@ -15,14 +15,14 @@ pub use eclass::{Eclass, Eclasses};
 use either::Either;
 pub use error::RepositoryError;
 use futures_util::{StreamExt, TryStreamExt, stream};
-use germ_pms::{Arch, Atom, CPV, CatName, Package, PackageView, RepoName};
+use germ_pms::{Arch, Atom, CatName, Cpv, Package, PackageView, RepoName};
 pub use layout::{Layout, LayoutError};
 use log::{debug, warn};
 pub use package::cache::CacheError;
 pub use package::{PackageResolutionError, PackageResult};
 pub use profiles::{Arches, ProfileError};
 
-use self::package::CPVIndex;
+use self::package::CpvIndex;
 use self::package::cache::MetadataCache;
 use self::package::discovery::{
     resolve_from_category_path, resolve_from_pkg_path, resolve_from_repo_path,
@@ -47,7 +47,7 @@ pub struct Repository {
     supported_arches: Arches,
     known_categories: FxHashSet<CatName>,
     profiles_desc: ProfileDescriptions,
-    cpv_index: CPVIndex,
+    cpv_index: CpvIndex,
     metadata_cache: MetadataCache,
     sysconf: Arc<SysConf>,
 
@@ -96,7 +96,7 @@ impl Repository {
             eclasses: Eclasses::empty(location),
             supported_arches: Arches::from_path(&profiles.join("arch.list"))?,
             profiles_desc: ProfileDescriptions::from_path(&profiles.join("profiles.desc"))?,
-            cpv_index: CPVIndex::default(),
+            cpv_index: CpvIndex::default(),
             package_mask,
             package_unmask,
             layout,
@@ -106,7 +106,7 @@ impl Repository {
     }
 
     /// Returns all existing CPVs in the repository.
-    pub fn cpvs(&self) -> Vec<CPV> {
+    pub fn cpvs(&self) -> Vec<Cpv> {
         self.update_cpv_index(&Atom::default());
         self.cpv_index.entries()
     }
@@ -192,8 +192,8 @@ impl Repository {
         Ok(())
     }
 
-    /// Resolves the [`Package`] for the given [`CPV`].
-    async fn resolve_package(&self, cpv: CPV) -> PackageResult {
+    /// Resolves the [`Package`] for the given [`Cpv`].
+    async fn resolve_package(&self, cpv: Cpv) -> PackageResult {
         let ebuild = match Ebuild::new(&cpv, self) {
             Ok(ebuild) => ebuild,
             Err(error) => {
@@ -210,7 +210,7 @@ impl Repository {
     /// Builds the [`Package`] index for the given `cpvs`.
     async fn resolve_packages(
         &self,
-        cpvs: Vec<CPV>,
+        cpvs: Vec<Cpv>,
     ) -> Result<Vec<PackageResult>, RepositoryError> {
         let mut result = (0..cpvs.len()).map(|_| None).collect::<Vec<_>>();
         let mut missing = Vec::new();
@@ -281,7 +281,7 @@ impl Repository {
         }
     }
 
-    /// Updates [`CPVIndex`] and ensures all [`CPV`]
+    /// Updates [`CpvIndex`] and ensures all [`Cpv`]
     /// for the given `atom` are discovered.
     fn update_cpv_index(&self, atom: &Atom) {
         if self.cpv_index.is_discovered(atom) {
@@ -412,7 +412,7 @@ impl Default for Repository {
             eclasses: Eclasses::default(),
             supported_arches: Arches::default(),
             profiles_desc: ProfileDescriptions::default(),
-            cpv_index: CPVIndex::default(),
+            cpv_index: CpvIndex::default(),
             metadata_cache: MetadataCache::new(&metadata_dir),
             sysconf: sysconf.into(),
             name,

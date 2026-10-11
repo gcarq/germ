@@ -4,7 +4,7 @@ use log::{debug, info, trace, warn};
 use super::outcome::{CandidateRejectionReason, RejectedCandidate, RequirementFailure};
 use super::provider::PackageLookup;
 use super::requirement::AtomRequirement;
-use super::state::PackageKey;
+use super::state::PackageId;
 use super::{EffectivePackage, Resolver};
 use crate::policy::PolicyResult;
 
@@ -28,16 +28,16 @@ impl<U: PackageLookup> Resolver<U> {
 
         let mut rejected = Vec::new();
         for pkg in pkgs {
-            let key = PackageKey::new(&pkg);
+            let id = PackageId::new(&pkg);
 
-            if let Some(rejection) = self.state.rejection(&key).copied() {
+            if let Some(rejection) = self.state.rejection(&id).copied() {
                 trace!("skipping {}: cached rejection {rejection}", pkg.cpv());
                 rejected.push(RejectedCandidate::policy(pkg, rejection));
                 continue;
             }
 
-            if self.state.is_selected(&key) || self.state.is_visiting(&key) {
-                if self.state.satisfies(&key, &requirement)? {
+            if self.state.is_selected(&id) || self.state.is_visiting(&id) {
+                if self.state.satisfies(&id, &requirement)? {
                     trace!("already selected: {pkg}");
                     return Ok(None);
                 }
@@ -56,7 +56,7 @@ impl<U: PackageLookup> Resolver<U> {
                     }
                 }
                 Ok(PolicyResult::Rejected(rejection)) => {
-                    self.state.reject(key, rejection);
+                    self.state.reject(id, rejection);
                     rejected.push(RejectedCandidate::policy(pkg, rejection));
                 }
                 Err(error) => {
@@ -78,7 +78,7 @@ impl<U: PackageLookup> Resolver<U> {
         requirement: &AtomRequirement<'_>,
         candidate: &EffectivePackage,
     ) -> anyhow::Result<Option<CandidateRejectionReason>> {
-        let key = PackageKey::new(&candidate.pkg);
+        let id = PackageId::new(&candidate.pkg);
 
         if !requirement.satisfied_by(&candidate.pkg, &candidate.effective_use)? {
             return Ok(Some(CandidateRejectionReason::Requirement(
@@ -95,15 +95,15 @@ impl<U: PackageLookup> Resolver<U> {
 
         debug!("resolving dependencies for {}", candidate.pkg);
         let traversal = self.start_traversal();
-        self.state.visit(key.clone(), candidate);
+        self.state.visit(id.clone(), candidate);
 
         match self.resolve_dependencies(candidate).await {
             Ok(None) => match self.provider.vdb_match_by_pkg(&candidate.pkg).await {
                 Ok(installed) => {
                     if let Some(installed) = installed {
-                        self.state.insert_replacement(key.clone(), installed);
+                        self.state.insert_replacement(id.clone(), installed);
                     }
-                    self.state.select(key);
+                    self.state.select(id);
                     Ok(None)
                 }
                 Err(error) => {

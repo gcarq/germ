@@ -9,7 +9,7 @@ use std::fmt;
 use rkyv::{Archive, Deserialize, Serialize};
 
 use self::arena::ExprArena;
-pub use self::item::{AtomDep, ExprItem, RequiredUseFlag};
+pub use self::item::{DepAtom, ExprItem, RequiredUseFlag};
 pub use self::kind::{BDepend, Depend, ExprKind, IDepend, PDepend, RDepend, RequiredUse};
 use self::parser::ExprParser;
 pub use self::tree::{Expr, ExprEval, ExprNodes, ExprTree};
@@ -18,11 +18,11 @@ use crate::MetaVar;
 /// Holds a metadata field expression parsed into an expression arena.
 /// See PMS 8.2 for the dependency specification format.
 #[derive(Archive, Serialize, Deserialize, Eq, PartialEq, Clone, Debug)]
-pub struct DepExpr<F: ExprKind> {
+pub struct ParsedExpr<F: ExprKind> {
     arena: ExprArena<F::Item>,
 }
 
-impl<F: ExprKind> DepExpr<F> {
+impl<F: ExprKind> ParsedExpr<F> {
     /// Parses `input` as an expression of the field `F`.
     ///
     /// # Errors
@@ -50,13 +50,13 @@ impl<F: ExprKind> DepExpr<F> {
     }
 }
 
-impl<F: ExprKind> fmt::Display for DepExpr<F> {
+impl<F: ExprKind> fmt::Display for ParsedExpr<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.view().fmt(f)
     }
 }
 
-impl<F: ExprKind> Default for DepExpr<F> {
+impl<F: ExprKind> Default for ParsedExpr<F> {
     fn default() -> Self {
         Self {
             arena: ExprArena::default(),
@@ -69,7 +69,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_atom_dep_parse() {
+    fn test_dep_atom_parse() {
         for (input, atom) in [
             ("dev-lang/rust", "dev-lang/rust"),
             ("!dev-lang/rust", "dev-lang/rust"),
@@ -80,17 +80,17 @@ mod tests {
             ("!cat/pkg::repo-", "cat/pkg::repo-"),
             ("!cat/pkg:slot", "cat/pkg:slot"),
         ] {
-            let parsed = input.parse::<AtomDep>().unwrap();
+            let parsed = input.parse::<DepAtom>().unwrap();
             assert_eq!(parsed.to_string(), input);
             assert_eq!(parsed.inner().to_string(), atom);
         }
     }
 
     #[test]
-    fn test_atom_dep_parse_error() {
+    fn test_dep_atom_parse_error() {
         for input in ["!", "!!", "!!!cat/pkg", "!(", "!||", "!^^", "! cat/pkg"] {
             assert!(
-                input.parse::<AtomDep>().is_err(),
+                input.parse::<DepAtom>().is_err(),
                 "expected atom dependency error for '{input}'"
             );
         }
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty() {
-        let expression = DepExpr::<Depend>::parse(" \t").unwrap();
+        let expression = ParsedExpr::<Depend>::parse(" \t").unwrap();
         assert_eq!(expression.to_string(), "");
     }
 
@@ -126,7 +126,7 @@ mod tests {
             ("!!cat/pkg", true),
             ("^^ ( cat/pkg cat/other )", false),
         ] {
-            let result = DepExpr::<Depend>::parse(input);
+            let result = ParsedExpr::<Depend>::parse(input);
             assert_eq!(result.is_ok(), valid, "dependency: {input}");
         }
 
@@ -136,13 +136,13 @@ mod tests {
             ("!foo", true),
             ("!!foo", false),
         ] {
-            let result = DepExpr::<RequiredUse>::parse(input);
+            let result = ParsedExpr::<RequiredUse>::parse(input);
             assert_eq!(result.is_ok(), valid, "REQUIRED_USE: {input}");
         }
     }
 
     #[test]
-    fn test_atom_dep_validate_ok() {
+    fn test_dep_atom_validate_ok() {
         let cases = [
             "dev-lang/rust",
             "=dev-lang/rust-1.70.0:1.70",
@@ -153,26 +153,26 @@ mod tests {
         ];
 
         for input in cases {
-            let result = DepExpr::<Depend>::parse(input);
+            let result = ParsedExpr::<Depend>::parse(input);
             assert!(result.is_ok(), "expected valid dependency: {input}");
         }
     }
 
     #[test]
-    fn test_atom_dep_validate_err() {
+    fn test_dep_atom_validate_err() {
         for input in ["*/*", "dev-lang/*", "*/rust", "dev-lang/rust::gentoo"] {
-            let result = DepExpr::<Depend>::parse(input);
+            let result = ParsedExpr::<Depend>::parse(input);
             assert!(result.is_err(), "expected invalid dependency: {input}");
         }
     }
 
     #[test]
     fn test_slot_operator_placement() {
-        assert!(DepExpr::<Depend>::parse("dev-lang/rust:=").is_ok());
-        assert!(DepExpr::<Depend>::parse("|| ( dev-lang/rust:= dev-lang/go )").is_err());
-        assert!(DepExpr::<PDepend>::parse("dev-lang/rust:=").is_err());
-        assert!(DepExpr::<PDepend>::parse("dev-lang/rust:0").is_ok());
-        assert!(DepExpr::<Depend>::parse("dev-lang/rust:0/1=").is_ok());
-        assert!(DepExpr::<PDepend>::parse("|| ( dev-lang/rust:0/1= dev-lang/go )").is_err());
+        assert!(ParsedExpr::<Depend>::parse("dev-lang/rust:=").is_ok());
+        assert!(ParsedExpr::<Depend>::parse("|| ( dev-lang/rust:= dev-lang/go )").is_err());
+        assert!(ParsedExpr::<PDepend>::parse("dev-lang/rust:=").is_err());
+        assert!(ParsedExpr::<PDepend>::parse("dev-lang/rust:0").is_ok());
+        assert!(ParsedExpr::<Depend>::parse("dev-lang/rust:0/1=").is_ok());
+        assert!(ParsedExpr::<PDepend>::parse("|| ( dev-lang/rust:0/1= dev-lang/go )").is_err());
     }
 }

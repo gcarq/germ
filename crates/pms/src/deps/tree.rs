@@ -230,7 +230,7 @@ impl<T: ExprItem> ExprArena<T> {
 mod tests {
     use super::*;
     use crate::deps::parser::ExprParser;
-    use crate::deps::{AtomDep, RequiredUseFlag};
+    use crate::deps::{DepAtom, RequiredUseFlag};
 
     struct TestEvaluator {
         enabled: Vec<UseFlag>,
@@ -260,7 +260,7 @@ mod tests {
         assert_eq!(arena.view().to_string(), input);
 
         let input = "!!cat/pkg !cat/other";
-        let arena = ExprParser::<AtomDep>::parse(input).unwrap();
+        let arena = ExprParser::<DepAtom>::parse(input).unwrap();
         assert_eq!(arena.view().to_string(), input);
     }
 

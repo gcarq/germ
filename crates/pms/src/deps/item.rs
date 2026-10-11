@@ -8,7 +8,7 @@ use crate::atom::{Atom, BlockerStrength};
 use crate::useflag::UseFlag;
 
 /// This trait defines an item that can be used in a dependency expression,
-/// such as [`RequiredUseFlag`] and [`AtomDep`].
+/// such as [`RequiredUseFlag`] and [`DepAtom`].
 pub trait ExprItem: FromStr<Err = anyhow::Error> + fmt::Display {
     /// Validates if the item is valid in a dependency expression.
     ///
@@ -23,12 +23,12 @@ pub trait ExprItem: FromStr<Err = anyhow::Error> + fmt::Display {
 ///
 /// [`BlockerStrength`] only makes sense when used a dependency, and is not part of the atom itself.
 #[derive(Archive, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct AtomDep {
+pub struct DepAtom {
     atom: Atom,
     blocker: Option<BlockerStrength>,
 }
 
-impl AtomDep {
+impl DepAtom {
     /// Returns the inner [`Atom`].
     pub const fn inner(&self) -> &Atom {
         &self.atom
@@ -40,7 +40,7 @@ impl AtomDep {
     }
 }
 
-impl ExprItem for AtomDep {
+impl ExprItem for DepAtom {
     fn validate(&self) -> anyhow::Result<()> {
         if self.atom.category().is_none()
             || self.atom.package().is_none()
@@ -52,7 +52,7 @@ impl ExprItem for AtomDep {
     }
 }
 
-impl FromStr for AtomDep {
+impl FromStr for DepAtom {
     type Err = anyhow::Error;
 
     fn from_str(value: &str) -> anyhow::Result<Self> {
@@ -68,7 +68,7 @@ impl FromStr for AtomDep {
     }
 }
 
-impl fmt::Display for AtomDep {
+impl fmt::Display for DepAtom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(blocker) = &self.blocker {
             write!(f, "{blocker}")?;

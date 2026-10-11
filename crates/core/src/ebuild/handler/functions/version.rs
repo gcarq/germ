@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use anyhow::bail;
-use germ_pms::{CPV, PackageVersion};
+use germ_pms::{Cpv, PackageVersion};
 
 use crate::ebuild::handler::protocol::FunctionReply;
 
@@ -12,7 +12,7 @@ use crate::ebuild::handler::protocol::FunctionReply;
 /// The `range` specifies which components to extract from the version.
 /// If `version` is `None`, the package's PV is used.
 /// Returns `Err` if the EAPI does not support `ver_cut`.
-pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> anyhow::Result<FunctionReply> {
+pub fn ver_cut(cpv: &Cpv, range: &str, version: Option<&str>) -> anyhow::Result<FunctionReply> {
     // Use PV as fallback if no version is provided
     let version = match version {
         Some(v) => v,
@@ -45,7 +45,7 @@ pub fn ver_cut(cpv: &CPV, range: &str, version: Option<&str>) -> anyhow::Result<
 /// If the len of `args` is odd, the last element is treated as the version string,
 /// otherwise the package's PV is used.
 /// Returns the modified version string or an `Err` if parsing fails.
-pub fn ver_rs(cpv: &CPV, args: &[String]) -> anyhow::Result<FunctionReply> {
+pub fn ver_rs(cpv: &Cpv, args: &[String]) -> anyhow::Result<FunctionReply> {
     if args.len() < 2 {
         bail!("ver_rs requires at least two arguments");
     }
@@ -100,7 +100,7 @@ pub fn ver_rs(cpv: &CPV, args: &[String]) -> anyhow::Result<FunctionReply> {
 ///
 /// Returns `Ok(true)` if the comparison holds, `Ok(false)` otherwise.
 pub fn ver_test(
-    cpv: &CPV,
+    cpv: &Cpv,
     version1: Option<&str>,
     op: &str,
     version2: &str,
