@@ -3,6 +3,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 
 use super::item::{DepAtom, ExprItem, RequiredUseFlag};
 use super::tree::{Expr, ExprNodes, ExprTree};
+use super::types::SimpleString;
 use crate::MetaVar;
 
 /// Pins the item type and allowed expression syntax of one metadata field.
@@ -146,6 +147,42 @@ impl ExprKind for RequiredUse {
 
     fn validate_expr(_expr: &Expr<'_, Self::Item>, _in_any_of: bool) -> anyhow::Result<()> {
         Ok(())
+    }
+}
+
+/// The `RESTRICT` metadata field.
+#[derive(Archive, Serialize, Deserialize, Clone, Copy, Eq, PartialEq, Debug)]
+pub struct Restrict;
+
+impl ExprKind for Restrict {
+    type Item = SimpleString;
+    const VAR: MetaVar = MetaVar::Restrict;
+
+    fn validate_expr(expr: &Expr<'_, Self::Item>, _in_any_of: bool) -> anyhow::Result<()> {
+        match expr {
+            Expr::Item(_) | Expr::AllOf(_) | Expr::Use { .. } => Ok(()),
+            Expr::AnyOf(_) | Expr::ExactlyOneOf(_) | Expr::AtMostOneOf(_) => {
+                bail!("{} is not valid in {}", expr.name(), Self::VAR);
+            }
+        }
+    }
+}
+
+/// The `PROPERTIES` metadata field.
+#[derive(Archive, Serialize, Deserialize, Clone, Copy, Eq, PartialEq, Debug)]
+pub struct Properties;
+
+impl ExprKind for Properties {
+    type Item = SimpleString;
+    const VAR: MetaVar = MetaVar::Properties;
+
+    fn validate_expr(expr: &Expr<'_, Self::Item>, _in_any_of: bool) -> anyhow::Result<()> {
+        match expr {
+            Expr::Item(_) | Expr::AllOf(_) | Expr::Use { .. } => Ok(()),
+            Expr::AnyOf(_) | Expr::ExactlyOneOf(_) | Expr::AtMostOneOf(_) => {
+                bail!("{} is not valid in {}", expr.name(), Self::VAR);
+            }
+        }
     }
 }
 

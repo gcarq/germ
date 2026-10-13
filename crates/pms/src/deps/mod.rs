@@ -3,6 +3,7 @@ mod item;
 mod kind;
 mod parser;
 mod tree;
+mod types;
 
 use std::fmt;
 
@@ -10,9 +11,12 @@ use rkyv::{Archive, Deserialize, Serialize};
 
 use self::arena::ExprArena;
 pub use self::item::{DepAtom, ExprItem, RequiredUseFlag};
-pub use self::kind::{BDepend, Depend, ExprKind, IDepend, PDepend, RDepend, RequiredUse};
+pub use self::kind::{
+    BDepend, Depend, ExprKind, IDepend, PDepend, Properties, RDepend, RequiredUse, Restrict,
+};
 use self::parser::ExprParser;
 pub use self::tree::{Expr, ExprEval, ExprNodes, ExprTree};
+pub use self::types::SimpleString;
 use crate::MetaVar;
 
 /// Holds a metadata field expression parsed into an expression arena.
@@ -138,6 +142,30 @@ mod tests {
         ] {
             let result = ParsedExpr::<RequiredUse>::parse(input);
             assert_eq!(result.is_ok(), valid, "REQUIRED_USE: {input}");
+        }
+
+        for (input, valid) in [
+            ("mirror test", true),
+            ("( mirror test )", true),
+            ("mirror? ( fetch )", true),
+            ("|| ( mirror fetch )", false),
+            ("^^ ( mirror fetch )", false),
+            ("?? ( mirror fetch )", false),
+        ] {
+            let result = ParsedExpr::<Restrict>::parse(input);
+            assert_eq!(result.is_ok(), valid, "RESTRICT: {input}");
+        }
+
+        for (input, valid) in [
+            ("live test_network", true),
+            ("( live test_network )", true),
+            ("test? ( live )", true),
+            ("|| ( live test )", false),
+            ("^^ ( live test )", false),
+            ("?? ( live test )", false),
+        ] {
+            let result = ParsedExpr::<Properties>::parse(input);
+            assert_eq!(result.is_ok(), valid, "PROPERTIES: {input}");
         }
     }
 

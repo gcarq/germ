@@ -7,8 +7,8 @@ use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::deps::{
-    BDepend, DepAtom, Depend, ExprKind, ExprTree, IDepend, PDepend, ParsedExpr, RDepend,
-    RequiredUse,
+    BDepend, DepAtom, Depend, ExprKind, ExprTree, IDepend, PDepend, ParsedExpr, Properties,
+    RDepend, RequiredUse, Restrict,
 };
 use crate::eapi::Eapi;
 use crate::keyword::Keyword;
@@ -124,11 +124,10 @@ pub struct PackageMetadata {
     src_uri: Vec<String>,
     // TODO: enforce valid license identifiers and parse as ParsedExpr
     license: Vec<String>,
-    properties: Vec<String>,
+    properties: ParsedExpr<Properties>,
     keywords: Vec<Keyword>,
     inherit: Vec<String>,
-    // TODO: Use something like ParsedExpr<String>
-    restrict: String,
+    restrict: ParsedExpr<Restrict>,
     defined_phases: Vec<String>,
     iuse: Vec<IUseEntry>,
     required_use: ParsedExpr<RequiredUse>,
@@ -161,7 +160,7 @@ impl PackageMetadata {
         &self.license
     }
 
-    pub fn properties(&self) -> &[String] {
+    pub const fn properties(&self) -> &ParsedExpr<Properties> {
         &self.properties
     }
 
@@ -173,7 +172,7 @@ impl PackageMetadata {
         &self.inherit
     }
 
-    pub const fn restrict(&self) -> &String {
+    pub const fn restrict(&self) -> &ParsedExpr<Restrict> {
         &self.restrict
     }
 
@@ -254,14 +253,10 @@ impl PackageMetadata {
             homepage: vars.words(MetaVar::Homepage)?,
             src_uri: vars.words(MetaVar::SrcUri)?,
             license: vars.words(MetaVar::License)?,
-            properties: vars.words(MetaVar::Properties)?,
+            properties: vars.expression::<Properties>(MetaVar::Properties)?,
             keywords: vars.words(MetaVar::Keywords)?,
             inherit: vars.words(MetaVar::Inherited)?,
-            restrict: vars
-                .get(MetaVar::Restrict)
-                .unwrap_or_default()
-                .trim()
-                .to_owned(),
+            restrict: vars.expression::<Restrict>(MetaVar::Restrict)?,
             defined_phases: vars.words(MetaVar::DefinedPhases)?,
             iuse: vars.words(MetaVar::IUse)?,
             required_use: vars.expression::<RequiredUse>(MetaVar::RequiredUse)?,
@@ -312,7 +307,7 @@ impl fmt::Display for PackageMetadata {
         )?;
         writeln!(f, "LICENSE={}", self.license.join(" "))?;
         writeln!(f, "PDEPEND={}", self.pdepend)?;
-        writeln!(f, "PROPERTIES={}", self.properties.join(" "))?;
+        writeln!(f, "PROPERTIES={}", self.properties)?;
         writeln!(f, "RDEPEND={}", self.rdepend)?;
         writeln!(f, "RESTRICT={}", self.restrict)?;
         writeln!(f, "REQUIRED_USE={}", self.required_use)?;
@@ -440,7 +435,7 @@ mod tests {
             ["https://localhost/a", "https://localhost/b"]
         );
         assert_eq!(metadata.license(), ["GPL-3"]);
-        assert_eq!(metadata.properties(), ["live", "test_network"]);
+        assert_eq!(metadata.properties().to_string(), "live test_network");
         assert_eq!(
             metadata.keywords(),
             &[
@@ -458,7 +453,7 @@ mod tests {
                 "systemd"
             ]
         );
-        assert_eq!(metadata.restrict(), "");
+        assert_eq!(metadata.restrict().to_string(), "");
         assert!(metadata.defined_phases().is_empty());
         assert_eq!(
             metadata.iuse(),
