@@ -1,6 +1,7 @@
 mod eclass;
 mod error;
 mod layout;
+mod licenses;
 mod package;
 mod profiles;
 
@@ -17,6 +18,7 @@ pub use error::RepositoryError;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use germ_pms::{Arch, Atom, CatName, Cpv, Package, PackageView, RepoName};
 pub use layout::{Layout, LayoutError};
+pub use licenses::Licenses;
 use log::{debug, warn};
 pub use package::cache::CacheError;
 pub use package::{PackageResolutionError, PackageResult};
@@ -44,6 +46,7 @@ pub struct Repository {
     name: RepoName,
     layout: Layout,
     eclasses: Eclasses,
+    licenses: Licenses,
     supported_arches: Arches,
     known_categories: FxHashSet<CatName>,
     profiles_desc: ProfileDescriptions,
@@ -94,6 +97,7 @@ impl Repository {
             metadata_cache: MetadataCache::new(&metadata_dir),
             known_categories: FxHashSet::default(),
             eclasses: Eclasses::empty(location),
+            licenses: Licenses::default(),
             supported_arches: Arches::from_path(&profiles.join("arch.list"))?,
             profiles_desc: ProfileDescriptions::from_path(&profiles.join("profiles.desc"))?,
             cpv_index: CpvIndex::default(),
@@ -138,6 +142,11 @@ impl Repository {
         &self.eclasses
     }
 
+    /// Returns all known licenses.
+    pub const fn licenses(&self) -> &Licenses {
+        &self.licenses
+    }
+
     /// Returns the current [`Layout`].
     pub const fn layout(&self) -> &Layout {
         &self.layout
@@ -158,11 +167,12 @@ impl Repository {
         self.supported_arches.contains(arch)
     }
 
-    /// Resolves all configured categories and eclasses and also clears the CPV index.
+    /// Resolves all configured categories, eclasses and licenses and also clears the CPV index.
     ///
     /// NOTE: The caller must ensure [`Inherit::inherit_from`] has been called before.
     pub fn finalize(&mut self) -> Result<(), RepositoryError> {
         self.collect_eclasses().map_err(RepositoryError::Data)?;
+        self.collect_licenses().map_err(RepositoryError::Data)?;
         self.collect_categories();
         self.cpv_index.clear();
         Ok(())
@@ -259,6 +269,15 @@ impl Repository {
         let eclasses = Eclasses::from_path(&path)
             .with_context(|| format!("unable to collect eclasses at {}", path.display()))?;
         self.eclasses.extend(&eclasses);
+        Ok(())
+    }
+
+    /// Collects all known licenses in the repo.
+    fn collect_licenses(&mut self) -> anyhow::Result<()> {
+        let path = self.location.join("licenses");
+        let licenses = Licenses::from_path(&path)
+            .with_context(|| format!("unable to collect licenses at {}", path.display()))?;
+        self.licenses.extend(&licenses);
         Ok(())
     }
 
@@ -365,6 +384,7 @@ impl Inherit for Repository {
             .extend(master.known_categories.iter().cloned());
         self.eclasses.extend(&master.eclasses);
         self.supported_arches.extend(&master.supported_arches);
+        self.licenses.extend(&master.licenses);
         Ok(())
     }
 }
@@ -410,6 +430,7 @@ impl Default for Repository {
             package_mask: PackageEntries::default(),
             package_unmask: PackageEntries::default(),
             eclasses: Eclasses::default(),
+            licenses: Licenses::default(),
             supported_arches: Arches::default(),
             profiles_desc: ProfileDescriptions::default(),
             cpv_index: CpvIndex::default(),

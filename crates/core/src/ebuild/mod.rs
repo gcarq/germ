@@ -96,7 +96,22 @@ impl<'r> Ebuild<'r> {
             })
             .collect::<anyhow::Result<RawPackageMetadata<'_>>>()?;
 
-        Ok(PackageMetadata::from_raw(&vars, Some(self.eapi))?)
+        let metadata = PackageMetadata::from_raw(&vars, Some(self.eapi))?;
+        self.validate_licenses(&metadata)?;
+        Ok(metadata)
+    }
+
+    /// Checks if every item in `LICENSE` is valid for the repository.
+    fn validate_licenses(&self, metadata: &PackageMetadata) -> Result<(), MetadataGenerationError> {
+        let licenses = self.repo.licenses();
+        metadata.license().try_for_each_item(|name| {
+            licenses
+                .contains(name)
+                .ok_or_else(|| MetadataGenerationError::MissingLicense {
+                    name: name.clone(),
+                    repo: self.repo.name().clone(),
+                })
+        })
     }
 
     /// Parses the EAPI from the ebuild file at the given `path`.
@@ -159,7 +174,7 @@ mod tests {
     use germ_pms::test_support::cpv;
 
     use super::*;
-    use crate::repository::test_support::RepoBuilder;
+    use crate::repository::test_support::{RepoBuilder, repo_set};
 
     #[test]
     fn test_eapi_declarations() {
@@ -173,6 +188,38 @@ mod tests {
         ] {
             assert_eq!(Ebuild::parse_eapi_declaration(line).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn test_validate_licenses() {
+        let reposet = repo_set([RepoBuilder::new("repo").license("GPL-3").license("MIT")]).unwrap();
+        let cpv = cpv("app-misc", "foo", "1");
+        let ebuild = Ebuild {
+            path: PathBuf::default(),
+            eapi: Eapi::Eight,
+            cpv: &cpv,
+            repo: reposet.get("repo").unwrap(),
+        };
+
+        let metadata = |license| {
+            [
+                ("EAPI", "8"),
+                ("DESCRIPTION", "Test package"),
+                ("SLOT", "0"),
+                ("LICENSE", license),
+            ]
+            .into_iter()
+            .collect::<RawPackageMetadata<'_>>()
+        };
+
+        let provided = PackageMetadata::from_raw(&metadata("GPL-3 || ( MIT )"), None).unwrap();
+        assert!(ebuild.validate_licenses(&provided).is_ok());
+
+        let missing = PackageMetadata::from_raw(&metadata("GPL-3 BSD"), None).unwrap();
+        assert!(matches!(
+            ebuild.validate_licenses(&missing),
+            Err(MetadataGenerationError::MissingLicense { .. })
+        ));
     }
 
     #[test]

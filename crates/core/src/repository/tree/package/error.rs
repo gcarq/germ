@@ -8,7 +8,7 @@ use crate::repository::RepositoryError;
 
 /// Defines failures while resolving packages from repositories.
 #[derive(Debug, Error)]
-#[error("resolving metadata for {cpv} failed")]
+#[error("resolving metadata for {cpv} failed: {source}")]
 pub struct PackageResolutionError {
     pub cpv: Box<Cpv>, // Boxed due to the large size
     #[source]

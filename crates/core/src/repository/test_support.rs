@@ -62,6 +62,7 @@ pub struct RepoBuilder {
     entries: Vec<FixtureEntry>,
     categories: FxHashSet<String>,
     eclasses: Vec<String>,
+    licenses: Vec<String>,
     ebuilds: Vec<(String, String, String, String)>,
 }
 
@@ -82,6 +83,7 @@ impl RepoBuilder {
             entries: Vec::new(),
             categories: FxHashSet::default(),
             eclasses: Vec::new(),
+            licenses: Vec::new(),
             ebuilds: Vec::new(),
         }
     }
@@ -155,12 +157,19 @@ impl RepoBuilder {
         self
     }
 
-    pub fn eclass(mut self, eclass: impl Into<String>) -> Self {
-        self.eclasses.push(eclass.into());
+    /// Adds an eclass with the given `name` to the fixture.
+    pub fn eclass(mut self, name: impl Into<String>) -> Self {
+        self.eclasses.push(name.into());
         self
     }
 
-    /// Adds an ebuild file with the given content to the fixture.
+    /// Adds a license file with the given `name` to the fixture.
+    pub fn license(mut self, name: impl Into<String>) -> Self {
+        self.licenses.push(name.into());
+        self
+    }
+
+    /// Adds an ebuild file to the fixture.
     pub fn ebuild(
         mut self,
         category: impl Into<String>,
@@ -234,6 +243,10 @@ impl RepoBuilder {
 
         for eclass in self.eclasses {
             write_file(eclasses.join(format!("{eclass}.eclass")), "")?;
+        }
+
+        for license in self.licenses {
+            write_file(location.join("licenses").join(license), "")?;
         }
 
         for (category, package, version, content) in self.ebuilds {

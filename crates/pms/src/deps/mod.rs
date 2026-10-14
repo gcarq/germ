@@ -12,7 +12,8 @@ use rkyv::{Archive, Deserialize, Serialize};
 use self::arena::ExprArena;
 pub use self::item::{DepAtom, ExprItem, RequiredUseFlag};
 pub use self::kind::{
-    BDepend, Depend, ExprKind, IDepend, PDepend, Properties, RDepend, RequiredUse, Restrict,
+    BDepend, Depend, ExprKind, IDepend, License, PDepend, Properties, RDepend, RequiredUse,
+    Restrict,
 };
 use self::parser::ExprParser;
 pub use self::tree::{Expr, ExprEval, ExprNodes, ExprTree};
@@ -46,6 +47,14 @@ impl<F: ExprKind> ParsedExpr<F> {
     /// Returns a view of the expression.
     pub const fn view(&self) -> ExprTree<'_, F::Item> {
         self.arena.view()
+    }
+
+    /// Calls `visit` on every item in source order, stopping at the first error.
+    pub fn try_for_each_item<E>(
+        &self,
+        visit: impl FnMut(&F::Item) -> Result<(), E>,
+    ) -> Result<(), E> {
+        self.view().try_for_each_item(visit)
     }
 
     /// Returns the metadata variable.
@@ -166,6 +175,21 @@ mod tests {
         ] {
             let result = ParsedExpr::<Properties>::parse(input);
             assert_eq!(result.is_ok(), valid, "PROPERTIES: {input}");
+        }
+
+        for (input, valid) in [
+            ("GPL-3", true),
+            ("( GPL-3 MIT )", true),
+            ("|| ( GPL-3 MIT )", true),
+            ("static? ( GPL-3 )", true),
+            ("!static? ( GPL-3 )", true),
+            ("^^ ( GPL-3 MIT )", false),
+            ("?? ( GPL-3 MIT )", false),
+            ("@group", false),
+            ("-invalid", false),
+        ] {
+            let result = ParsedExpr::<License>::parse(input);
+            assert_eq!(result.is_ok(), valid, "LICENSE: {input}");
         }
     }
 

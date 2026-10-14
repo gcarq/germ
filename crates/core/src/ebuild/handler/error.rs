@@ -1,6 +1,6 @@
 use std::process::ExitStatus;
 
-use germ_pms::{Eapi, PackageMetadataError};
+use germ_pms::{Eapi, LicenseName, PackageMetadataError, RepoName};
 use thiserror::Error;
 
 pub use super::ipc::IpcError;
@@ -19,8 +19,8 @@ pub enum FuncCallError {
         source: anyhow::Error,
     },
 
-    #[error("eclass '{name}' not found in {repository} or its masters")]
-    EclassNotFound { name: String, repository: String },
+    #[error("eclass '{name}' not found in {repo} or its masters")]
+    EclassNotFound { name: String, repo: RepoName },
 
     #[error("function '{func}' is unsupported for EAPI '{eapi}'")]
     Unsupported { func: FuncType, eapi: Eapi },
@@ -65,4 +65,7 @@ pub enum MetadataGenerationError {
 
     #[error(transparent)]
     Metadata(#[from] PackageMetadataError),
+
+    #[error("license '{name}' not found in {repo} or its masters")]
+    MissingLicense { name: LicenseName, repo: RepoName },
 }

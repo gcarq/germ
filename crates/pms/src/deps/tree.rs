@@ -23,6 +23,11 @@ impl<'a, T: ExprItem> ExprTree<'a, T> {
     {
         eval_group_all(evaluator, self.roots())
     }
+
+    /// Calls `visit` on every item in source order, stopping at the first error.
+    pub fn try_for_each_item<E>(self, mut visit: impl FnMut(&T) -> Result<(), E>) -> Result<(), E> {
+        visit_items(self.roots(), &mut visit)
+    }
 }
 
 impl<'a, T: ExprItem> Copy for ExprTree<'a, T> {}
@@ -219,6 +224,27 @@ impl<'a, T: ExprItem> Iterator for ExprNodes<'a, T> {
     }
 }
 
+/// Runs `visit` on each item of `nodes` in source order, stopping at the first error.
+fn visit_items<T, E>(
+    nodes: ExprNodes<'_, T>,
+    visit: &mut impl FnMut(&T) -> Result<(), E>,
+) -> Result<(), E>
+where
+    T: ExprItem,
+{
+    for expr in nodes {
+        match expr {
+            Expr::Item(item) => visit(item)?,
+            Expr::AllOf(nodes)
+            | Expr::AnyOf(nodes)
+            | Expr::ExactlyOneOf(nodes)
+            | Expr::AtMostOneOf(nodes)
+            | Expr::Use { nodes, .. } => visit_items(nodes, visit)?,
+        }
+    }
+    Ok(())
+}
+
 impl<T: ExprItem> ExprArena<T> {
     /// Returns a view of the arena.
     pub const fn view(&self) -> ExprTree<'_, T> {
@@ -262,6 +288,35 @@ mod tests {
         let input = "!!cat/pkg !cat/other";
         let arena = ExprParser::<DepAtom>::parse(input).unwrap();
         assert_eq!(arena.view().to_string(), input);
+    }
+
+    #[test]
+    fn test_try_for_each_item() {
+        let input = "a || ( b c ) d? ( e f ) !g? ( h )";
+        let tree = ExprParser::<RequiredUseFlag>::parse(input).unwrap();
+        let mut items = Vec::new();
+        tree.view()
+            .try_for_each_item(|item| {
+                items.push(item.to_string());
+                Ok::<(), ()>(())
+            })
+            .unwrap();
+        assert_eq!(items, vec!["a", "b", "c", "e", "f", "h"]);
+    }
+
+    #[test]
+    fn test_try_for_each_item_error() {
+        let tree = ExprParser::<RequiredUseFlag>::parse("a b c").unwrap();
+        let mut visited = Vec::new();
+        let result = tree.view().try_for_each_item(|item| {
+            visited.push(item.to_string());
+            if item.to_string() == "b" {
+                return Err("stop");
+            }
+            Ok(())
+        });
+        assert_eq!(result, Err("stop"));
+        assert_eq!(visited, vec!["a", "b"]);
     }
 
     #[test]

@@ -5,6 +5,7 @@ pub mod eapi;
 pub mod eclass;
 pub mod grammar;
 pub mod keyword;
+pub mod license;
 pub mod package;
 pub mod repository;
 #[cfg(any(test, feature = "test-support"))]
@@ -16,6 +17,7 @@ pub use atom::{Atom, BlockerStrength, SlotConstraint, VersionConstraint};
 pub use eapi::{Eapi, EapiError};
 pub use eclass::EclassName;
 pub use keyword::Keyword;
+pub use license::LicenseName;
 pub use package::metadata::{MetaVar, PackageMetadata, PackageMetadataError, RawPackageMetadata};
 pub use package::{
     CatName, Cpv, Package, PackageSlot, PackageVersion, PackageView, PkgName, SlotName,

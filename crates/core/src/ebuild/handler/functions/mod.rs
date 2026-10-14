@@ -31,7 +31,7 @@ pub fn resolve_eclass(
     let Some(eclass) = repository.eclasses().get(name) else {
         return Err(FuncCallError::EclassNotFound {
             name: name.to_owned(),
-            repository: repository.to_string(),
+            repo: repository.name().clone(),
         }
         .into());
     };

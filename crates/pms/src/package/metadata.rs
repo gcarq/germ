@@ -7,8 +7,8 @@ use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::deps::{
-    BDepend, DepAtom, Depend, ExprKind, ExprTree, IDepend, PDepend, ParsedExpr, Properties,
-    RDepend, RequiredUse, Restrict,
+    BDepend, DepAtom, Depend, ExprKind, ExprTree, IDepend, License, PDepend, ParsedExpr,
+    Properties, RDepend, RequiredUse, Restrict,
 };
 use crate::eapi::Eapi;
 use crate::keyword::Keyword;
@@ -122,8 +122,7 @@ pub struct PackageMetadata {
     homepage: Vec<String>,
     // TODO: should be parsed as ParsedExpr
     src_uri: Vec<String>,
-    // TODO: enforce valid license identifiers and parse as ParsedExpr
-    license: Vec<String>,
+    license: ParsedExpr<License>,
     properties: ParsedExpr<Properties>,
     keywords: Vec<Keyword>,
     inherit: Vec<String>,
@@ -156,7 +155,7 @@ impl PackageMetadata {
         &self.src_uri
     }
 
-    pub fn license(&self) -> &[String] {
+    pub const fn license(&self) -> &ParsedExpr<License> {
         &self.license
     }
 
@@ -252,7 +251,7 @@ impl PackageMetadata {
             description: vars.required(MetaVar::Description)?.to_owned(),
             homepage: vars.words(MetaVar::Homepage)?,
             src_uri: vars.words(MetaVar::SrcUri)?,
-            license: vars.words(MetaVar::License)?,
+            license: vars.expression::<License>(MetaVar::License)?,
             properties: vars.expression::<Properties>(MetaVar::Properties)?,
             keywords: vars.words(MetaVar::Keywords)?,
             inherit: vars.words(MetaVar::Inherited)?,
@@ -305,7 +304,7 @@ impl fmt::Display for PackageMetadata {
                 .collect::<Vec<_>>()
                 .join(" ")
         )?;
-        writeln!(f, "LICENSE={}", self.license.join(" "))?;
+        writeln!(f, "LICENSE={}", self.license)?;
         writeln!(f, "PDEPEND={}", self.pdepend)?;
         writeln!(f, "PROPERTIES={}", self.properties)?;
         writeln!(f, "RDEPEND={}", self.rdepend)?;
@@ -434,7 +433,7 @@ mod tests {
             metadata.src_uri(),
             ["https://localhost/a", "https://localhost/b"]
         );
-        assert_eq!(metadata.license(), ["GPL-3"]);
+        assert_eq!(metadata.license().to_string(), "GPL-3");
         assert_eq!(metadata.properties().to_string(), "live test_network");
         assert_eq!(
             metadata.keywords(),

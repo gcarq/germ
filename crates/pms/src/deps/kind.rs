@@ -5,6 +5,7 @@ use super::item::{DepAtom, ExprItem, RequiredUseFlag};
 use super::tree::{Expr, ExprNodes, ExprTree};
 use super::types::SimpleString;
 use crate::MetaVar;
+use crate::license::LicenseName;
 
 /// Pins the item type and allowed expression syntax of one metadata field.
 /// See PMS 8.2 for the dependency specification formats.
@@ -162,7 +163,7 @@ impl ExprKind for Restrict {
         match expr {
             Expr::Item(_) | Expr::AllOf(_) | Expr::Use { .. } => Ok(()),
             Expr::AnyOf(_) | Expr::ExactlyOneOf(_) | Expr::AtMostOneOf(_) => {
-                bail!("{} is not valid in {}", expr.name(), Self::VAR);
+                bail!("{} is not valid in {}", expr.name(), Self::VAR)
             }
         }
     }
@@ -180,7 +181,25 @@ impl ExprKind for Properties {
         match expr {
             Expr::Item(_) | Expr::AllOf(_) | Expr::Use { .. } => Ok(()),
             Expr::AnyOf(_) | Expr::ExactlyOneOf(_) | Expr::AtMostOneOf(_) => {
-                bail!("{} is not valid in {}", expr.name(), Self::VAR);
+                bail!("{} is not valid in {}", expr.name(), Self::VAR)
+            }
+        }
+    }
+}
+
+/// The `LICENSE` metadata field.
+#[derive(Archive, Serialize, Deserialize, Clone, Copy, Eq, PartialEq, Debug)]
+pub struct License;
+
+impl ExprKind for License {
+    type Item = LicenseName;
+    const VAR: MetaVar = MetaVar::License;
+
+    fn validate_expr(expr: &Expr<'_, Self::Item>, _in_any_of: bool) -> anyhow::Result<()> {
+        match expr {
+            Expr::Item(_) | Expr::AllOf(_) | Expr::AnyOf(_) | Expr::Use { .. } => Ok(()),
+            Expr::ExactlyOneOf(_) | Expr::AtMostOneOf(_) => {
+                bail!("{} is not valid in {}", expr.name(), Self::VAR)
             }
         }
     }
