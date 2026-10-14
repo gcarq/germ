@@ -16,6 +16,7 @@ use crate::useflag::UseFlag;
 pub struct ExprParser<'a, T: ExprItem> {
     lexer: Lexer<'a>,
     arena: ExprArena<T>,
+    buffer: Vec<ExprId>,
 }
 
 #[expect(clippy::needless_pass_by_value)]
@@ -27,6 +28,7 @@ impl<'a, T: ExprItem> ExprParser<'a, T> {
         let mut parser = Self {
             lexer: Lexer::new(input),
             arena: ExprArena::default(),
+            buffer: Vec::with_capacity(16),
         };
 
         parser.parse_root()?;
@@ -35,13 +37,14 @@ impl<'a, T: ExprItem> ExprParser<'a, T> {
 
     /// Parses the whole expression and initializes the arena.
     fn parse_root(&mut self) -> anyhow::Result<()> {
-        let mut buffer = Vec::with_capacity(64);
+        let base = self.buffer.len();
         while let Some(token) = self.lexer.next() {
             if token == Token::Whitespace {
                 continue;
             }
 
-            buffer.push(self.parse_expression(token)?);
+            let child = self.parse_expression(token)?;
+            self.buffer.push(child);
             match self.lexer.next() {
                 Some(Token::Whitespace) => {}
                 Some(token) => bail!("expected whitespace between expressions, got '{token}'"),
@@ -49,9 +52,19 @@ impl<'a, T: ExprItem> ExprParser<'a, T> {
             }
         }
 
-        let root = self.arena.push_children(&buffer)?;
+        let root = self.commit_children(base)?;
         self.arena.set_roots(root);
         Ok(())
+    }
+
+    /// Moves the children collected in `buffer` since `base` into the arena.
+    ///
+    /// Returns a [`Range`] for future referencing in `arena.children` and
+    /// restores `buffer` to its state at `base`.
+    fn commit_children(&mut self, base: usize) -> anyhow::Result<Range<u32>> {
+        let range = self.arena.push_children(&self.buffer[base..])?;
+        self.buffer.truncate(base);
+        Ok(range)
     }
 
     /// Parses an expression based on given [`Token`].
@@ -98,7 +111,7 @@ impl<'a, T: ExprItem> ExprParser<'a, T> {
     /// This function expects that [`Token::LParen`] has already been consumed.
     /// Returns a [`Range`] that can be used for slicing `expression.children`.
     fn parse_group(&mut self) -> anyhow::Result<Range<u32>> {
-        let mut buffer = Vec::with_capacity(16);
+        let base = self.buffer.len();
         let first = match self.lexer.next() {
             Some(Token::RParen) => bail!("empty groups are not supported"),
             Some(Token::Whitespace) => match self.lexer.next() {
@@ -109,15 +122,19 @@ impl<'a, T: ExprItem> ExprParser<'a, T> {
             Some(token) => bail!("expected whitespace after '(', got '{token}'"),
             None => bail!("unexpected EOF while parsing group"),
         };
-        buffer.push(self.parse_expression(first)?);
+        let first = self.parse_expression(first)?;
+        self.buffer.push(first);
 
         loop {
             match self.lexer.next() {
                 Some(Token::Whitespace) => match self.lexer.next() {
                     Some(Token::RParen) => {
-                        return self.arena.push_children(&buffer);
+                        return self.commit_children(base);
                     }
-                    Some(token) => buffer.push(self.parse_expression(token)?),
+                    Some(token) => {
+                        let child = self.parse_expression(token)?;
+                        self.buffer.push(child);
+                    }
                     None => bail!("unexpected EOF while parsing group"),
                 },
                 Some(Token::RParen) => {
