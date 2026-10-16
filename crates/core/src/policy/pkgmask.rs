@@ -81,7 +81,7 @@ impl PackageMasks {
     /// Only entries with [`Operation::Set`] are included in the resulting list.
     fn map_from_entries(entries: PackageEntries) -> Vec<(Atom, Precedence)> {
         entries
-            .into_iter()
+            .into_entries()
             .filter_map(|entry| {
                 matches!(entry.op, Operation::Set).then(|| {
                     let prec = entry.prec;

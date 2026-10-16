@@ -291,7 +291,7 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::files::entry::Entry;
+    use crate::files::entry::{Entry, SysAtom};
     use crate::files::pkgfile::KeywordRule;
     use crate::repository::test_support::{RepoBuilder, repo_set};
 
@@ -403,7 +403,11 @@ mod tests {
         assert_package_accept_keywords(&profile)?;
 
         assert_eq!(
-            profile.use_records.use_mask.into_iter().collect::<Vec<_>>(),
+            profile
+                .use_records
+                .use_mask
+                .into_entries()
+                .collect::<Vec<_>>(),
             vec![
                 Entry::from_str("foo", Precedence::Profile(0))?,
                 Entry::from_str("baz", Precedence::Profile(1))?,
@@ -470,6 +474,33 @@ mod tests {
 
             assert_eq!(Profile::resolve(&selected, &reposet).is_ok(), succeeds);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_packages_reset() -> anyhow::Result<()> {
+        let reposet = repo_set(vec![
+            RepoBuilder::new("repo")
+                .formats(["pms"])
+                .profile("base")
+                .profile("selected")
+                .parents("selected", ["../base"])
+                .profile_file("base/packages", "*sys-apps/coreutils\n*sys-apps/busybox\n")
+                .profile_file("selected/packages", "-*\n*sys-apps/busybox\n"),
+        ])?;
+
+        let repository = reposet.get("repo").unwrap();
+        let selected = profile_path(repository.location(), "selected");
+        let profile = Profile::resolve(&selected, &reposet)?;
+
+        assert_eq!(
+            profile
+                .packages
+                .into_entries()
+                .map(Entry::into_inner)
+                .collect::<Vec<SysAtom>>(),
+            vec!["*sys-apps/busybox".parse::<SysAtom>()?]
+        );
         Ok(())
     }
 

@@ -3,7 +3,8 @@
 //!
 //! The most used one is [`LineEntries`], which is expressed as text file where each line holds
 //! a value. [`LineEntries`] can be inherited and any value prefixed with a hyphen negates
-//! the same previous defined item, e.g.: `package.use`, `use.mask`, etc.
+//! the same previous defined item, e.g.: `package.use`, `use.mask`, etc..
+//! A bare `-*` line clears all previously entries.
 pub mod entry;
 mod linefile;
 pub mod pkgfile;
