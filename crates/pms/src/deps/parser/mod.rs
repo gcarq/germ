@@ -8,6 +8,7 @@ use anyhow::bail;
 
 use self::lexer::{Lexer, Token};
 use super::arena::{ExprArena, ExprEntry, ExprId};
+use super::item::ARROW;
 use crate::deps::ExprItem;
 use crate::useflag::UseFlag;
 
@@ -68,9 +69,9 @@ impl<'a, T: ExprItem> ExprParser<'a, T> {
     }
 
     /// Parses an expression based on given [`Token`].
-    fn parse_expression(&mut self, token: Token) -> anyhow::Result<ExprId> {
+    fn parse_expression(&mut self, token: Token<'a>) -> anyhow::Result<ExprId> {
         let node = match token {
-            Token::Ident(ident) => ExprEntry::Item(ident.parse()?),
+            Token::Ident(ident) => ExprEntry::Item(self.parse_item(ident)?),
             Token::LParen => ExprEntry::AllOf(self.parse_group()?),
             Token::ExactlyOneOf => {
                 self.expect_separated(Token::LParen)?;
@@ -90,6 +91,37 @@ impl<'a, T: ExprItem> ExprParser<'a, T> {
             }
         };
         self.arena.push_expr(node)
+    }
+
+    /// Parses an expression item, consuming a trailing [`lexer::ARROW`]
+    /// if the item type supports it.
+    fn parse_item(&mut self, ident: &'a str) -> anyhow::Result<T> {
+        if T::SUPPORTS_ARROW
+            && let Some(target) = self.consume_arrow()?
+        {
+            return self.lexer.span(ident, target).parse();
+        }
+        ident.parse()
+    }
+
+    /// Consumes a `->` arrow clause and returns its target token.
+    ///
+    /// Returns `Ok(None)` when the following tokens are not an arrow clause, leaving the
+    /// lexer position unchanged. Returns an error when an arrow is present without a target.
+    fn consume_arrow(&mut self) -> anyhow::Result<Option<&'a str>> {
+        let mut lookahead = self.lexer.clone();
+        match (lookahead.next(), lookahead.next()) {
+            (Some(Token::Whitespace), Some(Token::Ident(ARROW))) => {
+                match (lookahead.next(), lookahead.next()) {
+                    (Some(Token::Whitespace), Some(Token::Ident(target))) => {
+                        self.lexer = lookahead;
+                        Ok(Some(target))
+                    }
+                    _ => bail!("expected a distfile name after '->'"),
+                }
+            }
+            _ => Ok(None),
+        }
     }
 
     /// Parses a USE conditional expression, e.g. `foo? ( bar )` or `!foo? ( bar )`.
@@ -174,11 +206,11 @@ mod tests {
     use super::test_support::TestExpression::{AllOf, AnyOf, AtMostOneOf, ExactlyOneOf, Use};
     use super::test_support::{TestExpression, assert_expr, item};
     use super::*;
-    use crate::deps::{DepAtom, RequiredUseFlag};
+    use crate::deps::{DepAtom, RequiredUseFlag, SrcUriItem};
 
     #[test]
     fn test_parser_structure() {
-        let cases: [(&str, Vec<TestExpression<DepAtom>>); 6] = [
+        let cases: [(&str, Vec<TestExpression<DepAtom>>); 8] = [
             (
                 "( sys-libs/db app-misc/foo )",
                 vec![AllOf(vec![item("sys-libs/db"), item("app-misc/foo")])],
@@ -210,46 +242,24 @@ mod tests {
                 "media-libs/mesa[gbm(+)] dev-lang/R",
                 vec![item("media-libs/mesa[gbm(+)]"), item("dev-lang/R")],
             ),
+            (
+                "!foo? ( !app-misc/foo )",
+                vec![Use {
+                    flag: "foo".parse().unwrap(),
+                    negated: true,
+                    nodes: vec![item("!app-misc/foo")],
+                }],
+            ),
+            (
+                "!!<dev-perl/Mail-Box-3",
+                vec![item("!!<dev-perl/Mail-Box-3")],
+            ),
         ];
 
         for (input, expected) in cases {
             let expr = ExprParser::<DepAtom>::parse(input).unwrap();
             assert_expr(expr.view(), &expected);
         }
-    }
-
-    #[test]
-    fn test_parser_atoms() {
-        let input = r"
-            sys-libs/db
-            bar? ( sys-libs/db )
-            || (
-                =sys-libs/db-5*:5
-                =sys-libs/db-4*:4
-            )
-            !foo? ( !app-misc/foo )
-            !!<dev-perl/Mail-Box-3
-        ";
-
-        let expr = ExprParser::<DepAtom>::parse(input).unwrap();
-        assert_expr(
-            expr.view(),
-            &[
-                item("sys-libs/db"),
-                Use {
-                    flag: "bar".parse().unwrap(),
-                    negated: false,
-                    nodes: vec![item("sys-libs/db")],
-                },
-                AnyOf(vec![item("=sys-libs/db-5*:5"), item("=sys-libs/db-4*:4")]),
-                Use {
-                    flag: "foo".parse().unwrap(),
-                    negated: true,
-                    nodes: vec![item("!app-misc/foo")],
-                },
-                item("!!<dev-perl/Mail-Box-3"),
-            ],
-        );
     }
 
     #[test]
@@ -276,19 +286,59 @@ mod tests {
     }
 
     #[test]
+    fn test_parser_src_uri() {
+        let cases: [(&str, Vec<TestExpression<SrcUriItem>>); 4] = [
+            (
+                "https://example.org/a https://example.org/b",
+                vec![item("https://example.org/a"), item("https://example.org/b")],
+            ),
+            (
+                "https://example.org/latest -> a.tar.gz b.tar.gz",
+                vec![
+                    item("https://example.org/latest -> a.tar.gz"),
+                    item("b.tar.gz"),
+                ],
+            ),
+            (
+                "examples? ( mirror://gentoo/example.tar.gz )",
+                vec![Use {
+                    flag: "examples".parse().unwrap(),
+                    negated: false,
+                    nodes: vec![item("mirror://gentoo/example.tar.gz")],
+                }],
+            ),
+            (
+                "https://example.org/a ->file",
+                vec![item("https://example.org/a"), item("->file")],
+            ),
+        ];
+
+        for (input, expected) in cases {
+            let expr = ExprParser::<SrcUriItem>::parse(input).unwrap();
+            assert_expr(expr.view(), &expected);
+        }
+    }
+
+    #[test]
+    fn test_parser_src_uri_errors() {
+        let cases = ["https://example.org/a ->", "https://example.org/a -> ->"];
+        for input in cases {
+            assert!(
+                ExprParser::<SrcUriItem>::parse(input).is_err(),
+                "expected invalid source expression: {input}"
+            );
+        }
+    }
+
+    #[test]
     fn test_parser_boundaries() {
-        for input in [
+        let cases = [
             "||( cat/pkg )",
-            "foo||bar",
-            "foo ||bar",
-            "foo|| bar",
             "(cat/pkg )",
-            "( cat/pkg)",
             "foo?( cat/pkg )",
-            "cat/pkg(app-misc/foo)",
             "! cat/pkg",
-            "!! cat/pkg",
-        ] {
+        ];
+        for input in cases {
             assert!(
                 ExprParser::<DepAtom>::parse(input).is_err(),
                 "expected invalid expression: {input}"

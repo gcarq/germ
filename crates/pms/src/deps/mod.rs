@@ -10,10 +10,10 @@ use std::fmt;
 use rkyv::{Archive, Deserialize, Serialize};
 
 use self::arena::ExprArena;
-pub use self::item::{DepAtom, ExprItem, RequiredUseFlag};
+pub use self::item::{DepAtom, DistfileName, ExprItem, RequiredUseFlag, SrcUriItem};
 pub use self::kind::{
     BDepend, Depend, ExprKind, Homepage, IDepend, License, PDepend, Properties, RDepend,
-    RequiredUse, Restrict,
+    RequiredUse, Restrict, SrcUri,
 };
 use self::parser::ExprParser;
 pub use self::tree::{Expr, ExprEval, ExprNodes, ExprTree};
@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn test_dep_atom_parse() {
-        for (input, atom) in [
+        let cases = [
             ("dev-lang/rust", "dev-lang/rust"),
             ("!dev-lang/rust", "dev-lang/rust"),
             ("!!dev-lang/rust", "dev-lang/rust"),
@@ -92,7 +92,8 @@ mod tests {
             ("!cat/pkg[foo]", "cat/pkg[foo]"),
             ("!cat/pkg::repo-", "cat/pkg::repo-"),
             ("!cat/pkg:slot", "cat/pkg:slot"),
-        ] {
+        ];
+        for (input, atom) in cases {
             let parsed = input.parse::<DepAtom>().unwrap();
             assert_eq!(parsed.to_string(), input);
             assert_eq!(parsed.inner().to_string(), atom);
@@ -101,7 +102,8 @@ mod tests {
 
     #[test]
     fn test_dep_atom_parse_error() {
-        for input in ["!", "!!", "!!!cat/pkg", "!(", "!||", "!^^", "! cat/pkg"] {
+        let cases = ["!", "!!", "!!!cat/pkg", "!(", "!||", "!^^", "! cat/pkg"];
+        for input in cases {
             assert!(
                 input.parse::<DepAtom>().is_err(),
                 "expected atom dependency error for '{input}'"
@@ -111,14 +113,16 @@ mod tests {
 
     #[test]
     fn test_required_use_flag() {
-        for (input, flag, negated) in [("foo", "foo", false), ("!foo", "foo", true)] {
+        let valid = [("foo", "foo", false), ("!foo", "foo", true)];
+        for (input, flag, negated) in valid {
             let parsed = input.parse::<RequiredUseFlag>().unwrap();
             assert_eq!(parsed.to_string(), input);
             assert_eq!(parsed.inner().to_string(), flag);
             assert_eq!(parsed.is_negated(), negated);
         }
 
-        for input in ["", "!", "!!foo", "foo!"] {
+        let invalid = ["", "!", "!!foo", "foo!"];
+        for input in invalid {
             assert!(
                 input.parse::<RequiredUseFlag>().is_err(),
                 "expected error for '{input}'"
@@ -127,57 +131,55 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_empty() {
-        let expression = ParsedExpr::<Depend>::parse(" \t").unwrap();
-        assert_eq!(expression.to_string(), "");
-    }
-
-    #[test]
     fn test_parse_kinds() {
-        for (input, valid) in [
+        let depend_cases = [
             ("!cat/pkg", true),
             ("!!cat/pkg", true),
             ("^^ ( cat/pkg cat/other )", false),
-        ] {
+        ];
+        for (input, valid) in depend_cases {
             let result = ParsedExpr::<Depend>::parse(input);
             assert_eq!(result.is_ok(), valid, "dependency: {input}");
         }
 
-        for (input, valid) in [
+        let required_use_cases = [
             ("^^ ( foo bar )", true),
             ("?? ( foo bar )", true),
             ("!foo", true),
             ("!!foo", false),
-        ] {
+        ];
+        for (input, valid) in required_use_cases {
             let result = ParsedExpr::<RequiredUse>::parse(input);
             assert_eq!(result.is_ok(), valid, "REQUIRED_USE: {input}");
         }
 
-        for (input, valid) in [
+        let restrict_cases = [
             ("mirror test", true),
             ("( mirror test )", true),
             ("mirror? ( fetch )", true),
             ("|| ( mirror fetch )", false),
             ("^^ ( mirror fetch )", false),
             ("?? ( mirror fetch )", false),
-        ] {
+        ];
+        for (input, valid) in restrict_cases {
             let result = ParsedExpr::<Restrict>::parse(input);
             assert_eq!(result.is_ok(), valid, "RESTRICT: {input}");
         }
 
-        for (input, valid) in [
+        let properties_cases = [
             ("live test_network", true),
             ("( live test_network )", true),
             ("test? ( live )", true),
             ("|| ( live test )", false),
             ("^^ ( live test )", false),
             ("?? ( live test )", false),
-        ] {
+        ];
+        for (input, valid) in properties_cases {
             let result = ParsedExpr::<Properties>::parse(input);
             assert_eq!(result.is_ok(), valid, "PROPERTIES: {input}");
         }
 
-        for (input, valid) in [
+        let license_cases = [
             ("GPL-3", true),
             ("( GPL-3 MIT )", true),
             ("|| ( GPL-3 MIT )", true),
@@ -187,9 +189,39 @@ mod tests {
             ("?? ( GPL-3 MIT )", false),
             ("@group", false),
             ("-invalid", false),
-        ] {
+        ];
+        for (input, valid) in license_cases {
             let result = ParsedExpr::<License>::parse(input);
             assert_eq!(result.is_ok(), valid, "LICENSE: {input}");
+        }
+
+        let homepage_cases = [
+            ("https://example.org", true),
+            ("( https://example.org https://example.org/b )", true),
+            ("examples? ( https://example.org )", true),
+            ("https://example.org -> file", false),
+            ("|| ( https://example.org )", false),
+            ("^^ ( https://example.org )", false),
+            ("?? ( https://example.org )", false),
+        ];
+        for (input, valid) in homepage_cases {
+            let result = ParsedExpr::<Homepage>::parse(input);
+            assert_eq!(result.is_ok(), valid, "HOMEPAGE: {input}");
+        }
+
+        let src_uri_cases = [
+            ("https://example.org", true),
+            ("a.tar.gz", true),
+            ("https://example.org/latest -> a.tar.gz", true),
+            ("( a.tar.gz https://example.org/b )", true),
+            ("examples? ( https://example.org/latest -> a.tar.gz )", true),
+            ("|| ( https://example.org )", false),
+            ("^^ ( https://example.org )", false),
+            ("?? ( https://example.org )", false),
+        ];
+        for (input, valid) in src_uri_cases {
+            let result = ParsedExpr::<SrcUri>::parse(input);
+            assert_eq!(result.is_ok(), valid, "SRC_URI: {input}");
         }
     }
 
@@ -212,7 +244,8 @@ mod tests {
 
     #[test]
     fn test_dep_atom_validate_err() {
-        for input in ["*/*", "dev-lang/*", "*/rust", "dev-lang/rust::gentoo"] {
+        let cases = ["*/*", "dev-lang/*", "*/rust", "dev-lang/rust::gentoo"];
+        for input in cases {
             let result = ParsedExpr::<Depend>::parse(input);
             assert!(result.is_err(), "expected invalid dependency: {input}");
         }

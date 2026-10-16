@@ -1,7 +1,7 @@
 use anyhow::bail;
 use rkyv::{Archive, Deserialize, Serialize};
 
-use super::item::{DepAtom, ExprItem, RequiredUseFlag};
+use super::item::{DepAtom, ExprItem, RequiredUseFlag, SrcUriItem};
 use super::tree::{Expr, ExprNodes, ExprTree};
 use super::types::SimpleString;
 use crate::MetaVar;
@@ -213,6 +213,24 @@ pub struct Homepage;
 impl ExprKind for Homepage {
     type Item = Uri;
     const VAR: MetaVar = MetaVar::Homepage;
+
+    fn validate_expr(expr: &Expr<'_, Self::Item>, _in_any_of: bool) -> anyhow::Result<()> {
+        match expr {
+            Expr::Item(_) | Expr::AllOf(_) | Expr::Use { .. } => Ok(()),
+            Expr::AnyOf(_) | Expr::ExactlyOneOf(_) | Expr::AtMostOneOf(_) => {
+                bail!("{} is not valid in {}", expr.name(), Self::VAR)
+            }
+        }
+    }
+}
+
+/// The `SRC_URI` metadata field.
+#[derive(Archive, Serialize, Deserialize, Clone, Copy, Eq, PartialEq, Debug)]
+pub struct SrcUri;
+
+impl ExprKind for SrcUri {
+    type Item = SrcUriItem;
+    const VAR: MetaVar = MetaVar::SrcUri;
 
     fn validate_expr(expr: &Expr<'_, Self::Item>, _in_any_of: bool) -> anyhow::Result<()> {
         match expr {

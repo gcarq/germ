@@ -2,17 +2,19 @@ use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
+use anyhow::bail;
 use fxhash::FxHashMap;
 use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::deps::{
     BDepend, DepAtom, Depend, ExprKind, ExprTree, Homepage, IDepend, License, PDepend, ParsedExpr,
-    Properties, RDepend, RequiredUse, Restrict,
+    Properties, RDepend, RequiredUse, Restrict, SrcUri,
 };
 use crate::eapi::Eapi;
 use crate::keyword::Keyword;
 use crate::package::slot::PackageSlot;
+use crate::uri::Uri;
 use crate::useflag::IUseEntry;
 
 /// Identifies metadata variable names.
@@ -119,8 +121,7 @@ pub struct PackageMetadata {
     eapi: Eapi,
     description: String,
     homepage: ParsedExpr<Homepage>,
-    // TODO: should be parsed as ParsedExpr
-    src_uri: Vec<String>,
+    src_uri: ParsedExpr<SrcUri>,
     license: ParsedExpr<License>,
     properties: ParsedExpr<Properties>,
     keywords: Vec<Keyword>,
@@ -150,7 +151,7 @@ impl PackageMetadata {
         &self.homepage
     }
 
-    pub fn src_uri(&self) -> &[String] {
+    pub const fn src_uri(&self) -> &ParsedExpr<SrcUri> {
         &self.src_uri
     }
 
@@ -249,7 +250,7 @@ impl PackageMetadata {
             eapi,
             description: vars.required(MetaVar::Description)?.to_owned(),
             homepage: vars.expression::<Homepage>(MetaVar::Homepage)?,
-            src_uri: vars.words(MetaVar::SrcUri)?,
+            src_uri: parse_src_uri(vars, eapi)?,
             license: vars.expression::<License>(MetaVar::License)?,
             properties: vars.expression::<Properties>(MetaVar::Properties)?,
             keywords: vars.words(MetaVar::Keywords)?,
@@ -310,7 +311,7 @@ impl fmt::Display for PackageMetadata {
         writeln!(f, "RESTRICT={}", self.restrict)?;
         writeln!(f, "REQUIRED_USE={}", self.required_use)?;
         writeln!(f, "SLOT={}", self.slot)?;
-        writeln!(f, "SRC_URI={}", self.src_uri.join(" "))?;
+        writeln!(f, "SRC_URI={}", self.src_uri)?;
         writeln!(f, "_eclasses_=TODO")?;
         writeln!(f, "_md5_=TODO")?;
         Ok(())
@@ -378,6 +379,25 @@ fn optional(value: Option<&str>) -> &str {
     value.unwrap_or_default().trim()
 }
 
+/// Parses `SRC_URI` and rejects selective URI restrictions unsupported by `eapi`.
+fn parse_src_uri(
+    vars: &RawPackageMetadata<'_>,
+    eapi: Eapi,
+) -> Result<ParsedExpr<SrcUri>, PackageMetadataError> {
+    let src_uri = vars.expression::<SrcUri>(MetaVar::SrcUri)?;
+    if !eapi.supports_selective_uri_restrictions() {
+        src_uri
+            .try_for_each_item(|item| {
+                if item.uri().is_some_and(Uri::has_selective_restriction) {
+                    bail!("selective URI restrictions are not supported by EAPI {eapi}");
+                }
+                Ok(())
+            })
+            .map_err(|err| invalid(MetaVar::SrcUri, err))?;
+    }
+    Ok(src_uri)
+}
+
 const fn invalid(var: MetaVar, source: anyhow::Error) -> PackageMetadataError {
     PackageMetadataError::Invalid { var, source }
 }
@@ -396,7 +416,7 @@ mod tests {
             ("DEPEND", ""),
             ("RDEPEND", " \tpython_single_target_python3_11? ( \t\t\tdev-lang/python:3.11 \t\t)"),
             ("SLOT", "0/0"),
-            ("SRC_URI", "https://localhost/a https://localhost/b"),
+            ("SRC_URI", "https://localhost/a mirror://gentoo/b.tar.gz -> c.tar.gz examples? ( https://localhost/d )"),
             ("RESTRICT", ""),
             ("HOMEPAGE", "https://localhost/a examples? ( https://localhost/b )"),
             ("LICENSE", "GPL-3"),
@@ -424,8 +444,8 @@ mod tests {
             "https://localhost/a examples? ( https://localhost/b )"
         );
         assert_eq!(
-            metadata.src_uri(),
-            ["https://localhost/a", "https://localhost/b"]
+            metadata.src_uri().to_string(),
+            "https://localhost/a mirror://gentoo/b.tar.gz -> c.tar.gz examples? ( https://localhost/d )"
         );
         assert_eq!(metadata.license().to_string(), "GPL-3");
         assert_eq!(metadata.properties().to_string(), "live test_network");

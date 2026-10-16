@@ -302,21 +302,18 @@ mod tests {
             })
             .unwrap();
         assert_eq!(items, vec!["a", "b", "c", "e", "f", "h"]);
-    }
 
-    #[test]
-    fn test_try_for_each_item_error() {
-        let tree = ExprParser::<RequiredUseFlag>::parse("a b c").unwrap();
+        // The fold stops at the first error, keeping the items visited so far.
         let mut visited = Vec::new();
         let result = tree.view().try_for_each_item(|item| {
             visited.push(item.to_string());
-            if item.to_string() == "b" {
+            if item.to_string() == "c" {
                 return Err("stop");
             }
             Ok(())
         });
         assert_eq!(result, Err("stop"));
-        assert_eq!(visited, vec!["a", "b"]);
+        assert_eq!(visited, vec!["a", "b", "c"]);
     }
 
     #[test]

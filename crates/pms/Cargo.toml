@@ -6,7 +6,6 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 fancy-regex.workspace = true
-fluent-uri.workspace = true
 fxhash.workspace = true
 rkyv.workspace = true
 thiserror.workspace = true

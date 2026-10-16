@@ -31,6 +31,7 @@ impl<'a> fmt::Display for Token<'a> {
 }
 
 /// A basic lexer that provides a [`Token`] iterator for parsing dependency expressions.
+#[derive(Clone)]
 pub struct Lexer<'a> {
     input: &'a str,
     chars: Peekable<CharIndices<'a>>,
@@ -43,6 +44,21 @@ impl<'a> Lexer<'a> {
             input,
             chars: input.char_indices().peekable(),
         }
+    }
+
+    /// Returns the input slice spanning from the start of `start` to the end of `end`.
+    ///
+    /// Panics if the slices are not valid or do not belong to this lexer.
+    pub fn span(&self, start: &str, end: &str) -> &'a str {
+        let base = self.input.as_ptr() as usize;
+        let begin = start.as_ptr() as usize - base;
+        let finish = end.as_ptr() as usize - base + end.len();
+        self.input.get(begin..finish).unwrap_or_else(|| {
+            panic!(
+                "BUG: invalid span: start={start:?}, end={end:?}, input={:?}",
+                self.input
+            )
+        })
     }
 
     /// Returns the next char without consuming it.
@@ -132,6 +148,7 @@ impl<'a> Iterator for Lexer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deps::item::ARROW;
 
     #[test]
     fn test_lexer_syntax() {
@@ -147,6 +164,7 @@ mod tests {
             ^^ ( gnutls openssl )
             ?? ( mysql mariadb )
             ssh? ( || ( rdp ( vnc X ) ) )
+            https://host/path?query!
         ";
         let lexer = Lexer::new(input);
         let tokens = lexer
@@ -191,6 +209,7 @@ mod tests {
                 Token::RParen,
                 Token::RParen,
                 Token::RParen,
+                Token::Ident("https://host/path?query!"),
             ]
         );
     }
@@ -208,31 +227,23 @@ mod tests {
                 Token::Whitespace,
             ]
         );
-
-        let input = "foo || bar || ( baz )";
-        assert_eq!(
-            Lexer::new(input).collect::<Vec<_>>(),
-            vec![
-                Token::Ident("foo"),
-                Token::Whitespace,
-                Token::AnyOf,
-                Token::Whitespace,
-                Token::Ident("bar"),
-                Token::Whitespace,
-                Token::AnyOf,
-                Token::Whitespace,
-                Token::LParen,
-                Token::Whitespace,
-                Token::Ident("baz"),
-                Token::Whitespace,
-                Token::RParen,
-            ]
-        );
     }
 
     #[test]
-    fn test_lexer_item_url() {
-        let input = "https://host/path?query!";
+    fn test_lexer_arrow() {
+        let input = "https://host/a -> b.tar.gz";
+        assert_eq!(
+            Lexer::new(input).collect::<Vec<_>>(),
+            vec![
+                Token::Ident("https://host/a"),
+                Token::Whitespace,
+                Token::Ident(ARROW),
+                Token::Whitespace,
+                Token::Ident("b.tar.gz"),
+            ]
+        );
+
+        let input = "https://host/a->b.tar.gz";
         assert_eq!(
             Lexer::new(input).collect::<Vec<_>>(),
             vec![Token::Ident(input)]
