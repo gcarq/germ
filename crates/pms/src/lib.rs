@@ -10,6 +10,7 @@ pub mod package;
 pub mod repository;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+pub mod uri;
 pub mod useflag;
 
 pub use arch::Arch;
@@ -23,4 +24,5 @@ pub use package::{
     CatName, Cpv, Package, PackageSlot, PackageVersion, PackageView, PkgName, SlotName,
 };
 pub use repository::RepoName;
+pub use uri::Uri;
 pub use useflag::{IUseEntry, IUseState, UseDep, UseDepDefault, UseDepKind, UseFlag};

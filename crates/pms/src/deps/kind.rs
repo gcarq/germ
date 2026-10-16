@@ -6,6 +6,7 @@ use super::tree::{Expr, ExprNodes, ExprTree};
 use super::types::SimpleString;
 use crate::MetaVar;
 use crate::license::LicenseName;
+use crate::uri::Uri;
 
 /// Pins the item type and allowed expression syntax of one metadata field.
 /// See PMS 8.2 for the dependency specification formats.
@@ -199,6 +200,24 @@ impl ExprKind for License {
         match expr {
             Expr::Item(_) | Expr::AllOf(_) | Expr::AnyOf(_) | Expr::Use { .. } => Ok(()),
             Expr::ExactlyOneOf(_) | Expr::AtMostOneOf(_) => {
+                bail!("{} is not valid in {}", expr.name(), Self::VAR)
+            }
+        }
+    }
+}
+
+/// The `HOMEPAGE` metadata field.
+#[derive(Archive, Serialize, Deserialize, Clone, Copy, Eq, PartialEq, Debug)]
+pub struct Homepage;
+
+impl ExprKind for Homepage {
+    type Item = Uri;
+    const VAR: MetaVar = MetaVar::Homepage;
+
+    fn validate_expr(expr: &Expr<'_, Self::Item>, _in_any_of: bool) -> anyhow::Result<()> {
+        match expr {
+            Expr::Item(_) | Expr::AllOf(_) | Expr::Use { .. } => Ok(()),
+            Expr::AnyOf(_) | Expr::ExactlyOneOf(_) | Expr::AtMostOneOf(_) => {
                 bail!("{} is not valid in {}", expr.name(), Self::VAR)
             }
         }

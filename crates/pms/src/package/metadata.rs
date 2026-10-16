@@ -7,7 +7,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::deps::{
-    BDepend, DepAtom, Depend, ExprKind, ExprTree, IDepend, License, PDepend, ParsedExpr,
+    BDepend, DepAtom, Depend, ExprKind, ExprTree, Homepage, IDepend, License, PDepend, ParsedExpr,
     Properties, RDepend, RequiredUse, Restrict,
 };
 use crate::eapi::Eapi;
@@ -118,8 +118,7 @@ pub enum PackageMetadataError {
 pub struct PackageMetadata {
     eapi: Eapi,
     description: String,
-    // TODO: should be parsed as ParsedExpr
-    homepage: Vec<String>,
+    homepage: ParsedExpr<Homepage>,
     // TODO: should be parsed as ParsedExpr
     src_uri: Vec<String>,
     license: ParsedExpr<License>,
@@ -147,7 +146,7 @@ impl PackageMetadata {
         &self.description
     }
 
-    pub fn homepage(&self) -> &[String] {
+    pub const fn homepage(&self) -> &ParsedExpr<Homepage> {
         &self.homepage
     }
 
@@ -249,7 +248,7 @@ impl PackageMetadata {
         Ok(Self {
             eapi,
             description: vars.required(MetaVar::Description)?.to_owned(),
-            homepage: vars.words(MetaVar::Homepage)?,
+            homepage: vars.expression::<Homepage>(MetaVar::Homepage)?,
             src_uri: vars.words(MetaVar::SrcUri)?,
             license: vars.expression::<License>(MetaVar::License)?,
             properties: vars.expression::<Properties>(MetaVar::Properties)?,
@@ -283,7 +282,7 @@ impl fmt::Display for PackageMetadata {
         writeln!(f, "DEPEND={}", self.depend)?;
         writeln!(f, "DESCRIPTION={}", self.description)?;
         writeln!(f, "EAPI={}", self.eapi)?;
-        writeln!(f, "HOMEPAGE={}", self.homepage.join(" "))?;
+        writeln!(f, "HOMEPAGE={}", self.homepage)?;
         writeln!(f, "IDEPEND={}", self.idepend)?;
         writeln!(f, "INHERITED={}", self.inherit.join(" "))?;
         writeln!(
@@ -391,17 +390,15 @@ mod tests {
         variables.iter().copied().collect()
     }
 
+    #[rustfmt::skip]
     fn raw_metadata() -> RawPackageMetadata<'static> {
         raw(&[
             ("DEPEND", ""),
-            (
-                "RDEPEND",
-                " \tpython_single_target_python3_11? ( \t\t\tdev-lang/python:3.11 \t\t)",
-            ),
+            ("RDEPEND", " \tpython_single_target_python3_11? ( \t\t\tdev-lang/python:3.11 \t\t)"),
             ("SLOT", "0/0"),
             ("SRC_URI", "https://localhost/a https://localhost/b"),
             ("RESTRICT", ""),
-            ("HOMEPAGE", "https://localhost"),
+            ("HOMEPAGE", "https://localhost/a examples? ( https://localhost/b )"),
             ("LICENSE", "GPL-3"),
             ("PROPERTIES", "live test_network"),
             ("DESCRIPTION", "Example python package"),
@@ -409,17 +406,11 @@ mod tests {
             ("IUSE", "examples +ipv6"),
             ("REQUIRED_USE", "^^ ( python_single_target_python3_11 )"),
             ("PDEPEND", ""),
-            (
-                "BDEPEND",
-                " \tpython_single_target_python3_11? ( \t dev-python/setuptools \t )",
-            ),
+            ("BDEPEND", " \tpython_single_target_python3_11? ( \t dev-python/setuptools \t )"),
             ("EAPI", "8"),
             ("DEFINED_PHASES", ""),
             ("IDEPEND", "dev-python/installer"),
-            (
-                "INHERITED",
-                " bash-completion-r1 eapi9-ver edo linux-info systemd",
-            ),
+            ("INHERITED", " bash-completion-r1 eapi9-ver edo linux-info systemd"),
         ])
     }
 
@@ -428,7 +419,10 @@ mod tests {
         let metadata = PackageMetadata::from_raw(&raw_metadata(), None).unwrap();
         assert_eq!(metadata.eapi(), Eapi::Eight);
         assert_eq!(metadata.description(), "Example python package");
-        assert_eq!(metadata.homepage(), ["https://localhost"]);
+        assert_eq!(
+            metadata.homepage().to_string(),
+            "https://localhost/a examples? ( https://localhost/b )"
+        );
         assert_eq!(
             metadata.src_uri(),
             ["https://localhost/a", "https://localhost/b"]

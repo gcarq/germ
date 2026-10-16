@@ -25,6 +25,7 @@ germ-pms = { path = "crates/pms" }
 redb = { version = "4.3.0", default-features = false }
 rayon = { version = "1.12.0", default-features = false }
 fancy-regex = { version = "0.19.2", default-features = false, features = ["perf", "std"] }
+fluent-uri = { version = "0.4.1", default-features = false, features = ["std"] }
 rkyv = { version = "0.8.18", default-features = false, features = ["bytecheck", "std", "unaligned"] }
 rust-ini = { version = "0.21.3", default-features = false }
 shlex = { version = "2.0.1", default-features = false, features = ["std"] }

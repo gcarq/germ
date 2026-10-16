@@ -12,8 +12,8 @@ use rkyv::{Archive, Deserialize, Serialize};
 use self::arena::ExprArena;
 pub use self::item::{DepAtom, ExprItem, RequiredUseFlag};
 pub use self::kind::{
-    BDepend, Depend, ExprKind, IDepend, License, PDepend, Properties, RDepend, RequiredUse,
-    Restrict,
+    BDepend, Depend, ExprKind, Homepage, IDepend, License, PDepend, Properties, RDepend,
+    RequiredUse, Restrict,
 };
 use self::parser::ExprParser;
 pub use self::tree::{Expr, ExprEval, ExprNodes, ExprTree};
