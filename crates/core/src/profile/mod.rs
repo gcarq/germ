@@ -10,7 +10,7 @@ use log::warn;
 use crate::eapi::read_eapi;
 use crate::files::entry::Precedence;
 use crate::files::pkgfile::{PackageAcceptKeywords, PackageUseRecords};
-use crate::files::{PackageEntries, SysPackageEntries, UseEntries};
+use crate::files::{AtomEntries, SysAtomEntries, UseEntries};
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
 use crate::profile::parent::ParentEntry;
@@ -62,15 +62,15 @@ pub struct Profile {
     pub make_defaults: MakeEnv,
 
     /// Defines a system set for this profile
-    packages: SysPackageEntries,
+    packages: SysAtomEntries,
 
     /// Defines keywords that are accepted for packages in this profile
     pub package_accept_keywords: PackageAcceptKeywords,
 
     /// Masks packages from being visible
-    pub package_mask: PackageEntries,
+    pub package_mask: AtomEntries,
     /// Changes visibility of packages that would otherwise be masked
-    pub package_unmask: PackageEntries,
+    pub package_unmask: AtomEntries,
 
     /// Parsed and inherited profile USE records for the resolved profile.
     pub use_records: ProfileUseRecords,
@@ -118,18 +118,14 @@ impl Profile {
         let profile = Self {
             make_defaults: MakeEnv::from_path(&path.join("make.defaults"), false, true)?,
             deprecated: DeprecationInfo::from_path(&path.join("deprecated"))?,
-            packages: SysPackageEntries::from_path(&path.join("packages"), order, false)?,
+            packages: SysAtomEntries::from_path(&path.join("packages"), order, false)?,
             package_accept_keywords: PackageAcceptKeywords::from_path(
                 &path.join("package.accept_keywords"),
                 order,
                 recursive,
             )?,
-            package_mask: PackageEntries::from_path(&path.join("package.mask"), order, recursive)?,
-            package_unmask: PackageEntries::from_path(
-                &path.join("package.unmask"),
-                order,
-                recursive,
-            )?,
+            package_mask: AtomEntries::from_path(&path.join("package.mask"), order, recursive)?,
+            package_unmask: AtomEntries::from_path(&path.join("package.unmask"), order, recursive)?,
             use_records: ProfileUseRecords::load(path, order, recursive)?,
             location: path.clone(),
         };

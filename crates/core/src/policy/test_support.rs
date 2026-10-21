@@ -4,7 +4,7 @@ use super::PackagePolicy;
 use super::keyword::EffectiveKeywords;
 use super::pkgmask::{PackageMasks, PortageSource, RepositorySource};
 use super::useflag::{LocalUseRecords, UsePolicy};
-use crate::files::PackageEntries;
+use crate::files::AtomEntries;
 use crate::files::entry::Precedence;
 use crate::files::pkgfile::PackageAcceptKeywords;
 use crate::keyword::KeywordSelector;
@@ -44,7 +44,10 @@ impl PolicyFixture {
         let pkgmasks = PackageMasks::new(
             &RepositorySource::default(),
             PortageSource {
-                local_mask: PackageEntries::from_content(&self.masks.join("\n"), Precedence::User)?,
+                local_mask: AtomEntries::from_lines(
+                    self.masks.iter().map(String::as_str),
+                    Precedence::User,
+                )?,
                 ..Default::default()
             },
         )?;

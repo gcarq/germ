@@ -11,6 +11,8 @@ pub mod policy;
 mod profile;
 pub mod repository;
 pub mod resolver;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod useflag;
 pub use conf::system::SysConf;
 mod types;

@@ -61,13 +61,6 @@ impl fmt::Display for RepoName {
 }
 
 #[cfg(test)]
-impl Default for RepoName {
-    fn default() -> Self {
-        Self::new("gentoo").unwrap()
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 

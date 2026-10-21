@@ -3,15 +3,14 @@ mod useflags;
 
 use std::path::Path;
 
-use anyhow::Context;
 use germ_pms::Atom;
 pub(crate) use keywords::{KeywordRule, PackageAcceptKeywords};
 pub(crate) use useflags::{MatchedUse, PackageUseRecords, UseFlags};
 
-use crate::files::content_from_path;
 use crate::files::entry::Precedence;
+use crate::files::parse_from_path;
 use crate::types::FxIndexMap;
-use crate::utils::{Inherit, strip_line_comment};
+use crate::utils::Inherit;
 
 /// This trait abstracts multiple values in a line-based file, such as `package.use`.
 pub trait AtomPolicy: Default + Inherit {
@@ -25,26 +24,10 @@ pub struct AtomPolicies<T: AtomPolicy>(FxIndexMap<Atom, T>);
 
 impl<T: AtomPolicy> AtomPolicies<T> {
     pub fn from_path(path: &Path, precedence: Precedence, recursive: bool) -> anyhow::Result<Self> {
-        let content = content_from_path(path, recursive, true)?;
-        Self::from_content(&content, precedence)
-            .with_context(|| format!("failed to parse {}", path.display()))
-    }
-
-    pub fn from_content(content: &str, precedence: Precedence) -> anyhow::Result<Self> {
-        let mut policies = FxIndexMap::<Atom, T>::default();
-
-        for (lineno, line) in content.lines().enumerate() {
-            let line = strip_line_comment(line);
-            if line.is_empty() {
-                continue;
-            }
-
-            let (atom, policy) = Self::parse_line(line, precedence)
-                .with_context(|| format!("error in line {}: {line}", lineno + 1))?;
-            policies.entry(atom).or_default().update_from(policy);
-        }
-
-        Ok(Self(policies))
+        let pairs = parse_from_path(path, recursive, true, |line| {
+            Self::parse_line(line, precedence)
+        })?;
+        Ok(Self::from_pairs(pairs))
     }
 
     fn parse_line(line: &str, precedence: Precedence) -> anyhow::Result<(Atom, T)> {
@@ -53,6 +36,27 @@ impl<T: AtomPolicy> AtomPolicies<T> {
             None => (line, ""),
         };
         Ok((atom.parse()?, T::parse(value, precedence)?))
+    }
+
+    /// Merges `pairs` into one policy per atom, preserving order.
+    fn from_pairs(pairs: impl IntoIterator<Item = (Atom, T)>) -> Self {
+        let mut policies = FxIndexMap::<Atom, T>::default();
+        for (atom, policy) in pairs {
+            policies.entry(atom).or_default().update_from(policy);
+        }
+        Self(policies)
+    }
+
+    #[cfg(test)]
+    pub fn from_lines<'a>(
+        lines: impl IntoIterator<Item = &'a str>,
+        precedence: Precedence,
+    ) -> anyhow::Result<Self> {
+        let pairs = lines
+            .into_iter()
+            .map(|line| Self::parse_line(line, precedence))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(Self::from_pairs(pairs))
     }
 }
 
@@ -80,7 +84,7 @@ impl<T: AtomPolicy> IntoIterator for AtomPolicies<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, mem};
+    use std::mem;
 
     use super::*;
 
@@ -113,13 +117,12 @@ mod tests {
 
     #[test]
     fn test_parse_atom_order() -> anyhow::Result<()> {
-        let policies = AtomPolicies::<TestPolicy>::from_content(
-            "
-                # ignored
-                dev-lang/rust first
-                dev-lang/rust second # comment
-                app-editors/vim third
-            ",
+        let policies = AtomPolicies::<TestPolicy>::from_lines(
+            [
+                "dev-lang/rust first",
+                "dev-lang/rust second",
+                "app-editors/vim third",
+            ],
             Precedence::User,
         )?;
 
@@ -143,14 +146,12 @@ mod tests {
 
     #[test]
     fn test_inherit_atom_order() -> anyhow::Result<()> {
-        let parent = AtomPolicies::<TestPolicy>::from_content(
-            "dev-lang/rust parent
-                app-editors/vim inherited",
+        let parent = AtomPolicies::<TestPolicy>::from_lines(
+            ["dev-lang/rust parent", "app-editors/vim inherited"],
             Precedence::Profile(0),
         )?;
-        let mut child = AtomPolicies::<TestPolicy>::from_content(
-            "dev-lang/rust child
-                app-editors/nano own",
+        let mut child = AtomPolicies::<TestPolicy>::from_lines(
+            ["dev-lang/rust child", "app-editors/nano own"],
             Precedence::Profile(1),
         )?;
 
@@ -171,26 +172,6 @@ mod tests {
                 Atom::new("app-editors/nano")?,
                 Atom::new("app-editors/vim")?,
             ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_path_file_order() -> anyhow::Result<()> {
-        let temp = tempfile::tempdir()?;
-        let missing = temp.path().join("missing");
-        let policies = AtomPolicies::<TestPolicy>::from_path(&missing, Precedence::User, true)?;
-        assert!(policies.0.get(&Atom::new("dev-lang/rust")?).is_none());
-
-        let directory = temp.path().join("package.use");
-        fs::create_dir(&directory)?;
-        fs::write(directory.join("b"), "dev-lang/rust second")?;
-        fs::write(directory.join("a"), "dev-lang/rust first")?;
-
-        let policies = AtomPolicies::<TestPolicy>::from_path(&directory, Precedence::User, true)?;
-        assert_eq!(
-            policies.0.get(&Atom::new("dev-lang/rust")?),
-            Some(&policy(&["first", "second"]))
         );
         Ok(())
     }

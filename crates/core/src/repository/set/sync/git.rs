@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::iter;
 use std::process::{Command, Output, Stdio};
 
 use anyhow::{Context, anyhow, bail};
@@ -143,7 +144,7 @@ impl GitSyncHandler {
 
     /// Returns a string representation of the command and its arguments for logging purposes.
     fn command_repr(command: &Command) -> String {
-        std::iter::once(command.get_program())
+        iter::once(command.get_program())
             .chain(command.get_args())
             .map(|arg| arg.to_string_lossy())
             .collect::<Vec<_>>()

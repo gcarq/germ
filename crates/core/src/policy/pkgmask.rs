@@ -2,24 +2,24 @@ use germ_pms::{Atom, PackageView};
 use log::debug;
 
 use super::index::AtomIndex;
-use crate::files::PackageEntries;
+use crate::files::AtomEntries;
 use crate::files::entry::{Operation, Precedence};
 use crate::utils::Inherit;
 
 /// Simple DTO used to build [`PackageMasks`] from repo entries.
 #[derive(Default)]
 pub struct RepositorySource {
-    pub mask: PackageEntries,
-    pub unmask: PackageEntries,
+    pub mask: AtomEntries,
+    pub unmask: AtomEntries,
 }
 
 /// Simple DTO used to build [`PackageMasks`] from user config entries.
 #[derive(Default)]
 pub struct PortageSource {
-    pub profile_mask: PackageEntries,
-    pub profile_unmask: PackageEntries,
-    pub local_mask: PackageEntries,
-    pub local_unmask: PackageEntries,
+    pub profile_mask: AtomEntries,
+    pub profile_unmask: AtomEntries,
+    pub local_mask: AtomEntries,
+    pub local_unmask: AtomEntries,
 }
 
 /// Immutable runtime policy that determines whether a package is masked.
@@ -79,7 +79,7 @@ impl PackageMasks {
     /// Converts `entries` into an ordered list of `(atom, precedence)` masks.
     ///
     /// Only entries with [`Operation::Set`] are included in the resulting list.
-    fn map_from_entries(entries: PackageEntries) -> Vec<(Atom, Precedence)> {
+    fn map_from_entries(entries: AtomEntries) -> Vec<(Atom, Precedence)> {
         entries
             .into_entries()
             .filter_map(|entry| {
@@ -104,13 +104,12 @@ mod tests {
         let masks = PackageMasks::new(
             &RepositorySource::default(),
             PortageSource {
-                local_mask: PackageEntries::from_content(
-                    "dev-lang/rust
-                        app-editors/vim",
+                local_mask: AtomEntries::from_lines(
+                    ["dev-lang/rust", "app-editors/vim"],
                     Precedence::User,
                 )?,
-                local_unmask: PackageEntries::from_content(
-                    "=dev-lang/rust-1.50*",
+                local_unmask: AtomEntries::from_lines(
+                    "=dev-lang/rust-1.50*".lines(),
                     Precedence::User,
                 )?,
                 ..Default::default()

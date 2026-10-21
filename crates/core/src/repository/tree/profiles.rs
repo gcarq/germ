@@ -5,8 +5,7 @@ use anyhow::anyhow;
 use germ_pms::Arch;
 use thiserror::Error;
 
-use crate::files::content_from_path;
-use crate::utils::is_blank_or_comment;
+use crate::files::parse_from_path;
 
 #[derive(Debug, Error)]
 #[error(transparent)]
@@ -17,14 +16,8 @@ pub struct ProfileError(#[from] anyhow::Error);
 pub struct ProfileDescriptions(Vec<ProfileDescription>);
 
 impl ProfileDescriptions {
-    pub fn from_path(path: &Path) -> Result<Self, ProfileError> {
-        let content = content_from_path(path, false, true)?;
-        let descriptions = content
-            .lines()
-            .map(str::trim)
-            .filter(|line| !is_blank_or_comment(line))
-            .map(ProfileDescription::from_line)
-            .collect::<Result<Vec<_>, _>>()?;
+    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
+        let descriptions = parse_from_path(path, false, true, ProfileDescription::from_line)?;
         Ok(Self(descriptions))
     }
 }
@@ -49,7 +42,7 @@ pub struct ProfileDescription {
 impl ProfileDescription {
     /// Parses a profile description from a single line.
     /// The line must consist of `<arch> <profile_path> <stability>` otherwise an Err is returned.
-    fn from_line(line: &str) -> Result<Self, ProfileError> {
+    fn from_line(line: &str) -> anyhow::Result<Self> {
         let parts = line.split_ascii_whitespace().collect::<Vec<_>>();
         match parts.as_slice() {
             [arch, profile_path, stability] => Ok(Self {
@@ -57,9 +50,7 @@ impl ProfileDescription {
                 profile_path: (*profile_path).to_owned(),
                 stability: (*stability).to_owned(),
             }),
-            _ => Err(ProfileError(anyhow!(
-                "Invalid profile description line: {line}"
-            ))),
+            _ => Err(anyhow!("Invalid profile description line: {line}")),
         }
     }
 }
@@ -69,14 +60,8 @@ impl ProfileDescription {
 pub struct Arches(Vec<Arch>);
 
 impl Arches {
-    pub fn from_path(path: &Path) -> Result<Self, ProfileError> {
-        let content = content_from_path(path, false, true)?;
-        let archs = content
-            .lines()
-            .map(str::trim)
-            .filter(|line| !is_blank_or_comment(line))
-            .map(Arch::new)
-            .collect::<anyhow::Result<Vec<_>>>()?;
+    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
+        let archs = parse_from_path(path, false, true, |line| Arch::new(line))?;
         Ok(Self(archs))
     }
 

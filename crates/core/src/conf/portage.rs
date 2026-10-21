@@ -6,7 +6,7 @@ use log::debug;
 use crate::SysConf;
 use crate::files::entry::Precedence;
 use crate::files::pkgfile::{PackageAcceptKeywords, PackageUseRecords};
-use crate::files::{PackageEntries, UseEntries};
+use crate::files::{AtomEntries, UseEntries};
 use crate::makenv::{MakeEnv, MakeEnvStack};
 use crate::policy::keyword::EffectiveKeywords;
 use crate::policy::pkgmask::PortageSource as PackageMaskSource;
@@ -79,12 +79,12 @@ impl PortageConf {
         Ok(PackageMaskSource {
             profile_mask: self.profile.package_mask.clone(),
             profile_unmask: self.profile.package_unmask.clone(),
-            local_mask: PackageEntries::from_path(
+            local_mask: AtomEntries::from_path(
                 &self.path.join("package.mask"),
                 Precedence::User,
                 true,
             )?,
-            local_unmask: PackageEntries::from_path(
+            local_unmask: AtomEntries::from_path(
                 &self.path.join("package.unmask"),
                 Precedence::User,
                 true,

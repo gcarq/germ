@@ -264,11 +264,14 @@ mod tests {
         let user = MakeEnv::from_content(make_conf)?;
         let makenv_stack = MakeEnvStack::new(global, MakeEnv::default(), user)?;
         let local = LocalUseRecords {
-            package_use: PackageUseRecords::from_content(package_use, Precedence::User)?,
+            package_use: PackageUseRecords::from_lines(package_use.lines(), Precedence::User)?,
             ..Default::default()
         };
         let profile = ProfileUseRecords {
-            package_use: PackageUseRecords::from_content(profile_use, Precedence::Profile(0))?,
+            package_use: PackageUseRecords::from_lines(
+                profile_use.lines(),
+                Precedence::Profile(0),
+            )?,
             expand_config: UseExpandConfig::from_makenv(makenv_stack.makenv())?,
             ..Default::default()
         };
@@ -325,8 +328,8 @@ mod tests {
         let systemd = UseFlag::new("systemd")?;
         let forced = UseFlag::new("forced")?;
         let profile = ProfileUseRecords {
-            use_mask: UseEntries::from_content("elogind", Precedence::Profile(0))?,
-            use_force: UseEntries::from_content("forced", Precedence::Profile(0))?,
+            use_mask: UseEntries::from_lines("elogind".lines(), Precedence::Profile(0))?,
+            use_force: UseEntries::from_lines("forced".lines(), Precedence::Profile(0))?,
             ..Default::default()
         };
         let policy = UsePolicy::new(
@@ -355,8 +358,8 @@ mod tests {
         let expand_config =
             UseExpandConfig::from_makenv(&MakeEnv::from_content("USE_EXPAND=LLVM_TARGETS")?)?;
         let profile = ProfileUseRecords {
-            package_use_force: PackageUseRecords::from_content(
-                "*/* LLVM_TARGETS: AArch64",
+            package_use_force: PackageUseRecords::from_lines(
+                "*/* LLVM_TARGETS: AArch64".lines(),
                 Precedence::Profile(0),
             )?,
             expand_config,
@@ -379,8 +382,8 @@ mod tests {
         );
 
         let local = LocalUseRecords {
-            package_use_force: PackageUseRecords::from_content(
-                "*/* LLVM_TARGETS: -AArch64",
+            package_use_force: PackageUseRecords::from_lines(
+                "*/* LLVM_TARGETS: -AArch64".lines(),
                 Precedence::User,
             )?,
             ..Default::default()
@@ -396,9 +399,9 @@ mod tests {
     #[test]
     fn test_profile_use_unmask() -> anyhow::Result<()> {
         let elogind = UseFlag::new("elogind")?;
-        let masked = UseEntries::from_content("elogind", Precedence::Profile(0))?;
+        let masked = UseEntries::from_lines("elogind".lines(), Precedence::Profile(0))?;
         let profile = ProfileUseRecords {
-            use_mask: UseEntries::from_content("-elogind", Precedence::Profile(1))?
+            use_mask: UseEntries::from_lines("-elogind".lines(), Precedence::Profile(1))?
                 .inherit(&masked)?,
             ..Default::default()
         };

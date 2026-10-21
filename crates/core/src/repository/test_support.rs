@@ -8,6 +8,7 @@ use germ_pms::RepoName;
 
 use super::{RepoSet, Repository};
 use crate::conf::test_support::build_sysconf;
+use crate::test_support::write_file;
 use crate::types::FxHashSet;
 
 /// Owns a temporary directory together with a value that depends on it.
@@ -42,14 +43,6 @@ impl<T> DerefMut for Temp<T> {
 enum FixtureEntry {
     File { path: PathBuf, contents: String },
     Directory { path: PathBuf, contents: String },
-}
-
-fn write_file(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {
-    let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, contents)
 }
 
 pub struct RepoBuilder {

@@ -1,5 +1,4 @@
 use std::mem;
-use std::path::Path;
 
 use anyhow::Context;
 use germ_pms::Atom;
@@ -16,37 +15,20 @@ use crate::utils::Inherit;
 ///
 /// It can only be used for keyword acceptance after inheriting all files
 /// and compiling a keyword policy.
-#[derive(Clone, Default, Debug)]
-pub struct PackageAcceptKeywords(AtomPolicies<KeywordSpec>);
+pub type PackageAcceptKeywords = AtomPolicies<KeywordSpec>;
 
-impl PackageAcceptKeywords {
-    pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
-        Ok(Self(AtomPolicies::from_path(path, order, recursive)?))
-    }
-
-    #[cfg(test)]
-    pub fn from_content(content: &str, order: Precedence) -> anyhow::Result<Self> {
-        Ok(Self(AtomPolicies::from_content(content, order)?))
-    }
-
+impl AtomPolicies<KeywordSpec> {
     /// Consumes this configuration and returns [`Atom`] and [`KeywordRule`] pairs.
     pub fn into_rules(self) -> impl Iterator<Item = (Atom, KeywordRule)> {
-        self.0
-            .into_iter()
+        self.into_iter()
             .flat_map(|(atom, spec)| spec.0.into_iter().map(move |rule| (atom.clone(), rule)))
-    }
-}
-
-impl Inherit for PackageAcceptKeywords {
-    fn inherit_from(&mut self, parent: &Self) -> anyhow::Result<()> {
-        self.0.inherit_from(&parent.0)
     }
 }
 
 /// Helper struct to manage keyword rules for a single atom,
 /// while parsing `package.accept_keywords` files.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct KeywordSpec(Vec<KeywordRule>);
+pub struct KeywordSpec(Vec<KeywordRule>);
 
 impl KeywordSpec {
     fn contains_reset(&self) -> bool {
@@ -166,7 +148,8 @@ mod tests {
 
     #[test]
     fn test_atom_only_defaults_testing() -> anyhow::Result<()> {
-        let entries = PackageAcceptKeywords::from_content("net-analyzer/netcat", Precedence::User)?;
+        let entries =
+            PackageAcceptKeywords::from_lines("net-analyzer/netcat".lines(), Precedence::User)?;
         let rules = entries.into_rules().collect::<Vec<_>>();
 
         let atom = Atom::new("net-analyzer/netcat")?;
@@ -176,12 +159,12 @@ mod tests {
 
     #[test]
     fn test_duplicate_atom_reset() -> anyhow::Result<()> {
-        let entries = PackageAcceptKeywords::from_content(
-            r#"
-                dev-lang/rust amd64
-                dev-lang/rust -*
-                dev-lang/rust ~amd64
-            "#,
+        let entries = PackageAcceptKeywords::from_lines(
+            [
+                "dev-lang/rust amd64",
+                "dev-lang/rust -*",
+                "dev-lang/rust ~amd64",
+            ],
             Precedence::User,
         )?;
         let rules = entries
@@ -201,10 +184,14 @@ mod tests {
 
     #[test]
     fn test_keyword_spec_inherit_reset() -> anyhow::Result<()> {
-        let parent =
-            PackageAcceptKeywords::from_content("dev-lang/rust amd64", Precedence::Profile(0))?;
-        let mut child =
-            PackageAcceptKeywords::from_content("dev-lang/rust -* ~amd64", Precedence::Profile(1))?;
+        let parent = PackageAcceptKeywords::from_lines(
+            "dev-lang/rust amd64".lines(),
+            Precedence::Profile(0),
+        )?;
+        let mut child = PackageAcceptKeywords::from_lines(
+            "dev-lang/rust -* ~amd64".lines(),
+            Precedence::Profile(1),
+        )?;
 
         child.inherit_from(&parent)?;
         let rules = child.into_rules().map(|(_, rule)| rule).collect::<Vec<_>>();

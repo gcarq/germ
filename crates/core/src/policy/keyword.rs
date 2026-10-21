@@ -163,7 +163,7 @@ mod tests {
                 .map(str::parse)
                 .collect::<anyhow::Result<_>>()
                 .unwrap(),
-            PackageAcceptKeywords::from_content(package_keywords, Precedence::User).unwrap(),
+            PackageAcceptKeywords::from_lines(package_keywords.lines(), Precedence::User).unwrap(),
         )
     }
 
@@ -180,64 +180,32 @@ mod tests {
     }
 
     #[test]
-    fn test_policy_global_keywords() {
-        let policy = policy("amd64 ~arm64", "");
-        let test_cases = [
-            ("amd64", KeywordEvalResult::new(true, true)),
-            ("~arm64", KeywordEvalResult::new(true, false)),
-            ("~amd64", KeywordEvalResult::new(false, false)),
+    fn test_policy() {
+        let cases = [
+            ("amd64 ~arm64", "", "amd64", (true, true)),
+            ("amd64 ~arm64", "", "~arm64", (true, false)),
+            ("amd64 ~arm64", "", "~amd64", (false, false)),
+            ("*", "", "amd64", (true, true)),
+            ("*", "", "~amd64", (false, false)),
+            ("~*", "", "~amd64", (true, false)),
+            ("~*", "", "amd64", (false, false)),
+            ("**", "", "", (true, false)),
+            ("**", "", "-amd64", (true, false)),
+            ("amd64", "dev-lang/rust -amd64", "amd64", (false, false)),
+            ("amd64", "dev-lang/rust -* ~amd64", "~amd64", (true, false)),
+            ("amd64", "dev-lang/rust", "~amd64", (true, false)),
+            ("amd64", "dev-lang/rust", "~arm64", (false, false)),
+            ("*", "dev-lang/rust", "~arm64", (true, false)),
+            ("", "dev-lang/rust **", "", (true, false)),
+            ("", "dev-lang/rust **", "-amd64", (true, false)),
+            ("", "dev-lang/rust **", "-*", (true, false)),
         ];
 
-        for (keyword, expected) in test_cases {
-            let pkg = package([keyword]);
-            assert_eq!(policy.eval(&pkg), expected);
-        }
-    }
-
-    #[test]
-    fn test_policy_global_wildcards() {
-        let test_cases = &[
-            ("*", "amd64", KeywordEvalResult::new(true, true)),
-            ("*", "~amd64", KeywordEvalResult::new(false, false)),
-            ("~*", "~amd64", KeywordEvalResult::new(true, false)),
-            ("~*", "amd64", KeywordEvalResult::new(false, false)),
-            ("**", "", KeywordEvalResult::new(true, false)),
-            ("**", "-amd64", KeywordEvalResult::new(true, false)),
-        ];
-
-        for &(accept_keywords, package_keywords, expected) in test_cases {
-            let policy = policy(accept_keywords, "");
-            let pkg = package(package_keywords.split_whitespace());
-            assert_eq!(policy.eval(&pkg), expected);
-        }
-    }
-
-    #[test]
-    fn test_policy_selector_reject() {
-        let policy = policy("amd64", "dev-lang/rust -amd64");
-        let pkg = package(["amd64"]);
-        assert_eq!(policy.eval(&pkg), KeywordEvalResult::new(false, false));
-    }
-
-    #[test]
-    fn test_policy_reset_accept() {
-        let policy = policy("amd64", "dev-lang/rust -* ~amd64");
-        let pkg = package(["~amd64"]);
-        assert_eq!(policy.eval(&pkg), KeywordEvalResult::new(true, false));
-    }
-
-    #[test]
-    fn test_policy_atom_only() {
-        let test_cases = [
-            ("amd64", "~amd64", KeywordEvalResult::new(true, false)),
-            ("amd64", "~arm64", KeywordEvalResult::new(false, false)),
-            ("*", "~arm64", KeywordEvalResult::new(true, false)),
-        ];
-
-        for (accept_keywords, package_keywords, expected) in test_cases {
-            let pkg = package([package_keywords]);
-            let keywords = policy(accept_keywords, "dev-lang/rust");
-            assert_eq!(keywords.eval(&pkg), expected);
+        for (accept_keywords, package_accept_keywords, keywords, (accepted, stable)) in cases {
+            let policy = policy(accept_keywords, package_accept_keywords);
+            let pkg = package(keywords.split_whitespace());
+            let expected = KeywordEvalResult::new(accepted, stable);
+            assert_eq!(policy.eval(&pkg), expected, "{keywords}");
         }
     }
 
@@ -245,13 +213,11 @@ mod tests {
     fn test_policy_atom_order() {
         let test_cases = [
             (
-                "*/* -~amd64
-                dev-lang/rust ~amd64",
+                "*/* -~amd64\ndev-lang/rust ~amd64",
                 KeywordEvalResult::new(true, false),
             ),
             (
-                "dev-lang/rust ~amd64
-                */* -~amd64",
+                "dev-lang/rust ~amd64\n*/* -~amd64",
                 KeywordEvalResult::new(false, false),
             ),
         ];
@@ -265,30 +231,17 @@ mod tests {
 
     #[test]
     fn test_policy_precedence() -> anyhow::Result<()> {
-        let profile =
-            PackageAcceptKeywords::from_content("dev-lang/rust amd64", Precedence::Profile(0))?;
-        let user = PackageAcceptKeywords::from_content("*/* -amd64", Precedence::User)?;
+        let profile = PackageAcceptKeywords::from_lines(
+            "dev-lang/rust amd64".lines(),
+            Precedence::Profile(0),
+        )?;
+        let user = PackageAcceptKeywords::from_lines("*/* -amd64".lines(), Precedence::User)?;
         let package_accept_keywords = user.inherit(&profile)?;
         let policy = EffectiveKeywords::new(Vec::default(), package_accept_keywords);
 
         let pkg = package(["amd64"]);
         assert_eq!(policy.eval(&pkg), KeywordEvalResult::new(false, false));
         Ok(())
-    }
-
-    #[test]
-    fn test_policy_any() {
-        let policy = policy("", "dev-lang/rust **");
-        let test_cases = [
-            ("", KeywordEvalResult::new(true, false)),
-            ("-amd64", KeywordEvalResult::new(true, false)),
-            ("-*", KeywordEvalResult::new(true, false)),
-        ];
-
-        for (package_keywords, expected) in test_cases {
-            let pkg = package(package_keywords.split_whitespace());
-            assert_eq!(policy.eval(&pkg), expected);
-        }
     }
 
     #[test]

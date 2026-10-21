@@ -33,7 +33,7 @@ use self::profiles::ProfileDescriptions;
 use crate::SysConf;
 use crate::eapi::read_eapi;
 use crate::ebuild::Ebuild;
-use crate::files::PackageEntries;
+use crate::files::AtomEntries;
 use crate::files::entry::Precedence;
 use crate::types::FxHashSet;
 use crate::utils::{Inherit, is_blank_or_comment, md5sum};
@@ -54,8 +54,8 @@ pub struct Repository {
     metadata_cache: MetadataCache,
     sysconf: Arc<SysConf>,
 
-    pub(super) package_mask: PackageEntries,
-    pub(super) package_unmask: PackageEntries,
+    pub(super) package_mask: AtomEntries,
+    pub(super) package_unmask: AtomEntries,
 }
 
 impl Repository {
@@ -70,13 +70,13 @@ impl Repository {
         let eapi = read_eapi(&profiles.join("eapi")).map_err(ProfileError::from)?;
 
         let dir_support = eapi.supports_profile_file_dirs() || layout.supports_profile_file_dirs();
-        let package_mask = PackageEntries::from_path(
+        let package_mask = AtomEntries::from_path(
             &profiles.join("package.mask"),
             Precedence::Repository,
             dir_support,
         )
         .map_err(|err| ProfileError::from(err.context("unable to load package.mask")))?;
-        let package_unmask = PackageEntries::from_path(
+        let package_unmask = AtomEntries::from_path(
             &profiles.join("package.unmask"),
             Precedence::Repository,
             dir_support,
@@ -98,8 +98,10 @@ impl Repository {
             known_categories: FxHashSet::default(),
             eclasses: Eclasses::empty(location),
             licenses: Licenses::default(),
-            supported_arches: Arches::from_path(&profiles.join("arch.list"))?,
-            profiles_desc: ProfileDescriptions::from_path(&profiles.join("profiles.desc"))?,
+            supported_arches: Arches::from_path(&profiles.join("arch.list"))
+                .map_err(|err| RepositoryError::Profile(err.into()))?,
+            profiles_desc: ProfileDescriptions::from_path(&profiles.join("profiles.desc"))
+                .map_err(|err| RepositoryError::Profile(err.into()))?,
             cpv_index: CpvIndex::default(),
             package_mask,
             package_unmask,
@@ -427,8 +429,8 @@ impl Default for Repository {
             location: location.to_path_buf(),
             layout: Layout::default(),
             known_categories: FxHashSet::default(),
-            package_mask: PackageEntries::default(),
-            package_unmask: PackageEntries::default(),
+            package_mask: AtomEntries::default(),
+            package_unmask: AtomEntries::default(),
             eclasses: Eclasses::default(),
             licenses: Licenses::default(),
             supported_arches: Arches::default(),
