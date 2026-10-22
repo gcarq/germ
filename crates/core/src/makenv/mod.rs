@@ -15,15 +15,13 @@ use crate::utils::{self, Inherit};
 
 /// List of variables that are incremental as per PMS section 5.3 and
 /// <https://github.com/gentoo/portage/blob/0783d820e6eecffa3adff52c4669fc715d65dbaa/lib/portage/const.py#L121>
-const INCREMENTAL_VARS: [&str; 14] = [
+const INCREMENTAL_VARS: [&str; 12] = [
     "ACCEPT_KEYWORDS",
     "CONFIG_PROTECT",
     "CONFIG_PROTECT_MASK",
     "ENV_UNSET",
     "FEATURES",
     "IUSE_IMPLICIT",
-    "PRELINK_PATH",
-    "PRELINK_PATH_MASK",
     "PROFILE_ONLY_VARIABLES",
     "USE",
     "USE_EXPAND",
