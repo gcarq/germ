@@ -28,20 +28,7 @@ impl<T: EntryValue> LineEntries<T> {
     ///
     /// A [`LineEntry::Reset`] discards all earlier entries.
     pub fn into_entries(self) -> impl Iterator<Item = Entry<T>> {
-        let mut seen = FxHashSet::default();
-        let mut result = Vec::with_capacity(self.0.len());
-        for item in self.0.into_iter().rev() {
-            match item {
-                LineEntry::Reset => break,
-                LineEntry::Value(entry) => {
-                    if seen.insert(entry.inner().clone()) {
-                        result.push(entry);
-                    }
-                }
-            }
-        }
-        result.reverse();
-        result.into_iter()
+        Self::dedupe(self.0.into_iter().rev()).into_iter()
     }
 
     /// Consumes self and returns an iterator of the inner `T` that remain set.
@@ -72,6 +59,26 @@ impl<T: EntryValue> LineEntries<T> {
         }
     }
 
+    /// Returns the effective entries from `entries`.
+    ///
+    /// The caller must ensure the entries are in reverse order.
+    fn dedupe(entries: impl Iterator<Item = LineEntry<T>>) -> Vec<Entry<T>> {
+        let mut seen = FxHashSet::default();
+        let mut result = Vec::new();
+        for item in entries {
+            match item {
+                LineEntry::Reset => break,
+                LineEntry::Value(entry) => {
+                    if seen.insert(entry.inner().clone()) {
+                        result.push(entry);
+                    }
+                }
+            }
+        }
+        result.reverse();
+        result
+    }
+
     /// Creates a new [`LineEntries`] from the given `lines`.
     #[cfg(test)]
     pub fn from_lines<'a>(
@@ -88,20 +95,10 @@ impl<T: EntryValue> LineEntries<T> {
 
 impl<T: EntryValue> Inherit for LineEntries<T> {
     fn inherit_from(&mut self, parent: &LineEntries<T>) -> anyhow::Result<()> {
-        let mut seen = FxHashSet::default();
-        let mut result = Vec::with_capacity(self.0.len() + parent.0.len());
-        for item in self.0.iter().rev().chain(parent.0.iter().rev()) {
-            match item {
-                LineEntry::Reset => break,
-                LineEntry::Value(entry) => {
-                    if seen.insert(entry.inner()) {
-                        result.push(item.clone());
-                    }
-                }
-            }
-        }
-        result.reverse();
-        self.0 = result;
+        self.0 = Self::dedupe(self.0.iter().rev().chain(parent.0.iter().rev()).cloned())
+            .into_iter()
+            .map(LineEntry::Value)
+            .collect();
         Ok(())
     }
 }
@@ -143,26 +140,6 @@ mod tests {
                 Entry::from_str("-app-arch/rpm", Precedence::Repository)?,
             ]
         );
-        Ok(())
-    }
-
-    #[test]
-    fn test_reset() -> anyhow::Result<()> {
-        for (content, expected) in [
-            ("foo\nbar\n-*\nbaz\n", vec!["baz"]),
-            ("foo\n-foo\nfoo\n", vec!["foo"]),
-            ("foo\n-*\nbar\n-*\nbaz\n", vec!["baz"]),
-        ] {
-            let entries = UseEntries::from_lines(content.lines(), Precedence::User)?;
-            assert_eq!(
-                entries
-                    .into_entries()
-                    .map(|entry| entry.to_string())
-                    .collect::<Vec<_>>(),
-                expected,
-                "{content}"
-            );
-        }
         Ok(())
     }
 

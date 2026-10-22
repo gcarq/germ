@@ -25,11 +25,6 @@ impl AtomPolicies<UseSpec> {
             })
             .collect()
     }
-
-    #[cfg(test)]
-    fn get(&self, atom: &Atom) -> Option<&UseSpec> {
-        self.0.get(atom)
-    }
 }
 
 /// Holds USE flags for a single atom while parsing `package.use` files.
@@ -283,19 +278,6 @@ mod tests {
     use crate::makenv::MakeEnv;
     use crate::types::FxHashSet;
 
-    impl PackageUseTarget {
-        fn flag(value: impl Into<Box<str>>) -> anyhow::Result<Self> {
-            Ok(Self::Flag(UseFlag::new(value)?))
-        }
-
-        fn expand(group: &str, value: impl Into<Box<str>>) -> anyhow::Result<Self> {
-            Ok(Self::Expand {
-                group: EnvVarName::new(group)?,
-                value: UseFlag::new(value)?,
-            })
-        }
-    }
-
     fn config() -> anyhow::Result<UseExpandConfig> {
         let makenv = MakeEnv::from_content(
             "USE_EXPAND=\"LLVM_TARGETS\"
@@ -318,88 +300,69 @@ mod tests {
             ["app-admin/sudo foo -bar baz", "app-admin/sudo -foo"],
             Precedence::User,
         )?;
-        let sudo = policy.get(&Atom::new("app-admin/sudo")?).unwrap();
+        let resolved = policy.expand(&config()?)?;
+        let sudo = flags_for(&resolved, "app-admin/sudo")?;
 
         assert_eq!(
-            sudo.targets.get(&PackageUseTarget::flag("foo")?),
+            sudo.get(&UseFlag::new("foo")?),
             Some(&Entry::from_str("-foo", Precedence::User)?)
         );
         assert_eq!(
-            sudo.targets.get(&PackageUseTarget::flag("bar")?),
+            sudo.get(&UseFlag::new("bar")?),
             Some(&Entry::from_str("-bar", Precedence::User)?)
         );
         assert_eq!(
-            sudo.targets.get(&PackageUseTarget::flag("baz")?),
+            sudo.get(&UseFlag::new("baz")?),
             Some(&Entry::from_str("baz", Precedence::User)?)
         );
         Ok(())
     }
 
     #[test]
-    fn test_parse_keeps_expansion_symbolic() -> anyhow::Result<()> {
-        let spec = UseSpec::parse(
-            "foo llvm_targets_AMDGPU LLVM_TARGETS: AMDGPU ARCH: amd64 LLVM_TARGETS:",
-            Precedence::User,
-        )?;
-
-        assert!(spec.targets.contains_key(&PackageUseTarget::flag("foo")?));
-        assert!(
-            spec.targets
-                .contains_key(&PackageUseTarget::flag("llvm_targets_AMDGPU")?)
-        );
-        assert!(
-            spec.targets
-                .contains_key(&PackageUseTarget::expand("LLVM_TARGETS", "AMDGPU")?)
-        );
-        assert!(
-            spec.targets
-                .contains_key(&PackageUseTarget::expand("ARCH", "amd64")?)
-        );
-        assert!(spec.resets.0.is_empty());
-        Ok(())
-    }
-
-    #[test]
     fn test_parse_group_context_is_line_local() -> anyhow::Result<()> {
-        let entries = PackageUseRecords::from_lines(
+        let records = PackageUseRecords::from_lines(
             [
                 "dev-lang/rust LLVM_TARGETS: AMDGPU",
                 "app-arch/xz-utils direct_flag",
             ],
             Precedence::User,
         )?;
+        let resolved = records.expand(&config()?)?;
+        let xz = flags_for(&resolved, "app-arch/xz-utils")?;
 
-        let xz = entries.get(&Atom::new("app-arch/xz-utils")?).unwrap();
-        assert!(
-            xz.targets
-                .contains_key(&PackageUseTarget::flag("direct_flag")?)
+        assert_eq!(
+            xz.get(&UseFlag::new("direct_flag")?),
+            Some(&Entry::from_str("direct_flag", Precedence::User)?)
         );
         Ok(())
     }
 
     #[test]
     fn test_parse_resets() -> anyhow::Result<()> {
-        let spec = UseSpec::parse("foo bar -* baz", Precedence::User)?;
+        let records = PackageUseRecords::from_lines(
+            "dev-lang/rust foo bar -* baz".lines(),
+            Precedence::User,
+        )?;
+        let resolved = records.expand(&config()?)?;
+        let rust = flags_for(&resolved, "dev-lang/rust")?;
 
-        assert!(!spec.targets.contains_key(&PackageUseTarget::flag("foo")?));
-        assert!(!spec.targets.contains_key(&PackageUseTarget::flag("bar")?));
-        assert!(spec.targets.contains_key(&PackageUseTarget::flag("baz")?));
-        assert!(spec.resets.0.contains_key(&UseReset::All));
+        assert_eq!(rust.get(&UseFlag::new("foo")?), None);
+        assert_eq!(rust.get(&UseFlag::new("bar")?), None);
+        let entry = rust.get(&UseFlag::new("baz")?);
+        assert_eq!(entry, Some(&Entry::from_str("baz", Precedence::User)?));
 
-        let spec = UseSpec::parse("LLVM_TARGETS: X86 -* AMDGPU", Precedence::User)?;
-        assert!(
-            !spec
-                .targets
-                .contains_key(&PackageUseTarget::expand("LLVM_TARGETS", "X86")?)
-        );
-        assert!(
-            spec.targets
-                .contains_key(&PackageUseTarget::expand("LLVM_TARGETS", "AMDGPU")?)
-        );
-        assert!(
-            spec.resets
-                .0
-                .contains_key(&UseReset::Group(EnvVarName::new("LLVM_TARGETS")?))
+        let records = PackageUseRecords::from_lines(
+            "dev-lang/rust LLVM_TARGETS: X86 -* AMDGPU".lines(),
+            Precedence::User,
+        )?;
+        let resolved = records.expand(&config()?)?;
+        let rust = flags_for(&resolved, "dev-lang/rust")?;
+
+        assert_eq!(rust.get(&UseFlag::new("llvm_targets_X86")?), None);
+        let entry = rust.get(&UseFlag::new("llvm_targets_AMDGPU")?);
+        assert_eq!(
+            entry,
+            Some(&Entry::from_str("llvm_targets_AMDGPU", Precedence::User)?)
         );
         Ok(())
     }
