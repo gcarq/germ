@@ -11,7 +11,7 @@ use crate::makenv::{MakeEnv, MakeEnvStack};
 use crate::policy::keyword::EffectiveKeywords;
 use crate::policy::pkgmask::PortageSource as PackageMaskSource;
 use crate::policy::useflag::{LocalUseRecords, UsePolicy};
-use crate::profile::Profile;
+use crate::profile::{Profile, SystemPackages};
 use crate::repository::RepoSet;
 use crate::useflag::UseExpandConfig;
 use crate::utils::Inherit;
@@ -47,6 +47,13 @@ impl PortageConf {
             profile,
             makenv_stack,
         })
+    }
+
+    /// Returns the resolved `@system` set.
+    pub fn system_set(&self) -> anyhow::Result<SystemPackages> {
+        let path = self.path.join("profile").join("packages");
+        let local = SystemPackages::from_path(&path, Precedence::User)?;
+        local.inherit(&self.profile.system_set)
     }
 
     /// Returns the resolved [`MakeEnv`].
@@ -141,5 +148,36 @@ impl PortageConf {
             .context("unable to process make.conf")?;
         MakeEnvStack::new(global, profile.make_defaults.clone(), user)
             .context("unable to resolve make environment")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::conf::test_support::build_portage_conf;
+    use crate::test_support::{assert_display_eq, build_sysconf, write_file};
+
+    #[test]
+    fn test_system_set() -> anyhow::Result<()> {
+        let cases: &[(&str, &[&str])] = &[
+            // Unprefixed entries are ignored
+            (
+                "*app-misc/local\n-*sys-libs/glibc\napp-misc/ignored\n",
+                &["app-misc/local"],
+            ),
+            ("-*\n", &[]),
+        ];
+
+        for &(packages, system) in cases {
+            let temp = tempfile::tempdir()?;
+            let conf = build_portage_conf(&temp)?;
+            let sysconf = build_sysconf(&temp);
+
+            let path = sysconf.portage_conf().join("profile").join("packages");
+            write_file(path, packages)?;
+
+            let resolved = conf.system_set()?;
+            assert_display_eq(resolved.finalize(), system);
+        }
+        Ok(())
     }
 }

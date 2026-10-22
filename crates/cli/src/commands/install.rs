@@ -4,19 +4,22 @@ use std::sync::Arc;
 use anyhow::{Context, bail};
 use germ_core::SysConf;
 use germ_core::conf::portage::PortageConf;
+use germ_core::package_set::{PackageSets, Target};
 use germ_core::policy::PackagePolicy;
 use germ_core::policy::pkgmask::PackageMasks;
 use germ_core::repository::RepoSet;
 use germ_core::resolver::{ExecutionPlan, PackageOperation, PackageProvider, Resolver};
 use germ_core::useflag::{EffectiveUse, UseExpandConfig};
 use germ_core::vdb::Vdb;
-use germ_pms::{Atom, PackageView, UseFlag};
+use germ_pms::{PackageView, UseFlag};
 
-/// Installs the best matching package for each of the given `atoms`.
+/// Installs the best matching package for each of the given `targets`.
 /// TODO: this is just a placeholder for now.
-pub async fn install(atoms: &[Atom], sysconf: Arc<SysConf>) -> anyhow::Result<()> {
+pub async fn install(targets: &[Target], sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     let reposet = RepoSet::new(sysconf.clone()).context("unable to build repo set")?;
     let conf = PortageConf::new(&reposet, &sysconf)?;
+    let sets = PackageSets::new(&conf, &sysconf).context("unable to build package sets")?;
+    let atoms = sets.resolve(targets).context("unable to resolve targets")?;
     let policy = PackagePolicy::new(
         conf.effective_keywords()?,
         conf.use_policy()?,
@@ -25,7 +28,7 @@ pub async fn install(atoms: &[Atom], sysconf: Arc<SysConf>) -> anyhow::Result<()
 
     let vdb = Vdb::from_path(sysconf.vdb_path()).context("unable to read VDB")?;
     let outcome = Resolver::new(PackageProvider::new(&reposet, vdb), policy)
-        .resolve(atoms)
+        .resolve(&atoms)
         .await?;
     if let Some(failure) = outcome.failure() {
         bail!("unable to produce an install plan: {failure}");

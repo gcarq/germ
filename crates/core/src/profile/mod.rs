@@ -1,16 +1,18 @@
 mod deprecation;
 mod parent;
+mod system;
 
 use std::path::{Path, PathBuf};
 use std::{fmt, iter};
 
 use anyhow::{Context, bail};
 use log::warn;
+pub use system::SystemPackages;
 
 use crate::eapi::read_eapi;
 use crate::files::entry::Precedence;
 use crate::files::pkgfile::{PackageAcceptKeywords, PackageUseRecords};
-use crate::files::{AtomEntries, SysAtomEntries, UseEntries};
+use crate::files::{AtomEntries, UseEntries};
 use crate::makenv::MakeEnv;
 use crate::profile::deprecation::DeprecationInfo;
 use crate::profile::parent::ParentEntry;
@@ -31,12 +33,12 @@ impl<'repo> ProfileSource<'repo> {
             .canonicalize()
             .with_context(|| format!("unable to resolve profile {}", path.display()))?;
 
-        for repository in reposet.iter() {
-            let profiles_root = repository.location().join("profiles").canonicalize()?;
+        for repo in reposet.iter() {
+            let profiles_root = repo.location().join("profiles").canonicalize()?;
             if path.starts_with(&profiles_root) {
                 return Ok(Self {
                     path,
-                    owning_repo: repository,
+                    owning_repo: repo,
                 });
             }
         }
@@ -61,8 +63,8 @@ pub struct Profile {
     deprecated: Option<DeprecationInfo>,
     pub make_defaults: MakeEnv,
 
-    /// Defines a system set for this profile
-    packages: SysAtomEntries,
+    /// The raw `@system` entries for this profile
+    pub system_set: SystemPackages,
 
     /// Defines keywords that are accepted for packages in this profile
     pub package_accept_keywords: PackageAcceptKeywords,
@@ -118,7 +120,7 @@ impl Profile {
         let profile = Self {
             make_defaults: MakeEnv::from_path(&path.join("make.defaults"), false, true)?,
             deprecated: DeprecationInfo::from_path(&path.join("deprecated"))?,
-            packages: SysAtomEntries::from_path(&path.join("packages"), order, false)?,
+            system_set: SystemPackages::from_path(&path.join("packages"), order)?,
             package_accept_keywords: PackageAcceptKeywords::from_path(
                 &path.join("package.accept_keywords"),
                 order,
@@ -142,7 +144,7 @@ impl Profile {
     /// which needs to be handled beforehand to distinguish between
     /// incremental and literal variables.
     fn inherit(mut self, parent: &Profile) -> anyhow::Result<Self> {
-        self.packages.inherit_from(&parent.packages)?;
+        self.system_set.inherit_from(&parent.system_set)?;
         self.package_accept_keywords
             .inherit_from(&parent.package_accept_keywords)?;
         self.package_mask.inherit_from(&parent.package_mask)?;
@@ -287,9 +289,10 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::files::entry::{Entry, SysAtom};
+    use crate::files::entry::Entry;
     use crate::files::pkgfile::KeywordRule;
     use crate::repository::test_support::{RepoBuilder, repo_set};
+    use crate::test_support::assert_display_eq;
 
     fn profile_path(repository: &Path, profile: &str) -> PathBuf {
         repository.join("profiles").join(profile)
@@ -474,29 +477,28 @@ mod tests {
     }
 
     #[test]
-    fn test_packages_reset() -> anyhow::Result<()> {
+    fn test_system_set() -> anyhow::Result<()> {
         let reposet = repo_set(vec![
             RepoBuilder::new("repo")
-                .formats(["pms"])
+                .formats(["portage-2"])
                 .profile("base")
                 .profile("selected")
                 .parents("selected", ["../base"])
-                .profile_file("base/packages", "*sys-apps/coreutils\n*sys-apps/busybox\n")
-                .profile_file("selected/packages", "-*\n*sys-apps/busybox\n"),
+                .profile_file(
+                    "base/packages",
+                    "app-misc/base\n*sys-apps/coreutils\n*sys-apps/busybox\n",
+                )
+                .profile_file(
+                    "selected/packages",
+                    "-*\n*sys-apps/busybox\napp-misc/tool\n",
+                ),
         ])?;
 
         let repository = reposet.get("repo").unwrap();
         let selected = profile_path(repository.location(), "selected");
         let profile = Profile::resolve(&selected, &reposet)?;
 
-        assert_eq!(
-            profile
-                .packages
-                .into_entries()
-                .map(Entry::into_inner)
-                .collect::<Vec<SysAtom>>(),
-            vec!["*sys-apps/busybox".parse::<SysAtom>()?]
-        );
+        assert_display_eq(profile.system_set.finalize(), ["sys-apps/busybox"]);
         Ok(())
     }
 

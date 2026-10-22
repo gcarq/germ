@@ -414,7 +414,7 @@ impl fmt::Display for Repository {
 #[cfg(test)]
 impl Default for Repository {
     fn default() -> Self {
-        use crate::conf::test_support::build_sysconf;
+        use crate::test_support::build_sysconf;
 
         let temp_dir = tempfile::Builder::new()
             .tempdir()
@@ -449,7 +449,7 @@ mod tests {
 
     use super::super::test_support::RepoBuilder;
     use super::*;
-    use crate::conf::test_support::build_sysconf;
+    use crate::test_support::build_sysconf;
 
     #[tokio::test]
     async fn test_repository_resolves_cached_metadata() {

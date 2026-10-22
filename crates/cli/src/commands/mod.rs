@@ -8,6 +8,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use clap::Subcommand;
 use germ_core::SysConf;
+use germ_core::package_set::Target;
 use germ_core::repository::RepoSet;
 use germ_pms::Atom;
 
@@ -26,9 +27,9 @@ pub enum Command {
     },
     /// Install packages
     Install {
-        /// One or more package atoms to install, e.g. dev-lang/rust
-        #[arg(value_name = "atom", required = true)]
-        atoms: Vec<Atom>,
+        /// One or more package atoms or sets to install, e.g. dev-lang/rust or @world
+        #[arg(value_name = "target", required = true)]
+        targets: Vec<Target>,
     },
 
     /// Generate metadata cache for ebuild repositories
@@ -53,7 +54,7 @@ pub enum Command {
 pub async fn execute(args: &Args, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     match &args.command {
         Command::Info { atom } => info(atom.as_ref(), &sysconf)?,
-        Command::Install { atoms } => install(atoms, sysconf).await?,
+        Command::Install { targets } => install(targets, sysconf).await?,
         Command::Gencache { force, repo } => gencache(repo.as_deref(), *force, sysconf).await?,
         Command::Sync { repo } => sync(repo.as_deref(), sysconf)?,
     }
@@ -70,12 +71,25 @@ fn sync(repo: Option<&str>, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use clap::Parser;
+    use germ_core::package_set::Target;
 
+    use super::Command;
     use crate::Args;
 
     #[test]
-    fn test_install_requires_atom() {
+    fn test_install_requires_target() {
         let result = Args::try_parse_from(["germ", "install"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_install_parses_targets() {
+        let args = Args::try_parse_from(["germ", "install", "@world", "dev-lang/rust"]).unwrap();
+        let Command::Install { targets } = args.command else {
+            panic!("expected the install command");
+        };
+        assert_eq!(targets.len(), 2);
+        assert!(matches!(&targets[0], Target::Set(_)));
+        assert!(matches!(&targets[1], Target::Atom(_)));
     }
 }

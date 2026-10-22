@@ -53,6 +53,12 @@ impl<T: EntryValue> LineEntries<T> {
             .map(Entry::into_inner)
     }
 
+    /// Appends the parsed `line`, treating a bare `-*` as a reset.
+    pub fn push(&mut self, line: &str, order: Precedence) -> anyhow::Result<()> {
+        self.0.push(Self::parse_entry(line, order)?);
+        Ok(())
+    }
+
     /// Creates a new [`LineEntries`] from parsed `entries`.
     fn from_entries(entries: impl IntoIterator<Item = LineEntry<T>>) -> Self {
         Self(entries.into_iter().collect())

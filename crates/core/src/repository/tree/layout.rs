@@ -190,7 +190,9 @@ mod tests {
         let mixed = parse_layout(Some("future-format portage-1"));
         assert_eq!(mixed.profile_formats, vec![ProfileFormat::Portage1]);
 
-        let unknown = parse_layout(Some("future-format"));
-        assert_eq!(unknown.profile_formats, vec![ProfileFormat::Pms]);
+        for unknown in ["future-format", "profile-set"] {
+            let layout = parse_layout(Some(unknown));
+            assert_eq!(layout.profile_formats, vec![ProfileFormat::Pms]);
+        }
     }
 }

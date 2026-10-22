@@ -3,7 +3,6 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::str::FromStr;
 
-use anyhow::bail;
 use germ_pms::{Atom, UseFlag};
 
 /// This trait abstracts a single value in a line-based file, such as `use.mask`.
@@ -12,7 +11,6 @@ pub trait EntryValue:
 {
 }
 
-impl EntryValue for SysAtom {}
 impl EntryValue for Atom {}
 impl EntryValue for UseFlag {}
 
@@ -121,23 +119,6 @@ impl<T: EntryValue> Deref for Entry<T> {
     }
 }
 
-/// Holds a system package, which is expressed as [`Atom`] that makes up the base system profile.
-/// Only atoms prefixed with `*` are considered system packages.
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
-#[cfg_attr(test, derive(Debug))]
-pub struct SysAtom(Atom);
-
-impl FromStr for SysAtom {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> anyhow::Result<Self> {
-        match value.strip_prefix('*') {
-            Some(atom) => Ok(Self(atom.parse()?)),
-            None => bail!("invalid system package syntax: {value}"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,11 +142,5 @@ mod tests {
             }
         );
         Ok(())
-    }
-
-    #[test]
-    fn test_sysatom_from_str_ok() {
-        let atom = SysAtom::from_str("*sys-libs/glibc");
-        assert!(atom.is_ok());
     }
 }

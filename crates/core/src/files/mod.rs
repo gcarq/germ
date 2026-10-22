@@ -16,13 +16,10 @@ use anyhow::{Context, bail};
 use germ_pms::{Atom, UseFlag};
 use linefile::LineEntries;
 
-use self::entry::SysAtom;
 use crate::utils::{self, strip_line_comment};
 
 /// [`LineEntries`] holding package atoms.
 pub type AtomEntries = LineEntries<Atom>;
-/// [`LineEntries`] holding system package atoms.
-pub type SysAtomEntries = LineEntries<SysAtom>;
 /// [`LineEntries`] holding USE flags.
 pub type UseEntries = LineEntries<UseFlag>;
 
@@ -57,10 +54,9 @@ pub fn parse_from_path<T>(
     let mut values = Vec::new();
     for file in files_from_path(path, recursive, optional)? {
         let content = read_file(&file)?;
-        values.extend(
-            parse_lines(&content, &mut parse)
-                .with_context(|| format!("failed to parse {}", file.display()))?,
-        );
+        let parsed = parse_lines(&content, &mut parse)
+            .with_context(|| format!("failed to parse {}", file.display()))?;
+        values.extend(parsed);
     }
     Ok(values)
 }

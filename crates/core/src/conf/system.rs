@@ -5,6 +5,8 @@ use std::thread;
 const PORTAGE_CONF_PATH: &str = "etc/portage";
 const DEFAULT_PORTAGE_CONF_PATH: &str = "usr/share/portage/config";
 const VDB_PATH: &str = "var/db/pkg";
+const WORLD_PATH: &str = "var/lib/portage/world";
+const WORLD_SETS_PATH: &str = "var/lib/portage/world_sets";
 
 /// Runtime configuration shared by repository operations.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -49,6 +51,16 @@ impl SysConf {
         self.config_root.join(VDB_PATH)
     }
 
+    /// Returns the path to the `world` file.
+    pub fn world_path(&self) -> PathBuf {
+        self.config_root.join(WORLD_PATH)
+    }
+
+    /// Returns the path to the `world_sets` file.
+    pub fn world_sets_path(&self) -> PathBuf {
+        self.config_root.join(WORLD_SETS_PATH)
+    }
+
     /// Returns the application cache directory.
     pub fn cache_dir(&self) -> &Path {
         &self.cache_dir
@@ -77,5 +89,8 @@ mod tests {
             config.default_portage_conf(),
             config_root.join(DEFAULT_PORTAGE_CONF_PATH)
         );
+        assert_eq!(config.vdb_path(), config_root.join(VDB_PATH));
+        assert_eq!(config.world_path(), config_root.join(WORLD_PATH));
+        assert_eq!(config.world_sets_path(), config_root.join(WORLD_SETS_PATH));
     }
 }

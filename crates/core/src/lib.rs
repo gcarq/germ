@@ -7,6 +7,7 @@ mod ebuild;
 mod files;
 mod keyword;
 pub mod makenv;
+pub mod package_set;
 pub mod policy;
 mod profile;
 pub mod repository;

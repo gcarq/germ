@@ -7,8 +7,7 @@ use anyhow::{Context, bail};
 use germ_pms::RepoName;
 
 use super::{RepoSet, Repository};
-use crate::conf::test_support::build_sysconf;
-use crate::test_support::write_file;
+use crate::test_support::{build_sysconf, write_file};
 use crate::types::FxHashSet;
 
 /// Owns a temporary directory together with a value that depends on it.
@@ -272,7 +271,16 @@ impl RepoBuilder {
 /// The returned [`Temp`] keeps the repositories' temporary filesystem alive.
 pub fn repo_set(repos: impl IntoIterator<Item = RepoBuilder>) -> anyhow::Result<Temp<RepoSet>> {
     let temp = tempfile::tempdir().context("failed to create temp dir")?;
-    let sysconf = build_sysconf(&temp);
+    let reposet = repo_set_in(&temp, repos)?;
+    Ok(Temp::new(reposet, temp))
+}
+
+/// Creates a [`RepoSet`] from repository definitions rooted in `temp_dir`.
+pub fn repo_set_in(
+    temp_dir: &tempfile::TempDir,
+    repos: impl IntoIterator<Item = RepoBuilder>,
+) -> anyhow::Result<RepoSet> {
+    let sysconf = build_sysconf(temp_dir);
     let mut names = HashSet::new();
     let mut conf = String::new();
 
@@ -282,7 +290,7 @@ pub fn repo_set(repos: impl IntoIterator<Item = RepoBuilder>) -> anyhow::Result<
             bail!("tried to insert duplicate repository {name}");
         }
 
-        let location = temp.path().join("repositories").join(name.as_str());
+        let location = temp_dir.path().join("repositories").join(name.as_str());
         conf.push_str(&format!("[{name}]\nlocation = {}\n", location.display()));
         for (key, value) in &repo.repos_conf {
             conf.push_str(&format!("{key} = {value}\n"));
@@ -295,7 +303,5 @@ pub fn repo_set(repos: impl IntoIterator<Item = RepoBuilder>) -> anyhow::Result<
 
     let repos_conf = sysconf.portage_conf().join("repos.conf");
     write_file(repos_conf, conf).context("failed to write repos.conf")?;
-    let reposet = RepoSet::new(sysconf.into())?;
-
-    Ok(Temp::new(reposet, temp))
+    Ok(RepoSet::new(sysconf.into())?)
 }

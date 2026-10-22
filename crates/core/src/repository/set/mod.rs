@@ -383,8 +383,8 @@ impl RepoSet {
 mod tests {
     use super::super::test_support::{RepoBuilder, repo_set};
     use super::*;
-    use crate::conf::test_support::build_sysconf;
     use crate::files::entry::Precedence;
+    use crate::test_support::build_sysconf;
 
     #[test]
     fn test_validate_arch() -> anyhow::Result<()> {
