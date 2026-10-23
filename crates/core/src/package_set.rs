@@ -40,6 +40,15 @@ impl FromStr for Target {
     }
 }
 
+impl fmt::Display for Target {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Atom(atom) => write!(f, "{atom}"),
+            Self::Set(name) => write!(f, "{name}"),
+        }
+    }
+}
+
 /// Identifies a package set by its name without the leading `@`.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SetName(String);

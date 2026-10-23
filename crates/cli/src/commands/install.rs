@@ -8,10 +8,13 @@ use germ_core::package_set::{PackageSets, Target};
 use germ_core::policy::PackagePolicy;
 use germ_core::policy::pkgmask::PackageMasks;
 use germ_core::repository::RepoSet;
-use germ_core::resolver::{ExecutionPlan, PackageOperation, PackageProvider, Resolver};
+use germ_core::resolver::{
+    ExecutionPlan, PackageOperation, PackageProvider, ResolutionOutcome, Resolver,
+};
 use germ_core::useflag::{EffectiveUse, UseExpandConfig};
 use germ_core::vdb::Vdb;
 use germ_pms::{PackageView, UseFlag};
+use log::{info, warn};
 
 /// Installs the best matching package for each of the given `targets`.
 /// TODO: this is just a placeholder for now.
@@ -27,16 +30,44 @@ pub async fn install(targets: &[Target], sysconf: Arc<SysConf>) -> anyhow::Resul
     );
 
     let vdb = Vdb::from_path(sysconf.vdb_path()).context("unable to read VDB")?;
+
+    info!(
+        "Creating plan for {}...",
+        targets
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<String>>()
+            .join(" ")
+    );
     let outcome = Resolver::new(PackageProvider::new(&reposet, vdb), policy)
         .resolve(&atoms)
         .await?;
-    if let Some(failure) = outcome.failure() {
-        bail!("unable to produce an install plan: {failure}");
+    let expand = conf.use_expand_config();
+    match outcome {
+        ResolutionOutcome::Complete { plan, rejected } => {
+            print_plan(&plan, expand);
+            print_summary(&plan, rejected.len());
+        }
+        ResolutionOutcome::Partial {
+            plan,
+            failures,
+            rejected,
+        } => {
+            print_plan(&plan, expand);
+            for failure in failures {
+                warn!("skipped target: {failure}");
+            }
+            print_summary(&plan, rejected.len());
+        }
+        ResolutionOutcome::Failed { failures, .. } => {
+            let failures = failures
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            bail!("unable to produce an install plan:\n{failures}");
+        }
     }
-
-    print_plan(outcome.plan(), conf.use_expand_config());
-    println!("Total operations: {}", outcome.plan().operations().len());
-    println!("Rejected candidates: {}", outcome.rejected().len());
 
     Ok(())
 }
@@ -136,4 +167,10 @@ fn print_plan(plan: &ExecutionPlan, expand: &UseExpandConfig) {
             }
         }
     }
+}
+
+/// Prints the summary of the execution plan.
+fn print_summary(plan: &ExecutionPlan, rejected: usize) {
+    println!("Total operations: {}", plan.operations().len());
+    println!("Rejected candidates: {rejected}");
 }

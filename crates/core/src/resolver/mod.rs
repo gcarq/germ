@@ -12,10 +12,10 @@ pub(crate) mod test_support;
 mod tests;
 
 use germ_pms::{Atom, Package};
-use log::info;
 
 pub use self::outcome::{
-    CandidateRejectionReason, RejectedCandidate, RequirementFailure, ResolutionOutcome,
+    CandidateRejectionReason, RejectedCandidate, RejectedPackages, RequirementFailure,
+    ResolutionOutcome,
 };
 pub use self::plan::{ExecutionPlan, PackageOperation};
 pub use self::provider::{PackageLookup, PackageProvider};
@@ -46,22 +46,26 @@ impl<U: PackageLookup> Resolver<U> {
 
     /// Resolves the given root [`Atom`]s and returns a [`ResolutionOutcome`].
     ///
-    /// All roots share one [`ResolverState`] and are treated as a single transaction.
+    /// Roots share one [`ResolverState`], so packages selected for one root satisfy
+    /// the others. Each root is traversed speculatively: a root that cannot be
+    /// resolved is rolled back and recorded as a failure, leaving the other roots
+    /// unaffected.
     pub async fn resolve<'a>(
         mut self,
         atoms: impl IntoIterator<Item = &'a Atom>,
     ) -> anyhow::Result<ResolutionOutcome> {
-        let traversal = self.start_traversal();
+        let mut roots = 0;
+        let mut failures = Vec::new();
         for atom in atoms {
-            info!("Resolving candidates for {atom}...");
-
+            roots += 1;
+            let traversal = self.start_traversal();
             if let Some(failure) = self.resolve_candidates(AtomRequirement::root(atom)).await? {
                 traversal.rollback(&mut self);
-                return Ok(self.state.finalize(Some(failure)));
+                failures.push(failure);
             }
         }
 
-        Ok(self.state.finalize(None))
+        Ok(self.state.finalize(roots, failures))
     }
 }
 

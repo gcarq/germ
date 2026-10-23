@@ -170,8 +170,15 @@ impl ResolverState {
         self.replacements.insert(id, installed);
     }
 
-    /// Consumes the state and creates a [`ResolutionOutcome`].
-    pub fn finalize(mut self, failure: Option<RequirementFailure>) -> ResolutionOutcome {
+    /// Consumes the state and creates a [`ResolutionOutcome`] for `roots` root atoms.
+    ///
+    /// The resolution is failed when every root failed, partial when only some failed,
+    /// and complete when none failed.
+    pub fn finalize(
+        mut self,
+        roots: usize,
+        failures: Vec<RequirementFailure>,
+    ) -> ResolutionOutcome {
         let mut ops = Vec::with_capacity(self.selected.len() + self.removals.len());
         for (id, sel) in self.selected {
             let op = match self.replacements.shift_remove(&id) {
@@ -185,7 +192,19 @@ impl ResolverState {
             ops.push(op);
         }
         ops.extend(self.removals.into_iter().map(PackageOperation::Unmerge));
-        ResolutionOutcome::new(failure, ExecutionPlan::new(ops), self.rejected)
+        let plan = ExecutionPlan::new(ops);
+        let rejected = self.rejected;
+        if failures.is_empty() {
+            ResolutionOutcome::Complete { plan, rejected }
+        } else if failures.len() == roots {
+            ResolutionOutcome::Failed { failures, rejected }
+        } else {
+            ResolutionOutcome::Partial {
+                plan,
+                failures,
+                rejected,
+            }
+        }
     }
 }
 
@@ -255,10 +274,10 @@ mod tests {
     #[test]
     fn test_finalize_merge() {
         let pkg = pkg("app-misc", "foo", "1", &[]);
-        let outcome = selected_state(pkg.clone(), None).finalize(None);
+        let outcome = selected_state(pkg.clone(), None).finalize(1, Vec::new());
 
         assert_eq!(
-            outcome.plan().operations(),
+            outcome.plan().unwrap().operations(),
             &[PackageOperation::Merge(EffectivePackage::new(
                 pkg,
                 EffectiveUse::default(),
@@ -270,10 +289,10 @@ mod tests {
     fn test_finalize_replace() {
         let pkg = pkg("app-misc", "foo", "1", &[]);
         let installed = installed("foo", "1", "0", &[], &[]);
-        let outcome = selected_state(pkg.clone(), Some(installed.clone())).finalize(None);
+        let outcome = selected_state(pkg.clone(), Some(installed.clone())).finalize(1, Vec::new());
 
         assert_eq!(
-            outcome.plan().operations(),
+            outcome.plan().unwrap().operations(),
             &[PackageOperation::Replace(
                 EffectivePackage::new(pkg, EffectiveUse::default()),
                 installed,
@@ -285,10 +304,10 @@ mod tests {
     fn test_finalize_upgrade() {
         let pkg = pkg("app-misc", "foo", "2", &[]);
         let installed = installed("foo", "1", "0", &[], &[]);
-        let outcome = selected_state(pkg.clone(), Some(installed.clone())).finalize(None);
+        let outcome = selected_state(pkg.clone(), Some(installed.clone())).finalize(1, Vec::new());
 
         assert_eq!(
-            outcome.plan().operations(),
+            outcome.plan().unwrap().operations(),
             &[PackageOperation::Upgrade(
                 EffectivePackage::new(pkg, EffectiveUse::default()),
                 installed,
@@ -300,10 +319,10 @@ mod tests {
     fn test_finalize_downgrade() {
         let pkg = pkg("app-misc", "foo", "1", &[]);
         let installed = installed("foo", "2", "0", &[], &[]);
-        let outcome = selected_state(pkg.clone(), Some(installed.clone())).finalize(None);
+        let outcome = selected_state(pkg.clone(), Some(installed.clone())).finalize(1, Vec::new());
 
         assert_eq!(
-            outcome.plan().operations(),
+            outcome.plan().unwrap().operations(),
             &[PackageOperation::Downgrade(
                 EffectivePackage::new(pkg, EffectiveUse::default()),
                 installed,

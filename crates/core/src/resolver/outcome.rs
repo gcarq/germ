@@ -7,44 +7,58 @@ use super::state::PackageId;
 use crate::policy::PolicyRejection;
 use crate::types::FxIndexMap;
 
-/// The outcome of resolving an [`Atom`] with a resolver.
+/// The policy-rejected packages and their rejection reasons, keyed by package key.
+pub type RejectedPackages = FxIndexMap<PackageId, PolicyRejection>;
+
+/// The outcome of resolving the root [`Atom`]s.
+///
+/// A root that cannot be resolved is rolled back and recorded in a
+/// [`RequirementFailure`], while the plan keeps the operations of every root
+/// that did resolve.
 #[derive(Debug)]
-pub struct ResolutionOutcome {
-    failure: Option<RequirementFailure>,
-    plan: ExecutionPlan,
-    rejected: FxIndexMap<PackageId, PolicyRejection>,
+pub enum ResolutionOutcome {
+    /// Every root atom resolved.
+    Complete {
+        plan: ExecutionPlan,
+        rejected: RejectedPackages,
+    },
+    /// At least one root atom resolved and at least one failed.
+    Partial {
+        plan: ExecutionPlan,
+        failures: Vec<RequirementFailure>,
+        rejected: RejectedPackages,
+    },
+    /// No root atom resolved.
+    Failed {
+        failures: Vec<RequirementFailure>,
+        rejected: RejectedPackages,
+    },
 }
 
 impl ResolutionOutcome {
-    pub const fn new(
-        failure: Option<RequirementFailure>,
-        plan: ExecutionPlan,
-        rejected: FxIndexMap<PackageId, PolicyRejection>,
-    ) -> Self {
-        Self {
-            failure,
-            plan,
-            rejected,
+    /// Returns the plan for the roots that resolved.
+    pub const fn plan(&self) -> Option<&ExecutionPlan> {
+        match self {
+            Self::Complete { plan, .. } | Self::Partial { plan, .. } => Some(plan),
+            Self::Failed { .. } => None,
         }
     }
-    /// Returns whether the resolution was successful.
-    pub const fn is_resolved(&self) -> bool {
-        self.failure.is_none()
+
+    /// Returns every root failure.
+    pub fn failures(&self) -> &[RequirementFailure] {
+        match self {
+            Self::Complete { .. } => &[],
+            Self::Partial { failures, .. } | Self::Failed { failures, .. } => failures,
+        }
     }
 
-    /// Returns the root resolution failure, if resolution failed.
-    pub const fn failure(&self) -> Option<&RequirementFailure> {
-        self.failure.as_ref()
-    }
-
-    /// Returns the [`ExecutionPlan`].
-    pub const fn plan(&self) -> &ExecutionPlan {
-        &self.plan
-    }
-
-    /// Returns the map of rejected candidates with their reasons.
-    pub const fn rejected(&self) -> &FxIndexMap<PackageId, PolicyRejection> {
-        &self.rejected
+    /// Returns the rejected packages and their rejection reasons.
+    pub const fn rejected(&self) -> &RejectedPackages {
+        match self {
+            Self::Complete { rejected, .. }
+            | Self::Partial { rejected, .. }
+            | Self::Failed { rejected, .. } => rejected,
+        }
     }
 }
 
