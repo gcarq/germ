@@ -2,7 +2,7 @@ use germ_pms::BlockerStrength;
 use germ_pms::deps::{Depend, ExprKind};
 use germ_pms::test_support::{atom, pkg};
 
-use super::CandidateRejectionReason::{ActiveBlocker, Dependency, Policy};
+use super::CandidateRejectionReason::{ActiveBlocker, Dependency, Policy, SlotConflict};
 use super::RequirementFailure::{AnyOf, Blocker, Exhausted, NoCandidate};
 use super::test_support::{ResolverFixture, installed};
 use super::*;
@@ -89,20 +89,32 @@ async fn test_resolve_fallback_masked() {
 #[tokio::test]
 async fn test_resolve_selected() {
     let atom = atom("app-editors/nano");
-    let metadata = [("DEPEND", "sys-libs/zlib sys-libs/zlib")];
-    let root = pkg("app-editors/nano-2", &metadata);
-    let zlib = pkg("sys-libs/zlib-2", &[]);
+    let zlib_2 = pkg("sys-libs/zlib-2", &[]);
+    let zlib_1 = pkg("sys-libs/zlib-1", &[]);
+    let cases = [
+        ("sys-libs/zlib sys-libs/zlib", zlib_2.clone()),
+        ("=sys-libs/zlib-1 sys-libs/zlib", zlib_1.clone()),
+    ];
 
-    let outcome = ResolverFixture::new([root.clone(), zlib.clone()])
-        .resolve([&atom])
-        .await;
-    assert_eq!(
-        outcome.plan().unwrap().operations(),
-        &[
-            Merge(EffectivePackage::new(zlib, EffectiveUse::default())),
-            Merge(EffectivePackage::new(root, EffectiveUse::default())),
-        ]
-    );
+    for (depend, selected) in cases {
+        let root = pkg("app-editors/nano-2", &[("DEPEND", depend)]);
+        let outcome = ResolverFixture::new([root.clone(), zlib_2.clone(), zlib_1.clone()])
+            .resolve([&atom])
+            .await;
+
+        assert!(
+            matches!(outcome, ResolutionOutcome::Complete { .. }),
+            "{depend}"
+        );
+        assert_eq!(
+            outcome.plan().unwrap().operations(),
+            &[
+                Merge(EffectivePackage::new(selected, EffectiveUse::default())),
+                Merge(EffectivePackage::new(root, EffectiveUse::default())),
+            ],
+            "{depend}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -121,6 +133,41 @@ async fn test_resolve_dependency_cycle() {
             Merge(EffectivePackage::new(root, EffectiveUse::default()))
         ]
     );
+}
+
+#[tokio::test]
+async fn test_slot_conflict() {
+    let older_atom = atom("=app/lib-1");
+    let atom = atom("app-editors/nano");
+    for (newer_slot, older_slot) in [("0", "0"), ("0/2", "0/1")] {
+        let root = pkg("app-editors/nano-2", &[("DEPEND", "app/lib =app/lib-1")]);
+        let newer = pkg("app/lib-2", &[("SLOT", newer_slot)]);
+        let older = pkg("app/lib-1", &[("SLOT", older_slot)]);
+        let outcome = ResolverFixture::new([root.clone(), newer.clone(), older.clone()])
+            .resolve([&atom])
+            .await;
+        let expected = Exhausted(
+            atom.clone(),
+            vec![RejectedCandidate::new(
+                root,
+                Dependency(
+                    Depend::VAR,
+                    Exhausted(
+                        older_atom.clone(),
+                        vec![RejectedCandidate::new(
+                            older,
+                            SlotConflict {
+                                selected: newer.into(),
+                            },
+                        )],
+                    )
+                    .into(),
+                ),
+            )],
+        );
+
+        assert_eq!(outcome.failures(), &[expected], "{newer_slot}");
+    }
 }
 
 #[tokio::test]
@@ -540,18 +587,29 @@ async fn test_resolve_any_of_failures() {
 async fn test_resolve_multiple_roots() {
     let grep = atom("sys-apps/grep");
     let sed = atom("sys-apps/sed");
+    let py313 = atom("dev-lang/python:3.13");
+    let py314 = atom("dev-lang/python:3.14");
     let grep_pkg = pkg("sys-apps/grep-1", &[]);
     let sed_pkg = pkg("sys-apps/sed-1", &[]);
-    let outcome = ResolverFixture::new([grep_pkg.clone(), sed_pkg.clone()])
-        .resolve([&grep, &sed])
-        .await;
+    let py313_pkg = pkg("dev-lang/python-3.13.5", &[("SLOT", "3.13")]);
+    let py314_pkg = pkg("dev-lang/python-3.14.2", &[("SLOT", "3.14")]);
+    let outcome = ResolverFixture::new([
+        grep_pkg.clone(),
+        sed_pkg.clone(),
+        py313_pkg.clone(),
+        py314_pkg.clone(),
+    ])
+    .resolve([&grep, &sed, &py313, &py314])
+    .await;
 
     assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
     assert_eq!(
         outcome.plan().unwrap().operations(),
         &[
             Merge(EffectivePackage::new(grep_pkg, EffectiveUse::default())),
-            Merge(EffectivePackage::new(sed_pkg, EffectiveUse::default()))
+            Merge(EffectivePackage::new(sed_pkg, EffectiveUse::default())),
+            Merge(EffectivePackage::new(py313_pkg, EffectiveUse::default())),
+            Merge(EffectivePackage::new(py314_pkg, EffectiveUse::default())),
         ]
     );
 }

@@ -90,6 +90,15 @@ impl<U: PackageLookup> Resolver<U> {
                 requirement.atom().clone(),
             )));
         }
+        if let Some(conflict) = self.state.slot_conflict(&candidate.pkg) {
+            debug!(
+                "skipping {}: slot conflict with {}",
+                candidate.pkg, conflict.pkg
+            );
+            return Ok(Some(CandidateRejectionReason::SlotConflict {
+                selected: conflict.pkg.clone().into(),
+            }));
+        }
         if let Some((atom, owner)) = self.state.matching_active_blocker(candidate)? {
             info!("skipping {} due to active blocker", candidate.pkg);
             return Ok(Some(CandidateRejectionReason::ActiveBlocker {

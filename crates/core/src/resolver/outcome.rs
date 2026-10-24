@@ -93,6 +93,7 @@ impl RejectedCandidate {
 pub enum CandidateRejectionReason {
     Policy(PolicyRejection),
     Requirement(Atom),
+    SlotConflict { selected: Box<Package> },
     ActiveBlocker { atom: Atom, owner: Box<Package> },
     Dependency(MetaVar, Box<RequirementFailure>),
 }
@@ -102,6 +103,7 @@ impl fmt::Display for CandidateRejectionReason {
         match self {
             Self::Policy(rejection) => write!(f, "{rejection}"),
             Self::Requirement(atom) => write!(f, "does not satisfy requirement {atom}"),
+            Self::SlotConflict { selected } => write!(f, "slot conflict with {selected}"),
             Self::ActiveBlocker { atom, owner } => write!(f, "blocked by {atom} from {owner}"),
             Self::Dependency(field, failure) => write!(f, "unsatisfied {field}: {failure}"),
         }

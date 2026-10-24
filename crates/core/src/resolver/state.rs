@@ -52,6 +52,14 @@ impl ResolverState {
         Ok(false)
     }
 
+    /// Returns a selected candidate that has the same primary slot as `pkg`.
+    ///
+    /// A same slot conflict only happens if the package version differs.
+    pub fn slot_conflict(&self, pkg: &Package) -> Option<&EffectivePackage> {
+        self.candidates()
+            .find(|selected| selected.pkg.matches_package_slot(pkg) && selected.pkg != *pkg)
+    }
+
     /// Marks the package for the given `id` as selected.
     pub fn select(&mut self, id: PackageId) {
         let pkg = self
