@@ -68,7 +68,7 @@ impl MakeEnvStack {
             .parse()
     }
 
-    /// Returns the calculated `IUSE_EFFECTIVE` from profile defaults.
+    /// Returns the flags injected into `IUSE_EFFECTIVE` by the profile.
     ///
     /// This is constructed by `IUSE_IMPLICIT` and `USE_EXPAND_IMPLICIT`.
     pub fn iuse_implicit(&self) -> anyhow::Result<FxHashSet<UseFlag>> {

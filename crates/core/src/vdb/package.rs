@@ -33,7 +33,7 @@ impl InstalledPackage {
                 .split_whitespace()
                 .map(UseFlag::from_str)
                 .collect::<anyhow::Result<_>>()?,
-        );
+        )?;
         Ok(Self {
             cpv,
             repo: fs::read_to_string(path.join("repository"))

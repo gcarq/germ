@@ -4,5 +4,5 @@ use super::EffectiveUse;
 pub fn effective(available: &[&str], enabled: &[&str]) -> EffectiveUse {
     let available = available.iter().map(|flag| flag.parse().unwrap()).collect();
     let enabled = enabled.iter().map(|flag| flag.parse().unwrap()).collect();
-    EffectiveUse::from_parts(available, enabled)
+    EffectiveUse::from_parts(available, enabled).unwrap()
 }

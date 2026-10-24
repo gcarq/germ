@@ -130,37 +130,32 @@ impl UsePolicy {
     where
         P: PackageView,
     {
-        let mut available = FxHashSet::default();
-        let mut enabled = FxHashSet::default();
-
         let pkg_use = self.package_use.matched_for(pkg);
         let masked = self.masked_for_pkg(pkg, stable_in_use);
         let forced = self.forced_for_pkg(pkg, stable_in_use);
 
-        let iuse = pkg
-            .metadata()
-            .iuse()
-            .iter()
-            .map(|e| (e.flag(), e.state()))
-            .chain(self.iuse_implicit.iter().map(|f| (f, None)));
+        // Explicit IUSE entries overwrite implicit ones.
+        let iuse = self.iuse_implicit.iter().map(|flag| (flag, None)).chain(
+            pkg.metadata()
+                .iuse()
+                .iter()
+                .map(|entry| (entry.flag(), entry.state())),
+        );
 
-        for (flag, default_state) in iuse {
-            if !available.insert(flag.clone()) || masked.contains(flag) {
-                continue;
-            }
+        let flags = iuse
+            .map(|(flag, default)| {
+                let enabled = !masked.contains(flag)
+                    && (forced.contains(flag)
+                        || pkg_use
+                            .state(flag, &self.expand_config)
+                            .or_else(|| self.global_use.state(flag))
+                            .or_else(|| default.map(IUseState::as_bool))
+                            .unwrap_or(false));
+                (flag.clone(), enabled)
+            })
+            .collect();
 
-            if forced.contains(flag)
-                || pkg_use
-                    .state(flag, &self.expand_config)
-                    .or_else(|| self.global_use.state(flag))
-                    .or_else(|| default_state.map(IUseState::as_bool))
-                    .unwrap_or(false)
-            {
-                enabled.insert(flag.clone());
-            }
-        }
-
-        EffectiveUse::from_parts(available, enabled)
+        EffectiveUse::new(flags)
     }
 
     /// Returns all USE flags that are masked for the given [`PackageView`].
@@ -304,16 +299,12 @@ mod tests {
 
         let foo = UseFlag::new("foo")?;
         let bar = UseFlag::new("bar")?;
-        let available = FxHashSet::from_iter([foo.clone(), bar.clone()]);
         for (input, foo_state, bar_state, expected) in cases {
             let expr = ParsedExpr::<RequiredUse>::parse(input)?;
-            let state = EffectiveUse::from_parts(
-                available.clone(),
-                [(&foo, foo_state), (&bar, bar_state)]
-                    .into_iter()
-                    .filter_map(|(flag, enabled)| enabled.then_some(flag.clone()))
-                    .collect(),
-            );
+            let state = EffectiveUse::new(FxHashMap::from_iter([
+                (foo.clone(), foo_state),
+                (bar.clone(), bar_state),
+            ]));
             let mut evaluator = ReqUseEval::new(&state);
             let actual = expr.view().eval(&mut evaluator)?;
 
@@ -500,6 +491,8 @@ mod tests {
             ("foo", "USE=foo", "", "", "", "", "", None),
             ("foo", "", "", "", "", "+foo", "", Some(true)),
             ("foo", "", "USE=-foo", "", "", "+foo", "", Some(false)),
+            // Explicit overrides implicit IUSE.
+            ("foo", "", "", "", "", "+foo", "foo", Some(true)),
             // An implicit flag is available without appearing in IUSE; package.use
             // overrides the global state, otherwise it defaults to disabled.
             ("implicit", "", "USE=-implicit", "", "dev-lang/rust implicit", "", "implicit", Some(true)),

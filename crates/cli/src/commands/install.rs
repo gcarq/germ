@@ -73,15 +73,7 @@ pub async fn install(targets: &[Target], sysconf: Arc<SysConf>) -> anyhow::Resul
 }
 
 fn changed_use<'a>(old: &'a EffectiveUse, new: &'a EffectiveUse) -> Vec<(&'a UseFlag, bool)> {
-    let enabled = new
-        .enabled()
-        .difference(old.enabled())
-        .map(|flag| (flag, true));
-    let disabled = old
-        .enabled()
-        .difference(new.enabled())
-        .map(|flag| (flag, false));
-    let mut changes = enabled.chain(disabled).collect::<Vec<_>>();
+    let mut changes = new.changes(old).collect::<Vec<_>>();
     changes.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(b.0)));
     changes
 }
@@ -119,7 +111,6 @@ fn print_plan(plan: &ExecutionPlan, expand: &UseExpandConfig) {
                 let flags = selected
                     .effective_use
                     .enabled()
-                    .iter()
                     .map(|flag| (flag, true))
                     .collect::<Vec<_>>();
                 println!(
