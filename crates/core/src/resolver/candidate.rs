@@ -21,6 +21,11 @@ impl<U: PackageLookup> Resolver<U> {
         requirement: AtomRequirement<'_>,
     ) -> anyhow::Result<Option<RequirementFailure>> {
         let atom = requirement.atom();
+        if self.state.already_satisfied(&requirement)? {
+            trace!("already satisfied: {atom}");
+            return Ok(None);
+        }
+
         let pkgs = self.provider.repo_match_by_atom(atom).await?;
         if pkgs.is_empty() {
             return Ok(Some(RequirementFailure::NoCandidate(atom.clone())));

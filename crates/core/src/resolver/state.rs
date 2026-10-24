@@ -44,7 +44,7 @@ impl ResolverState {
 
     /// Returns whether a selected or visiting package satisfies `requirement`.
     pub fn already_satisfied(&self, requirement: &AtomRequirement<'_>) -> anyhow::Result<bool> {
-        for candidate in self.selected.values().chain(self.visiting.values()) {
+        for candidate in self.candidates() {
             if candidate.matches(requirement)? {
                 return Ok(true);
             }
@@ -102,7 +102,7 @@ impl ResolverState {
         installed: impl IntoIterator<Item = InstalledPackage>,
     ) -> anyhow::Result<Option<Package>> {
         let requirement = AtomRequirement::dependency(atom, &owner.effective_use);
-        for candidate in self.selected.values().chain(self.visiting.values()) {
+        for candidate in self.candidates() {
             if strength == BlockerStrength::Weak && candidate.pkg == owner.pkg {
                 continue;
             }
@@ -205,6 +205,11 @@ impl ResolverState {
                 rejected,
             }
         }
+    }
+
+    /// Returns an iterator over all selected and "visiting" candidates.
+    fn candidates(&self) -> impl Iterator<Item = &EffectivePackage> {
+        self.selected.values().chain(self.visiting.values())
     }
 }
 
@@ -340,5 +345,19 @@ mod tests {
         assert!(state.removals.is_empty());
         assert!(state.replacements.is_empty());
         assert_eq!(state.rejection(&glibc_id), Some(&PolicyRejection::Masked));
+    }
+
+    #[test]
+    fn test_candidates() {
+        let pam = pkg("sys-libs/pam-1", &[]);
+        let zlib = pkg("sys-libs/zlib-1", &[]);
+        let mut state = selected_state(pam.clone(), None);
+        state.visit(
+            PackageId::new(&zlib),
+            &EffectivePackage::new(zlib.clone(), EffectiveUse::default()),
+        );
+
+        let candidates: Vec<_> = state.candidates().map(|candidate| &candidate.pkg).collect();
+        assert_eq!(candidates, vec![&pam, &zlib]);
     }
 }
