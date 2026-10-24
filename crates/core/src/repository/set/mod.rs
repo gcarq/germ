@@ -474,8 +474,8 @@ mod tests {
         set.reload_from_disk().unwrap();
 
         RepoBuilder::new("repo")
-            .categories(["app-misc"])
-            .ebuild("app-misc", "foo", "1", "")
+            .categories(["sys-apps"])
+            .ebuild("sys-apps/grep-1", "")
             .write_to(&location)
             .unwrap();
         set.maybe_sync(None).unwrap();
@@ -483,7 +483,7 @@ mod tests {
         assert!(set.get("repo").is_some_and(|repo| {
             repo.cpvs()
                 .into_iter()
-                .any(|cpv| cpv.fqn() == "app-misc/foo-1")
+                .any(|cpv| cpv.fqn() == "sys-apps/grep-1")
         }));
     }
 
@@ -518,24 +518,21 @@ mod tests {
         fs::remove_dir_all(reposet.get("repo").unwrap().location()).unwrap();
         reposet.reload_from_disk().unwrap();
 
-        assert!(
-            reposet
-                .find_packages(&Atom::new("app-misc/foo::repo").unwrap())
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        let result = reposet
+            .find_packages(&Atom::new("sys-apps/grep::repo").unwrap())
+            .await;
+        assert!(result.unwrap().is_empty());
     }
 
     #[test]
     fn test_layout_masters_are_used() {
         let reposet = repo_set(vec![
             RepoBuilder::new("master")
-                .categories(["app-misc"])
+                .categories(["sys-apps"])
                 .eclass("master"),
             RepoBuilder::new("overlay")
                 .masters(["master"])
-                .ebuild("app-misc", "foo", "1", ""),
+                .ebuild("sys-apps/grep-1", ""),
         ])
         .unwrap();
 
@@ -543,7 +540,7 @@ mod tests {
         let has_package = overlay
             .cpvs()
             .into_iter()
-            .any(|cpv| cpv.fqn() == "app-misc/foo-1");
+            .any(|cpv| cpv.fqn() == "sys-apps/grep-1");
 
         assert!(has_package);
         assert!(
@@ -559,12 +556,12 @@ mod tests {
     fn test_empty_masters_override() {
         let reposet = repo_set(vec![
             RepoBuilder::new("master")
-                .categories(["app-misc"])
+                .categories(["sys-apps"])
                 .eclass("master"),
             RepoBuilder::new("overlay")
                 .masters(["master"])
                 .masters_override()
-                .ebuild("app-misc", "foo", "1", ""),
+                .ebuild("sys-apps/grep-1", ""),
         ])
         .unwrap();
 
@@ -573,7 +570,7 @@ mod tests {
             .unwrap()
             .cpvs()
             .into_iter()
-            .any(|cpv| cpv.fqn() == "app-misc/foo-1");
+            .any(|cpv| cpv.fqn() == "sys-apps/grep-1");
 
         assert!(!has_package);
         assert!(
@@ -588,11 +585,11 @@ mod tests {
     #[test]
     fn test_reload_refreshes_dependent_overlays() {
         let mut reposet = repo_set(vec![
-            RepoBuilder::new("master").categories(["app-misc"]),
+            RepoBuilder::new("master").categories(["sys-apps"]),
             RepoBuilder::new("overlay")
                 .masters(["master"])
-                .ebuild("app-misc", "foo", "1", "")
-                .ebuild("dev-libs", "bar", "1", ""),
+                .ebuild("sys-apps/grep-1", "")
+                .ebuild("dev-libs/libffi-1", ""),
         ])
         .unwrap();
 
@@ -601,14 +598,14 @@ mod tests {
             !overlay_before
                 .cpvs()
                 .into_iter()
-                .any(|cpv| cpv.fqn() == "dev-libs/bar-1")
+                .any(|cpv| cpv.fqn() == "dev-libs/libffi-1")
         );
         assert!(!overlay_before.eclasses().contains_key("refreshed"));
 
         let master_path = reposet.get("master").unwrap().location();
         fs::write(
             master_path.join("profiles").join("categories"),
-            "app-misc\ndev-libs\n",
+            "sys-apps\ndev-libs\n",
         )
         .unwrap();
         fs::write(master_path.join("eclass").join("refreshed.eclass"), "").unwrap();
@@ -619,7 +616,7 @@ mod tests {
             overlay_after
                 .cpvs()
                 .into_iter()
-                .any(|cpv| cpv.fqn() == "dev-libs/bar-1")
+                .any(|cpv| cpv.fqn() == "dev-libs/libffi-1")
         );
         assert!(overlay_after.eclasses().contains_key("refreshed"));
     }
@@ -648,7 +645,7 @@ mod tests {
             RepoBuilder::new("second")
                 .formats(["pms"])
                 .eapi("0")
-                .profile_entries_dir("package.mask", "app-misc/foo\n")
+                .profile_entries_dir("package.mask", "sys-apps/grep\n")
                 .repos_conf_property("masters", "first"),
         ]);
 
@@ -666,14 +663,14 @@ mod tests {
     fn test_unavailable_masters() {
         let mut reposet = repo_set(vec![
             RepoBuilder::new("available")
-                .categories(["app-misc"])
+                .categories(["sys-apps"])
                 .eclass("available"),
             RepoBuilder::new("unavailable")
                 .repos_conf_property("sync-type", "git")
                 .repos_conf_property("sync-uri", "https://example.invalid/unavailable.git"),
             RepoBuilder::new("child")
                 .masters(["missing", "available", "unavailable"])
-                .ebuild("app-misc", "foo", "1", ""),
+                .ebuild("sys-apps/grep-1", ""),
         ])
         .unwrap();
 
@@ -689,7 +686,7 @@ mod tests {
             child
                 .cpvs()
                 .into_iter()
-                .any(|cpv| cpv.fqn() == "app-misc/foo-1")
+                .any(|cpv| cpv.fqn() == "sys-apps/grep-1")
         );
     }
 

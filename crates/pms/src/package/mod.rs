@@ -18,6 +18,15 @@ pub use version::{
 use crate::atom::Atom;
 use crate::repository::RepoName;
 
+/// Parses a PF (package full name), e.g. `python-3.14.3-r1`.
+pub fn parse_pf(pf: &str) -> Option<(PkgName, PackageVersion)> {
+    pf.match_indices('-').rev().find_map(|(at, _)| {
+        let package = pf[..at].parse().ok()?;
+        let version = PackageVersion::try_from(&pf[at + 1..]).ok()?;
+        Some((package, version))
+    })
+}
+
 /// Provides a trait for package types used for common operations like comparison and atom
 /// matching.
 pub trait PackageView {
@@ -137,14 +146,36 @@ mod tests {
 
     #[test]
     fn test_package_display() {
-        let pkg = pkg("dev-lang", "rust", "1.98.1", &[]);
+        let pkg = pkg("dev-lang/rust-1.98.1", &[]);
         assert_eq!(pkg.to_string(), "dev-lang/rust-1.98.1::gentoo");
     }
 
     #[test]
     fn test_package_matches_atoms() {
-        let pkg = pkg("sys-devel", "gcc", "15.2.1_p20251122-r1", &[("SLOT", "15")]);
+        let pkg = pkg("sys-devel/gcc-15.2.1_p20251122-r1", &[("SLOT", "15")]);
         assert_package_view_matches_atoms(&pkg);
         assert_eq!(pkg.qualified_name(), "sys-devel/gcc");
+    }
+
+    #[test]
+    fn test_parse_pf() {
+        for (pf, package, version) in [
+            ("vim-7.0.174-r1", "vim", "7.0.174-r1"),
+            ("foo-bar-1.2", "foo-bar", "1.2"),
+            ("foo-r2-2", "foo-r2", "2"),
+            ("foo--1", "foo-", "1"),
+            ("foobar-1-r2", "foobar", "1-r2"),
+        ] {
+            let (actual_package, actual_version) = parse_pf(pf).unwrap();
+            assert_eq!(actual_package.as_str(), package);
+            assert_eq!(actual_version.to_string(), version);
+        }
+    }
+
+    #[test]
+    fn test_parse_pf_err() {
+        for pf in ["foo", "foo-1-2", "-1", "foo-"] {
+            assert!(parse_pf(pf).is_none(), "{pf} should be invalid");
+        }
     }
 }

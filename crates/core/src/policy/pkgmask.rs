@@ -116,10 +116,10 @@ mod tests {
             },
         )?;
 
-        let rust_unmasked = pkg("dev-lang", "rust", "1.50-r2", &[]);
-        let rust_masked = pkg("dev-lang", "rust", "1.60-r1", &[]);
-        let vim = pkg("app-editors", "vim", "8.2", &[]);
-        let nano = pkg("app-editors", "nano", "5.0", &[]);
+        let rust_unmasked = pkg("dev-lang/rust-1.50-r2", &[]);
+        let rust_masked = pkg("dev-lang/rust-1.60-r1", &[]);
+        let vim = pkg("app-editors/vim-8.2", &[]);
+        let nano = pkg("app-editors/nano-5.0", &[]);
 
         assert!(!masks.is_masked(&rust_unmasked));
         assert!(masks.is_masked(&rust_masked));

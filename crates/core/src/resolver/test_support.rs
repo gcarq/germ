@@ -7,16 +7,15 @@ use crate::policy::test_support::PolicyFixture;
 use crate::useflag::test_support::effective;
 use crate::vdb::package::InstalledPackage;
 
-/// Returns an installed `app-misc/<name>-<version>` package in `slot` with the given USE state.
+/// Returns an installed package for `fqn` in `slot` with the given USE state.
 pub fn installed(
-    name: &str,
-    version: &str,
+    fqn: &str,
     slot: &str,
     iuse_effective: &[&str],
     enabled: &[&str],
 ) -> InstalledPackage {
     InstalledPackage::from_parts(
-        cpv("app-misc", name, version),
+        cpv(fqn),
         "gentoo".parse().unwrap(),
         pkg_metadata(&[("SLOT", slot)]),
         effective(iuse_effective, enabled),

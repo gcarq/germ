@@ -1,8 +1,12 @@
 use core::hash;
 use std::cmp::Ordering;
 use std::fmt;
+use std::str::FromStr;
+
+use anyhow::anyhow;
 
 use crate::package::names::{CatName, PkgName};
+use crate::package::parse_pf;
 use crate::package::version::PackageVersion;
 
 /// Represents a simplified form of a package only with its category, name and version.
@@ -87,6 +91,19 @@ impl Cpv {
     }
 }
 
+impl FromStr for Cpv {
+    type Err = anyhow::Error;
+
+    /// Parses a [`Cpv`] from its fully qualified name, e.g. `app-editors/vim-9.1.1652-r2`.
+    fn from_str(fqn: &str) -> anyhow::Result<Self> {
+        let (category, pf) = fqn
+            .split_once('/')
+            .ok_or_else(|| anyhow!("invalid CPV: '{fqn}'"))?;
+        let (package, version) = parse_pf(pf).ok_or_else(|| anyhow!("invalid CPV: '{fqn}'"))?;
+        Ok(Self::new(category.parse()?, package, version))
+    }
+}
+
 impl Eq for Cpv {}
 
 impl PartialEq for Cpv {
@@ -127,11 +144,12 @@ impl fmt::Display for Cpv {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::test_support::cpv;
 
     #[test]
     fn test_cpv_format() {
-        let vim = cpv("app-editors", "vim", "7.0.174-r1");
+        let vim = cpv("app-editors/vim-7.0.174-r1");
         assert_eq!(vim.to_string(), "app-editors/vim-7.0.174-r1");
         assert_eq!(vim.fqn(), "app-editors/vim-7.0.174-r1");
         assert_eq!(vim.qualified_name(), "app-editors/vim");
@@ -143,9 +161,32 @@ mod tests {
         assert_eq!(vim.pvr(), "7.0.174-r1");
 
         // Should contain explicit r0
-        let explicit_r0 = cpv("dev-libs", "pkg", "1.0-r0");
-        assert_eq!(explicit_r0.fqn(), "dev-libs/pkg-1.0-r0");
-        assert_eq!(explicit_r0.pf(), "pkg-1.0-r0");
+        let explicit_r0 = cpv("app-arch/gzip-1-r0");
+        assert_eq!(explicit_r0.fqn(), "app-arch/gzip-1-r0");
+        assert_eq!(explicit_r0.pf(), "gzip-1-r0");
         assert_eq!(explicit_r0.pr(), "r0");
+    }
+
+    #[test]
+    fn test_cpv_from_str() {
+        let cpv = "app-editors/vim-1-r1".parse::<Cpv>().unwrap();
+        assert_eq!(cpv.category().as_str(), "app-editors");
+        assert_eq!(cpv.package().as_str(), "vim");
+        assert_eq!(cpv.version().to_string(), "1-r1");
+        assert_eq!(cpv.to_string(), "app-editors/vim-1-r1");
+    }
+
+    #[test]
+    fn test_cpv_from_str_err() {
+        for fqn in [
+            "app-editors",
+            "/nano-1",
+            "app-editors/nano",
+            "app-editors/nano-1-2",
+            "=app-editors/nano-1",
+            "app-editors/nano-1::repo",
+        ] {
+            assert!(fqn.parse::<Cpv>().is_err(), "{fqn} should be invalid");
+        }
     }
 }

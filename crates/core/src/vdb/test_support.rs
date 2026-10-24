@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::{fs, io};
 
+use germ_pms::Cpv;
+use germ_pms::test_support::cpv;
 use tempfile::{TempDir, tempdir};
 
 use super::Vdb;
@@ -18,18 +20,11 @@ impl VdbFixture {
         })
     }
 
-    /// Defines an installed package in the fixture.
-    pub fn package<'a>(
-        &'a self,
-        category: &'a str,
-        package: &'a str,
-        version: &'a str,
-    ) -> VdbPackageBuilder<'a> {
+    /// Defines an installed package by its fully qualified name, e.g. `sys-libs/pam-1`.
+    pub fn package<'a>(&'a self, fqn: &str) -> VdbPackageBuilder<'a> {
         VdbPackageBuilder {
             fixture: self,
-            category,
-            package,
-            version,
+            cpv: cpv(fqn),
             repo: "gentoo",
             slot: "0",
         }
@@ -44,9 +39,7 @@ impl VdbFixture {
 /// Defines an installed package in a [`VdbFixture`].
 pub struct VdbPackageBuilder<'a> {
     fixture: &'a VdbFixture,
-    category: &'a str,
-    package: &'a str,
-    version: &'a str,
+    cpv: Cpv,
     repo: &'a str,
     slot: &'a str,
 }
@@ -80,7 +73,7 @@ impl<'a> VdbPackageBuilder<'a> {
         self.fixture
             .temp_dir
             .path()
-            .join(self.category)
-            .join(format!("{}-{}", self.package, self.version))
+            .join(self.cpv.category().as_str())
+            .join(self.cpv.pf())
     }
 }

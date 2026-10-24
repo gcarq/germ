@@ -281,7 +281,7 @@ mod tests {
             .collect::<anyhow::Result<_>>()?;
         let policy = UsePolicy::new(makenv_stack.global_use()?, implicit, profile, local)?;
         let package = Package::new(
-            cpv("dev-lang", "rust", "1.0"),
+            cpv("dev-lang/rust-1.0"),
             "gentoo".parse()?,
             pkg_metadata(&[("IUSE", iuse)]),
         );
@@ -339,7 +339,7 @@ mod tests {
             LocalUseRecords::default(),
         )?;
         let package = Package::new(
-            cpv("sys-libs", "pam", "1.0"),
+            cpv("sys-libs/pam-1.0"),
             "gentoo".parse()?,
             pkg_metadata(&[("IUSE", "elogind systemd forced")]),
         );
@@ -366,7 +366,7 @@ mod tests {
             ..Default::default()
         };
         let package = Package::new(
-            cpv("llvm-core", "clang", "23.1.2"),
+            cpv("llvm-core/clang-23.1.2"),
             "gentoo".parse()?,
             pkg_metadata(&[("IUSE", "llvm_targets_AArch64")]),
         );
@@ -412,7 +412,7 @@ mod tests {
             LocalUseRecords::default(),
         )?;
         let package = Package::new(
-            cpv("sys-libs", "pam", "1.0"),
+            cpv("sys-libs/pam-1.0"),
             "gentoo".parse()?,
             pkg_metadata(&[("IUSE", "elogind")]),
         );

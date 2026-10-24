@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use anyhow::{Context, bail};
-use germ_pms::RepoName;
+use germ_pms::test_support::cpv;
+use germ_pms::{Cpv, RepoName};
 
 use super::{RepoSet, Repository};
 use crate::test_support::{build_sysconf, write_file};
@@ -55,7 +56,7 @@ pub struct RepoBuilder {
     categories: FxHashSet<String>,
     eclasses: Vec<String>,
     licenses: Vec<String>,
-    ebuilds: Vec<(String, String, String, String)>,
+    ebuilds: Vec<(Cpv, String)>,
 }
 
 impl RepoBuilder {
@@ -162,19 +163,12 @@ impl RepoBuilder {
     }
 
     /// Adds an ebuild file to the fixture.
-    pub fn ebuild(
-        mut self,
-        category: impl Into<String>,
-        package: impl Into<String>,
-        version: impl Into<String>,
-        content: impl Into<String>,
-    ) -> Self {
-        self.ebuilds.push((
-            category.into(),
-            package.into(),
-            version.into(),
-            content.into(),
-        ));
+    ///
+    /// # Panics
+    ///
+    /// Panics if `fqn` is not a valid fully qualified package name.
+    pub fn ebuild(mut self, fqn: impl AsRef<str>, content: impl Into<String>) -> Self {
+        self.ebuilds.push((cpv(fqn.as_ref()), content.into()));
         self
     }
 
@@ -241,12 +235,11 @@ impl RepoBuilder {
             write_file(location.join("licenses").join(license), "")?;
         }
 
-        for (category, package, version, content) in self.ebuilds {
-            let package_dir = location.join(&category).join(&package);
-            write_file(
-                package_dir.join(format!("{package}-{version}.ebuild")),
-                content,
-            )?;
+        for (cpv, content) in self.ebuilds {
+            let package_dir = location
+                .join(cpv.category().as_str())
+                .join(cpv.package().as_str());
+            write_file(package_dir.join(format!("{}.ebuild", cpv.pf())), content)?;
         }
 
         Ok(())

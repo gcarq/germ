@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn test_installed_package_matches_atoms() {
         let pkg = InstalledPackage::from_parts(
-            cpv("sys-devel", "gcc", "15.2.1_p20251122-r1"),
+            cpv("sys-devel/gcc-15.2.1_p20251122-r1"),
             "gentoo".parse().unwrap(),
             pkg_metadata(&[("SLOT", "15")]),
             EffectiveUse::default(),
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn test_installed_package_fmt() {
         let pkg = InstalledPackage::from_parts(
-            cpv("app-editors", "vim", "7.0.174-r1"),
+            cpv("app-editors/vim-7.0.174-r1"),
             "gentoo".parse().unwrap(),
             pkg_metadata(&[]),
             EffectiveUse::default(),
@@ -189,7 +189,7 @@ mod tests {
     fn test_effective_use() {
         let flag: UseFlag = "flag".parse().unwrap();
         let pkg = InstalledPackage::from_parts(
-            cpv("app-misc", "foo", "1"),
+            cpv("sys-libs/pam-1"),
             "gentoo".parse().unwrap(),
             pkg_metadata(&[]),
             effective(&["flag"], &[]),

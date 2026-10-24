@@ -5,24 +5,14 @@ pub(crate) mod test_support;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
 
 use anyhow::{Context, anyhow};
 use either::Either;
-use fancy_regex::Regex;
-use germ_pms::grammar::{PACKAGE, REVISION, VERSION, VERSION_SUFFIXES};
-use germ_pms::{Atom, CatName, Cpv, PackageVersion, PackageView};
+use germ_pms::package::parse_pf;
+use germ_pms::{Atom, CatName, Cpv, PackageView};
 
 use crate::types::FxHashMap;
 use crate::vdb::package::InstalledPackage;
-
-/// Regex to validate and parse `package`, `version`, `suffixes` and the `revision` from VDB.
-static VDB_PKG_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!(
-        r"\A(?<package>{PACKAGE})-(?<version>{VERSION})(?<suffixes>{VERSION_SUFFIXES})(?:-r(?<revision>{REVISION}))?\z"
-    ))
-    .unwrap()
-});
 
 /// Takes care of handling the portage virtual database (VDB)
 /// which contains [`InstalledPackage`].
@@ -153,20 +143,13 @@ impl Vdb {
         category: &CatName,
         path: &Path,
     ) -> anyhow::Result<Option<InstalledPackage>> {
-        let pvr = path
+        let pf = path
             .file_name()
             .and_then(|f| f.to_str())
             .with_context(|| format!("path contains invalid unicode: {}", path.display()))?;
-        let Some(caps) = VDB_PKG_RE.captures(pvr)? else {
+        let Some((package, version)) = parse_pf(pf) else {
             return Ok(None);
         };
-
-        let package = caps["package"].parse()?;
-        let version = PackageVersion::new(
-            &caps["version"],
-            Some(&caps["suffixes"]),
-            caps.name("revision").map(|m| m.as_str()),
-        )?;
         let cpv = Cpv::new(category.clone(), package, version);
         let pkg = InstalledPackage::from_path(cpv, path)
             .with_context(|| format!("failed to collect package from {}", path.display()))?;
@@ -191,15 +174,13 @@ mod tests {
     #[test]
     fn test_load_package() -> anyhow::Result<()> {
         let fixture = VdbFixture::new()?;
-        fixture
-            .package("dev-libs", "foo-", "1")
-            .repo("repo-")
-            .write()?;
+
+        fixture.package("dev-libs/foo--1").repo("repo-").write()?;
         let mut vdb = fixture.vdb()?;
         let atom = Atom::new("dev-libs/foo-")?;
 
         let pkg = vdb.find_by_atom(&atom)?.next().unwrap();
-        assert_eq!(pkg.cpv(), &cpv("dev-libs", "foo-", "1"));
+        assert_eq!(pkg.cpv(), &cpv("dev-libs/foo--1"));
         assert_eq!(pkg.repo().as_str(), "repo-");
         Ok(())
     }
@@ -208,11 +189,11 @@ mod tests {
     fn test_load_package_invalid_repository() -> anyhow::Result<()> {
         let fixture = VdbFixture::new()?;
         fixture
-            .package("dev-libs", "foo", "1")
+            .package("sys-libs/pam-1")
             .repo("invalid name")
             .write()?;
         let mut vdb = fixture.vdb()?;
-        let atom = Atom::new("dev-libs/foo")?;
+        let atom = Atom::new("sys-libs/pam")?;
 
         assert!(vdb.find_by_atom(&atom).is_err());
         Ok(())
@@ -221,28 +202,30 @@ mod tests {
     #[test]
     fn test_find_by_atom() -> anyhow::Result<()> {
         let fixture = VdbFixture::new()?;
-        for (category, package, version) in [
-            ("dev-libs", "bar", "1"),
-            ("dev-libs", "bar", "2"),
-            ("dev-libs", "foo", "1"),
-            ("app-editors", "foo", "3"),
+        for fqn in [
+            "sys-libs/zlib-1",
+            "sys-libs/zlib-2",
+            "sys-libs/pam-1",
+            "app-alternatives/tar-1",
+            "app-arch/tar-1",
         ] {
-            fixture.package(category, package, version).write()?;
+            fixture.package(fqn).write()?;
         }
         let mut vdb = fixture.vdb()?;
 
         let tests = [
-            ("dev-libs/foo", vec!["dev-libs/foo-1"]),
+            ("sys-libs/pam", vec!["sys-libs/pam-1"]),
             (
-                "dev-libs/*",
-                vec!["dev-libs/foo-1", "dev-libs/bar-2", "dev-libs/bar-1"],
+                "sys-libs/*",
+                vec!["sys-libs/pam-1", "sys-libs/zlib-1", "sys-libs/zlib-2"],
             ),
-            ("*/foo", vec!["dev-libs/foo-1", "app-editors/foo-3"]),
+            ("*/tar", vec!["app-alternatives/tar-1", "app-arch/tar-1"]),
         ];
         for (atom, expected) in tests {
             let atom = Atom::new(atom)?;
             let pkgs = vdb.find_by_atom(&atom)?;
-            let actual = pkgs.map(|pkg| pkg.cpv().fqn()).collect::<Vec<_>>();
+            let mut actual = pkgs.map(|pkg| pkg.cpv().fqn()).collect::<Vec<_>>();
+            actual.sort_unstable();
             assert_eq!(actual, expected);
         }
         Ok(())
@@ -251,24 +234,31 @@ mod tests {
     #[test]
     fn test_find_by_pkg() -> anyhow::Result<()> {
         let fixture = VdbFixture::new()?;
-        fixture.package("app-misc", "foo", "1").slot("0").write()?;
-        fixture.package("app-misc", "foo", "2").slot("1").write()?;
+        fixture.package("sys-libs/pam-1").slot("0").write()?;
+        fixture.package("sys-libs/pam-2").slot("1").write()?;
         let mut vdb = fixture.vdb()?;
 
-        let same_slot = pkg("app-misc", "foo", "3", &[("SLOT", "0")]);
-        let diff_slot = pkg("app-misc", "foo", "3", &[("SLOT", "2")]);
+        let same_slot = pkg("sys-libs/pam-2", &[("SLOT", "0")]);
+        let diff_slot = pkg("sys-libs/pam-2", &[("SLOT", "2")]);
 
         let result = vdb.find_by_pkg(&same_slot)?.map(PackageView::cpv);
-        assert_eq!(result, Some(&cpv("app-misc", "foo", "1")));
+        assert_eq!(result, Some(&cpv("sys-libs/pam-1")));
         assert!(vdb.find_by_pkg(&diff_slot)?.is_none());
         Ok(())
+    }
+
+    #[test]
+    fn test_package_from_path_invalid() {
+        let category = "sys-libs".parse().unwrap();
+        let result = Vdb::package_from_path(&category, Path::new("pam-1-2"));
+        assert!(result.unwrap().is_none());
     }
 
     #[test]
     fn test_find_by_atom_missing_category() -> anyhow::Result<()> {
         let fixture = VdbFixture::new()?;
         let mut vdb = fixture.vdb()?;
-        let atom = Atom::new("dev-libs/foo")?;
+        let atom = Atom::new("sys-apps/grep")?;
 
         assert!(vdb.find_by_atom(&atom)?.next().is_none());
         Ok(())

@@ -86,18 +86,18 @@ fn use_dep_satisfied_by(
 #[cfg(test)]
 mod tests {
     use germ_pms::UseDep;
-    use germ_pms::test_support::pkg;
+    use germ_pms::test_support::{atom, pkg};
 
     use super::*;
     use crate::useflag::test_support::effective;
 
     #[test]
     fn test_root_ignores_use_deps() {
-        let pkg = pkg("app-misc", "foo", "1.0", &[("IUSE", "")]);
-        let atom = "app-misc/foo[foo]".parse().unwrap();
+        let nano = pkg("app-editors/nano-1", &[("IUSE", "")]);
+        let atom = atom("app-editors/nano[foo]");
         let request = AtomRequirement::root(&atom);
 
-        let result = request.satisfied_by(&pkg, &effective(&["foo"], &[]));
+        let result = request.satisfied_by(&nano, &effective(&["foo"], &[]));
         assert!(result.unwrap());
     }
 
@@ -153,10 +153,10 @@ mod tests {
 
     #[test]
     fn test_static_mismatch() {
-        let pkg = pkg("app-misc", "foo", "1.0", &[("IUSE", "")]);
-        let atom = "app-misc/bar".parse().unwrap();
+        let nano = pkg("app-editors/nano-1", &[("IUSE", "")]);
+        let atom = atom("app-editors/vim");
 
-        let result = AtomRequirement::root(&atom).satisfied_by(&pkg, &EffectiveUse::default());
+        let result = AtomRequirement::root(&atom).satisfied_by(&nano, &EffectiveUse::default());
         assert!(!result.unwrap());
     }
 }

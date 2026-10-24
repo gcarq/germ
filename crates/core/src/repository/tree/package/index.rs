@@ -224,9 +224,9 @@ mod tests {
     #[test]
     fn test_matching_entries_exact() {
         let index = CpvIndex::default();
-        let python_3_13 = cpv("dev-lang", "python", "3.13.12");
-        let python3_14 = cpv("dev-lang", "python", "3.14.3");
-        let rust = cpv("dev-lang", "rust", "1.94.0");
+        let python_3_13 = cpv("dev-lang/python-3.13.12");
+        let python3_14 = cpv("dev-lang/python-3.14.3");
+        let rust = cpv("dev-lang/rust-1.94.0");
         index.update(
             &Atom::default(),
             [python_3_13.clone(), python3_14.clone(), rust.clone()],
@@ -246,9 +246,9 @@ mod tests {
         index.update(
             &Atom::default(),
             [
-                cpv("dev-lang", "python", "3.14.3"),
-                cpv("dev-lang", "rust", "1.94.0"),
-                cpv("dev-libs", "libfoo", "1.0.0"),
+                cpv("dev-lang/python-3.14.3"),
+                cpv("dev-lang/rust-1.94.0"),
+                cpv("dev-libs/libffi-1"),
             ],
         );
 
@@ -262,14 +262,14 @@ mod tests {
 
     #[test]
     fn test_matching_entries_equal_versions() {
-        let implicit = cpv("dev-libs", "pkg", "1.0");
-        let explicit = cpv("dev-libs", "pkg", "1.0-r0");
-        let r1 = cpv("dev-libs", "pkg", "1.0-r1");
+        let implicit = cpv("sys-libs/zlib-1");
+        let explicit = cpv("sys-libs/zlib-1-r0");
+        let r1 = cpv("sys-libs/zlib-1-r1");
 
         let index = CpvIndex::default();
         index.update(&Atom::default(), [explicit, implicit, r1]);
 
-        let atom = Atom::new("dev-libs/pkg").unwrap();
+        let atom = Atom::new("sys-libs/zlib").unwrap();
         assert_eq!(index.matching_entries(&atom).len(), 2);
     }
 }

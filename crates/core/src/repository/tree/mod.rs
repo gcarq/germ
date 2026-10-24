@@ -454,7 +454,7 @@ mod tests {
     #[tokio::test]
     async fn test_repository_resolves_cached_metadata() {
         let repository = RepoBuilder::new("repo").finalize().unwrap();
-        let cpv = cpv("app-misc", "foo", "1");
+        let cpv = cpv("sys-apps/grep-1");
         let metadata = pkg_metadata(&[("DESCRIPTION", "cached metadata")]);
         repository
             .metadata_cache
@@ -474,13 +474,13 @@ mod tests {
     #[tokio::test]
     async fn test_repository_preserves_input_order() {
         let repository = RepoBuilder::new("repo")
-            .ebuild("app-misc", "invalid-first", "1", "EAPI=6")
-            .ebuild("app-misc", "invalid-last", "1", "EAPI=abc")
+            .ebuild("app-arch/gzip-1", "EAPI=6")
+            .ebuild("app-arch/zstd-1", "EAPI=abc")
             .finalize()
             .unwrap();
-        let invalid_first = cpv("app-misc", "invalid-first", "1");
-        let cached = cpv("app-misc", "cached", "1");
-        let invalid_last = cpv("app-misc", "invalid-last", "1");
+        let invalid_first = cpv("app-arch/gzip-1");
+        let cached = cpv("app-arch/bzip2-1");
+        let invalid_last = cpv("app-arch/zstd-1");
         repository
             .metadata_cache
             .insert_batch([(&cached, &pkg_metadata(&[]))])
@@ -569,7 +569,7 @@ mod tests {
             let result = RepoBuilder::new("repo")
                 .formats([format])
                 .eapi(eapi)
-                .profile_entries_dir("package.mask", "app-misc/foo\n")
+                .profile_entries_dir("package.mask", "sys-apps/grep\n")
                 .finalize();
 
             assert_eq!(result.is_ok(), supported);

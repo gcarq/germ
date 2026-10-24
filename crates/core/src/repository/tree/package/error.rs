@@ -53,9 +53,9 @@ mod tests {
     #[test]
     fn test_promote() {
         let data = PackageResolutionError::new(
-            cpv("app-misc", "foo", "1"),
+            cpv("sys-apps/grep-1"),
             MetadataGenerationError::Ebuild(EbuildError::Io {
-                path: PathBuf::from("foo-1.ebuild"),
+                path: PathBuf::from("grep-1.ebuild"),
                 source: io::Error::from(io::ErrorKind::NotFound),
             }),
         );
@@ -64,7 +64,7 @@ mod tests {
         };
 
         let internal = PackageResolutionError::new(
-            cpv("app-misc", "foo", "1"),
+            cpv("sys-apps/grep-1"),
             MetadataGenerationError::Internal(anyhow!("test")),
         );
         let RepositoryError::Internal(_) = internal.promote().unwrap_err() else {
@@ -72,7 +72,7 @@ mod tests {
         };
 
         let lifecycle = PackageResolutionError::new(
-            cpv("app-misc", "foo", "1"),
+            cpv("sys-apps/grep-1"),
             MetadataGenerationError::Execution(PhaseExecutionError::Lifecycle(anyhow!("test"))),
         );
         assert!(lifecycle.promote().is_ok());

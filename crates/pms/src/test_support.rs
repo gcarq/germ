@@ -5,25 +5,23 @@ use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 
 use crate::atom::Atom;
-use crate::package::{
-    Cpv, Package, PackageMetadata, PackageVersion, PackageView, RawPackageMetadata,
-};
+use crate::package::{Cpv, Package, PackageMetadata, PackageView, RawPackageMetadata};
 
-pub fn cpv(category: &str, package: &str, version: &str) -> Cpv {
-    Cpv::new(
-        category.parse().unwrap(),
-        package.parse().unwrap(),
-        PackageVersion::try_from(version).unwrap(),
-    )
+/// Creates an [`Atom`] from the given string, e.g. `app-editors/nano`.
+pub fn atom(value: &str) -> Atom {
+    Atom::new(value).unwrap()
 }
 
-/// Creates a [`Package`] from valid strings for testing.
-pub fn pkg(cat: &str, name: &str, version: &str, metadata: &[(&str, &str)]) -> Package {
-    Package::new(
-        cpv(cat, name, version),
-        "gentoo".parse().unwrap(),
-        pkg_metadata(metadata),
-    )
+/// Creates a [`Cpv`] from its fully qualified name, e.g. `app-editors/nano-1`.
+pub fn cpv(fqn: &str) -> Cpv {
+    let cpv: Cpv = fqn.parse().unwrap();
+    assert_eq!(cpv.fqn(), fqn);
+    cpv
+}
+
+/// Creates a [`Package`] from its fully qualified name and metadata overrides.
+pub fn pkg(fqn: &str, metadata: &[(&str, &str)]) -> Package {
+    Package::new(cpv(fqn), "gentoo".parse().unwrap(), pkg_metadata(metadata))
 }
 
 /// Creates valid package metadata with optional variable overrides.

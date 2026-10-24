@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn test_validate_licenses() {
         let reposet = repo_set([RepoBuilder::new("repo").license("GPL-3").license("MIT")]).unwrap();
-        let cpv = cpv("app-misc", "foo", "1");
+        let cpv = cpv("app-editors/nano-1");
         let ebuild = Ebuild {
             path: PathBuf::default(),
             eapi: Eapi::Eight,
@@ -227,12 +227,12 @@ mod tests {
         let contents = ["", "  # comment", "DESCRIPTION=missing", "EAPI="];
         let mut builder = RepoBuilder::new("repo");
         for (index, content) in contents.iter().enumerate() {
-            builder = builder.ebuild("cat", "pkg", (index + 1).to_string(), *content);
+            builder = builder.ebuild(format!("app-editors/nano-{}", index + 1), *content);
         }
         let repo = builder.finalize().unwrap();
 
-        for (index, _) in contents.iter().enumerate() {
-            let cpv = cpv("cat", "pkg", &(index + 1).to_string());
+        for index in 1..=contents.len() {
+            let cpv = cpv(&format!("app-editors/nano-{index}"));
             assert!(matches!(
                 Ebuild::new(&cpv, &repo).unwrap_err(),
                 EbuildError::UnsupportedEapi(Eapi::Zero)
@@ -243,10 +243,10 @@ mod tests {
     #[test]
     fn test_unrecognized_eapi() {
         let repo = RepoBuilder::new("repo")
-            .ebuild("cat", "pkg", "1", "EAPI=abc")
+            .ebuild("app-editors/nano-1", "EAPI=abc")
             .finalize()
             .unwrap();
-        let cpv = cpv("cat", "pkg", "1");
+        let cpv = cpv("app-editors/nano-1");
         let err = Ebuild::new(&cpv, &repo).unwrap_err();
         assert!(matches!(
             err,
@@ -257,10 +257,10 @@ mod tests {
     #[test]
     fn test_unsupported_eapi() {
         let repo = RepoBuilder::new("repo")
-            .ebuild("cat", "pkg", "1", "EAPI=6")
+            .ebuild("app-editors/nano-1", "EAPI=6")
             .finalize()
             .unwrap();
-        let cpv = cpv("cat", "pkg", "1");
+        let cpv = cpv("app-editors/nano-1");
         let err = Ebuild::new(&cpv, &repo).unwrap_err();
         assert!(matches!(err, EbuildError::UnsupportedEapi(Eapi::Six)));
     }
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn test_ebuild_io_error() {
         let repo = RepoBuilder::new("repo").finalize().unwrap();
-        let cpv = cpv("cat", "pkg", "1");
+        let cpv = cpv("app-editors/nano-1");
         let err = Ebuild::new(&cpv, &repo).unwrap_err();
         assert!(matches!(err, EbuildError::Io { .. }));
     }
@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn test_ebuild_eq() {
         let path = PathBuf::from("/dev/null");
-        let cpv = cpv("cat", "pkg", "1");
+        let cpv = cpv("app-editors/nano-1");
         let repo = Repository::default();
         let ebuild1 = Ebuild {
             path: path.clone(),

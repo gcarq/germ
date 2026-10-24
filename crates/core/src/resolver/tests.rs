@@ -1,7 +1,9 @@
 use germ_pms::BlockerStrength;
 use germ_pms::deps::{Depend, ExprKind};
-use germ_pms::test_support::pkg;
+use germ_pms::test_support::{atom, pkg};
 
+use super::CandidateRejectionReason::{ActiveBlocker, Dependency, Policy};
+use super::RequirementFailure::{AnyOf, Blocker, Exhausted, NoCandidate};
 use super::test_support::{ResolverFixture, installed};
 use super::*;
 use crate::policy::PolicyRejection;
@@ -11,16 +13,16 @@ use crate::useflag::test_support::effective;
 
 /// Returns the candidate rejected behind the single root `Exhausted` dependency failure.
 fn nested_rejection(outcome: &ResolutionOutcome) -> &RejectedCandidate {
-    let [RequirementFailure::Exhausted(_, candidates)] = outcome.failures() else {
+    let [Exhausted(_, candidates)] = outcome.failures() else {
         panic!("expected an exhausted root candidate");
     };
     let [rejected] = candidates.as_slice() else {
         panic!("expected one rejected root candidate");
     };
-    let CandidateRejectionReason::Dependency(_, failure) = &rejected.reason else {
+    let Dependency(_, failure) = &rejected.reason else {
         panic!("expected a dependency failure");
     };
-    let RequirementFailure::Exhausted(_, candidates) = failure.as_ref() else {
+    let Exhausted(_, candidates) = failure.as_ref() else {
         panic!("expected an exhausted dependency candidate");
     };
     let [rejected] = candidates.as_slice() else {
@@ -31,13 +33,14 @@ fn nested_rejection(outcome: &ResolutionOutcome) -> &RejectedCandidate {
 
 #[tokio::test]
 async fn test_resolve_use_conditional() {
-    let atom = "app-misc/root".parse().unwrap();
+    let zlib_atom = atom("sys-libs/zlib");
+    let atom = atom("app-editors/nano");
     let metadata = [
         ("IUSE", "feature"),
-        ("DEPEND", "feature? ( app-misc/child )"),
+        ("DEPEND", "feature? ( sys-libs/zlib )"),
     ];
-    let root = || pkg("app-misc", "root", "1", &metadata);
-    let child = pkg("app-misc", "child", "1", &[]);
+    let root = || pkg("app-editors/nano-2", &metadata);
+    let child = pkg("sys-libs/zlib-2", &[]);
 
     let enabled = ResolverFixture::new([root(), child])
         .with_use(&["feature"])
@@ -52,44 +55,61 @@ async fn test_resolve_use_conditional() {
         .with_use(&["feature"])
         .resolve([&atom])
         .await;
-    assert!(!matches!(unavailable, ResolutionOutcome::Complete { .. }));
+    let expected = Exhausted(
+        atom,
+        vec![RejectedCandidate::new(
+            root(),
+            Dependency(Depend::VAR, NoCandidate(zlib_atom).into()),
+        )],
+    );
+    assert_eq!(unavailable.failures(), &[expected]);
 }
 
 #[tokio::test]
 async fn test_resolve_fallback_masked() {
-    let atom = "app-misc/root".parse().unwrap();
-    let metadata = [("DEPEND", "app-misc/child")];
-    let packages = [
-        pkg("app-misc", "root", "1", &metadata),
-        pkg("app-misc", "child", "2", &[]),
-        pkg("app-misc", "child", "1", &[]),
-    ];
+    let atom = atom("app-editors/nano");
+    let metadata = [("DEPEND", "sys-libs/zlib")];
+    let root = pkg("app-editors/nano-2", &metadata);
+    let zlib_2 = pkg("sys-libs/zlib-2", &[]);
+    let zlib_1 = pkg("sys-libs/zlib-1", &[]);
 
-    let outcome = ResolverFixture::new(packages)
-        .with_mask("=app-misc/child-2")
+    let outcome = ResolverFixture::new([root.clone(), zlib_2, zlib_1.clone()])
+        .with_mask("=sys-libs/zlib-2")
         .resolve([&atom])
         .await;
-    assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
+    assert_eq!(
+        outcome.plan().unwrap().operations(),
+        &[
+            Merge(EffectivePackage::new(zlib_1, EffectiveUse::default())),
+            Merge(EffectivePackage::new(root, EffectiveUse::default())),
+        ]
+    );
 }
 
 #[tokio::test]
 async fn test_resolve_selected() {
-    let atom = "app-misc/root".parse().unwrap();
-    let metadata = [("DEPEND", "app-misc/child app-misc/child")];
-    let candidates = [
-        pkg("app-misc", "root", "1", &metadata),
-        pkg("app-misc", "child", "1", &[]),
-    ];
+    let atom = atom("app-editors/nano");
+    let metadata = [("DEPEND", "sys-libs/zlib sys-libs/zlib")];
+    let root = pkg("app-editors/nano-2", &metadata);
+    let zlib = pkg("sys-libs/zlib-2", &[]);
 
-    let outcome = ResolverFixture::new(candidates).resolve([&atom]).await;
-    assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
+    let outcome = ResolverFixture::new([root.clone(), zlib.clone()])
+        .resolve([&atom])
+        .await;
+    assert_eq!(
+        outcome.plan().unwrap().operations(),
+        &[
+            Merge(EffectivePackage::new(zlib, EffectiveUse::default())),
+            Merge(EffectivePackage::new(root, EffectiveUse::default())),
+        ]
+    );
 }
 
 #[tokio::test]
 async fn test_resolve_dependency_cycle() {
-    let atom = "app-misc/root".parse().unwrap();
-    let root = pkg("app-misc", "root", "1", &[("DEPEND", "app-misc/child")]);
-    let child = pkg("app-misc", "child", "1", &[("DEPEND", "app-misc/root")]);
+    let atom = atom("app-editors/nano");
+    let root = pkg("app-editors/nano-2", &[("DEPEND", "sys-libs/zlib")]);
+    let child = pkg("sys-libs/zlib-2", &[("DEPEND", "app-editors/nano")]);
     let outcome = ResolverFixture::new([root.clone(), child.clone()])
         .resolve([&atom])
         .await;
@@ -105,27 +125,20 @@ async fn test_resolve_dependency_cycle() {
 
 #[tokio::test]
 async fn test_failed_candidate_rollback_state() {
-    let atom = "app-misc/root".parse().unwrap();
+    let atom = atom("app-editors/nano");
     let new_root = pkg(
-        "app-misc",
-        "root",
-        "2",
+        "app-editors/nano-2",
         &[(
             "DEPEND",
-            "|| ( app-misc/first-child app-misc/second-child ) !app-misc/fallback-child app-misc/missing",
+            "|| ( app-arch/gzip app-arch/bzip2 ) !app-arch/zstd dev-libs/libffi",
         )],
     );
-    let old_root = pkg(
-        "app-misc",
-        "root",
-        "1",
-        &[("DEPEND", "app-misc/fallback-child")],
-    );
-    let first = pkg("app-misc", "first-child", "1", &[]);
-    let second = pkg("app-misc", "second-child", "1", &[]);
-    let fallback = pkg("app-misc", "fallback-child", "1", &[]);
-    let first_installed = installed("first-child", "0", "0", &[], &[]);
-    let fallback_installed = installed("fallback-child", "1", "1", &[], &[]);
+    let old_root = pkg("app-editors/nano-1", &[("DEPEND", "app-arch/zstd")]);
+    let first = pkg("app-arch/gzip-2", &[]);
+    let second = pkg("app-arch/bzip2-1", &[]);
+    let fallback = pkg("app-arch/zstd-1", &[]);
+    let first_installed = installed("app-arch/gzip-1", "0", &[], &[]);
+    let fallback_installed = installed("app-arch/zstd-1", "1", &[], &[]);
     let outcome =
         ResolverFixture::new([new_root, old_root.clone(), first, second, fallback.clone()])
             .with_installed([first_installed, fallback_installed])
@@ -144,9 +157,9 @@ async fn test_failed_candidate_rollback_state() {
 
 #[tokio::test]
 async fn test_plan_replace() {
-    let atom = "app-misc/root".parse().unwrap();
-    let root = pkg("app-misc", "root", "1", &[]);
-    let installed = installed("root", "1", "0", &[], &[]);
+    let atom = atom("app-editors/nano");
+    let root = pkg("app-editors/nano-2", &[]);
+    let installed = installed("app-editors/nano-2", "0", &[], &[]);
     let outcome = ResolverFixture::new([root.clone()])
         .with_installed([installed.clone()])
         .resolve([&atom])
@@ -163,9 +176,9 @@ async fn test_plan_replace() {
 
 #[tokio::test]
 async fn test_plan_other_slot_merge() {
-    let atom = "app-misc/root".parse().unwrap();
-    let root = pkg("app-misc", "root", "1", &[]);
-    let installed = installed("root", "1", "1", &[], &[]);
+    let atom = atom("app-editors/nano");
+    let root = pkg("app-editors/nano-2", &[]);
+    let installed = installed("app-editors/nano-2", "1", &[], &[]);
     let outcome = ResolverFixture::new([root.clone()])
         .with_installed([installed])
         .resolve([&atom])
@@ -179,18 +192,16 @@ async fn test_plan_other_slot_merge() {
 
 #[tokio::test]
 async fn test_resolve_active_blocker() {
-    let atom = "app-misc/root".parse().unwrap();
+    let blocked_atom = atom("sys-apps/sed");
+    let atom = atom("app-editors/nano");
     for prefix in ["!", "!!"] {
         let root = pkg(
-            "app-misc",
-            "root",
-            "1",
-            &[("DEPEND", "app-misc/a app-misc/b")],
+            "app-editors/nano-2",
+            &[("DEPEND", "sys-apps/grep sys-apps/sed")],
         );
-        let depend = format!("{prefix}app-misc/b");
-        let owner = pkg("app-misc", "a", "1", &[("DEPEND", depend.as_str())]);
-        let blocked = pkg("app-misc", "b", "1", &[]);
-        let blocked_atom = "app-misc/b".parse().unwrap();
+        let depend = format!("{prefix}sys-apps/sed");
+        let owner = pkg("sys-apps/grep-1", &[("DEPEND", depend.as_str())]);
+        let blocked = pkg("sys-apps/sed-1", &[]);
         let outcome = ResolverFixture::new([root, owner.clone(), blocked.clone()])
             .resolve([&atom])
             .await;
@@ -199,9 +210,9 @@ async fn test_resolve_active_blocker() {
         assert_eq!(&rejected.pkg, &blocked);
         assert_eq!(
             rejected.reason,
-            CandidateRejectionReason::ActiveBlocker {
-                atom: blocked_atom,
-                owner: Box::new(owner),
+            ActiveBlocker {
+                atom: blocked_atom.clone(),
+                owner: owner.into(),
             }
         );
     }
@@ -213,17 +224,16 @@ async fn test_resolve_blocker_in_graph() {
         ("!", BlockerStrength::Weak),
         ("!!", BlockerStrength::Strong),
     ] {
-        let atom = "app-misc/root".parse().unwrap();
+        let sed_atom = atom("sys-apps/sed");
+        let atom = atom("app-editors/nano");
 
-        let depend = format!("{prefix}app-misc/b");
+        let depend = format!("{prefix}sys-apps/sed");
         let root = pkg(
-            "app-misc",
-            "root",
-            "1",
-            &[("DEPEND", "app-misc/b app-misc/a")],
+            "app-editors/nano-2",
+            &[("DEPEND", "sys-apps/sed sys-apps/grep")],
         );
-        let owner = pkg("app-misc", "a", "1", &[("DEPEND", depend.as_str())]);
-        let conflict = pkg("app-misc", "b", "1", &[]);
+        let owner = pkg("sys-apps/grep-1", &[("DEPEND", depend.as_str())]);
+        let conflict = pkg("sys-apps/sed-1", &[]);
         let outcome = ResolverFixture::new([root, owner.clone(), conflict.clone()])
             .resolve([&atom])
             .await;
@@ -232,19 +242,20 @@ async fn test_resolve_blocker_in_graph() {
         assert_eq!(&rejected.pkg, &owner);
         assert_eq!(
             rejected.reason,
-            CandidateRejectionReason::Dependency(
+            Dependency(
                 Depend::VAR,
-                Box::new(RequirementFailure::Blocker {
+                Blocker {
                     strength,
-                    atom: "app-misc/b".parse().unwrap(),
-                    conflict: Box::new(conflict),
-                }),
+                    atom: sed_atom,
+                    conflict: conflict.into(),
+                }
+                .into(),
             )
         );
 
-        let depend = format!("{prefix}app-misc/root");
-        let root = pkg("app-misc", "root", "1", &[("DEPEND", "app-misc/child")]);
-        let child = pkg("app-misc", "child", "1", &[("DEPEND", depend.as_str())]);
+        let depend = format!("{prefix}app-editors/nano");
+        let root = pkg("app-editors/nano-2", &[("DEPEND", "sys-libs/zlib")]);
+        let child = pkg("sys-libs/zlib-2", &[("DEPEND", depend.as_str())]);
         let outcome = ResolverFixture::new([root.clone(), child.clone()])
             .resolve([&atom])
             .await;
@@ -253,13 +264,14 @@ async fn test_resolve_blocker_in_graph() {
         assert_eq!(&rejected.pkg, &child);
         assert_eq!(
             rejected.reason,
-            CandidateRejectionReason::Dependency(
+            Dependency(
                 Depend::VAR,
-                Box::new(RequirementFailure::Blocker {
+                Blocker {
                     strength,
-                    atom: "app-misc/root".parse().unwrap(),
-                    conflict: Box::new(root),
-                }),
+                    atom: atom.clone(),
+                    conflict: root.into(),
+                }
+                .into(),
             )
         );
     }
@@ -271,10 +283,11 @@ async fn test_resolve_blocker_installed() {
         ("!", BlockerStrength::Weak),
         ("!!", BlockerStrength::Strong),
     ] {
-        let atom = "app-misc/root".parse().unwrap();
-        let depend = format!("{prefix}app-misc/other");
-        let root = pkg("app-misc", "root", "1", &[("DEPEND", depend.as_str())]);
-        let other = installed("other", "1", "0", &[], &[]);
+        let pam_atom = atom("sys-libs/pam");
+        let atom = atom("app-editors/nano");
+        let depend = format!("{prefix}sys-libs/pam");
+        let root = pkg("app-editors/nano-2", &[("DEPEND", depend.as_str())]);
+        let other = installed("sys-libs/pam-2", "0", &[], &[]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([other.clone()])
             .resolve([&atom])
@@ -292,17 +305,18 @@ async fn test_resolve_blocker_installed() {
                 );
             }
             BlockerStrength::Strong => {
-                let expected = RequirementFailure::Exhausted(
+                let expected = Exhausted(
                     atom,
                     vec![RejectedCandidate::new(
                         root,
-                        CandidateRejectionReason::Dependency(
+                        Dependency(
                             Depend::VAR,
-                            Box::new(RequirementFailure::Blocker {
+                            Blocker {
                                 strength,
-                                atom: "app-misc/other".parse().unwrap(),
-                                conflict: Box::new(pkg("app-misc", "other", "1", &[])),
-                            }),
+                                atom: pam_atom,
+                                conflict: pkg("sys-libs/pam-2", &[]).into(),
+                            }
+                            .into(),
                         ),
                     )],
                 );
@@ -314,10 +328,10 @@ async fn test_resolve_blocker_installed() {
 
 #[tokio::test]
 async fn test_resolve_blocker_same_slot() {
-    let atom = "app-misc/root".parse().unwrap();
-    for depend in ["!app-misc/root", "!!<app-misc/root-2"] {
-        let root = pkg("app-misc", "root", "2", &[("DEPEND", depend)]);
-        let installed = installed("root", "1", "0", &[], &[]);
+    let atom = atom("app-editors/nano");
+    for depend in ["!app-editors/nano", "!!<app-editors/nano-2"] {
+        let root = pkg("app-editors/nano-2", &[("DEPEND", depend)]);
+        let installed = installed("app-editors/nano-1", "0", &[], &[]);
         let outcome = ResolverFixture::new([root.clone()])
             .with_installed([installed.clone()])
             .resolve([&atom])
@@ -336,15 +350,10 @@ async fn test_resolve_blocker_same_slot() {
 
 #[tokio::test]
 async fn test_resolve_blocker_use() {
-    let atom = "app-misc/root".parse().unwrap();
+    let atom = atom("app-editors/nano");
 
-    let root = pkg(
-        "app-misc",
-        "root",
-        "1",
-        &[("DEPEND", "!app-misc/other[flag]")],
-    );
-    let disabled = installed("other", "1", "0", &["flag"], &[]);
+    let root = pkg("app-editors/nano-2", &[("DEPEND", "!sys-libs/pam[flag]")]);
+    let disabled = installed("sys-libs/pam-2", "0", &["flag"], &[]);
     let outcome = ResolverFixture::new([root.clone()])
         .with_installed([disabled])
         .resolve([&atom])
@@ -358,7 +367,7 @@ async fn test_resolve_blocker_use() {
         ))]
     );
 
-    let enabled = installed("other", "1", "0", &["flag"], &["flag"]);
+    let enabled = installed("sys-libs/pam-2", "0", &["flag"], &["flag"]);
     let outcome = ResolverFixture::new([root.clone()])
         .with_installed([enabled.clone()])
         .resolve([&atom])
@@ -373,13 +382,11 @@ async fn test_resolve_blocker_use() {
     );
 
     let root = pkg(
-        "app-misc",
-        "root",
-        "1",
-        &[("IUSE", "feature"), ("DEPEND", "!app-misc/other[feature?]")],
+        "app-editors/nano-2",
+        &[("IUSE", "feature"), ("DEPEND", "!sys-libs/pam[feature?]")],
     );
-    let enabled = installed("other", "2", "0", &["feature"], &["feature"]);
-    let disabled = installed("other", "1", "0", &["feature"], &[]);
+    let enabled = installed("sys-libs/pam-2", "0", &["feature"], &["feature"]);
+    let disabled = installed("sys-libs/pam-1", "0", &["feature"], &[]);
     let outcome = ResolverFixture::new([root.clone()])
         .with_use(&["feature"])
         .with_installed([disabled, enabled.clone()])
@@ -395,18 +402,15 @@ async fn test_resolve_blocker_use() {
 
 #[tokio::test]
 async fn test_resolve_missing_dependency_candidate() {
-    let atom = "app-misc/root".parse().unwrap();
-    let root = pkg("app-misc", "root", "1", &[("DEPEND", "app-misc/missing")]);
-    let missing = "app-misc/missing".parse().unwrap();
+    let missing = atom("dev-libs/libffi");
+    let atom = atom("app-editors/nano");
+    let root = pkg("app-editors/nano-2", &[("DEPEND", "dev-libs/libffi")]);
     let outcome = ResolverFixture::new([root.clone()]).resolve([&atom]).await;
-    let expected = RequirementFailure::Exhausted(
+    let expected = Exhausted(
         atom,
         vec![RejectedCandidate::new(
             root,
-            CandidateRejectionReason::Dependency(
-                Depend::VAR,
-                RequirementFailure::NoCandidate(missing).into(),
-            ),
+            Dependency(Depend::VAR, NoCandidate(missing).into()),
         )],
     );
 
@@ -415,35 +419,29 @@ async fn test_resolve_missing_dependency_candidate() {
 }
 
 #[tokio::test]
-async fn test_resolve_missing_root_candidate() {
-    let atom = "app-misc/missing".parse().unwrap();
-    let outcome = ResolverFixture::new([]).resolve([&atom]).await;
-
-    assert_eq!(outcome.failures(), &[RequirementFailure::NoCandidate(atom)]);
-}
-
-#[tokio::test]
 async fn test_resolve_rejected_dependency_candidates() {
-    let atom = "app-misc/root".parse().unwrap();
-    let root = pkg("app-misc", "root", "1", &[("DEPEND", "app-misc/child")]);
-    let child = pkg("app-misc", "child", "1", &[]);
+    let zlib_atom = atom("sys-libs/zlib");
+    let atom = atom("app-editors/nano");
+    let root = pkg("app-editors/nano-2", &[("DEPEND", "sys-libs/zlib")]);
+    let child = pkg("sys-libs/zlib-2", &[]);
     let outcome = ResolverFixture::new([root.clone(), child.clone()])
-        .with_mask("app-misc/child")
+        .with_mask("sys-libs/zlib")
         .resolve([&atom])
         .await;
-    let expected = RequirementFailure::Exhausted(
+    let expected = Exhausted(
         atom,
         vec![RejectedCandidate::new(
             root,
-            CandidateRejectionReason::Dependency(
+            Dependency(
                 Depend::VAR,
-                Box::new(RequirementFailure::Exhausted(
-                    "app-misc/child".parse().unwrap(),
+                Exhausted(
+                    zlib_atom,
                     vec![RejectedCandidate::new(
                         child,
-                        CandidateRejectionReason::Policy(PolicyRejection::Masked),
+                        Policy(PolicyRejection::Masked),
                     )],
-                )),
+                )
+                .into(),
             ),
         )],
     );
@@ -453,8 +451,8 @@ async fn test_resolve_rejected_dependency_candidates() {
 
 #[tokio::test]
 async fn test_resolve_strong_blocker() {
-    let atom = "app-misc/root".parse().unwrap();
-    let root = pkg("app-misc", "root", "1", &[("DEPEND", "!!app-misc/blocked")]);
+    let atom = atom("app-editors/nano");
+    let root = pkg("app-editors/nano-2", &[("DEPEND", "!!net-misc/curl")]);
     let outcome = ResolverFixture::new([root.clone()]).resolve([&atom]).await;
 
     assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
@@ -467,15 +465,15 @@ async fn test_resolve_strong_blocker() {
 #[tokio::test]
 async fn test_resolve_any_of_rollback_blocker() {
     for prefix in ["!", "!!"] {
-        let atom = "app-misc/root".parse().unwrap();
+        let atom = atom("app-editors/nano");
         let depend = format!(
-            "|| ( ( app-misc/abandoned {prefix}app-misc/child app-misc/missing ) app-misc/child )"
+            "|| ( ( app-shells/bash {prefix}sys-libs/zlib dev-libs/libffi ) sys-libs/zlib )"
         );
-        let root = pkg("app-misc", "root", "1", &[("DEPEND", depend.as_str())]);
-        let abandoned = pkg("app-misc", "abandoned", "1", &[]);
-        let child = pkg("app-misc", "child", "1", &[]);
-        let abandoned_installed = installed("abandoned", "0", "0", &[], &[]);
-        let child_installed = installed("child", "1", "1", &[], &[]);
+        let root = pkg("app-editors/nano-2", &[("DEPEND", depend.as_str())]);
+        let abandoned = pkg("app-shells/bash-2", &[]);
+        let child = pkg("sys-libs/zlib-2", &[]);
+        let abandoned_installed = installed("app-shells/bash-1", "0", &[], &[]);
+        let child_installed = installed("sys-libs/zlib-2", "1", &[], &[]);
         let outcome = ResolverFixture::new([root.clone(), abandoned, child.clone()])
             .with_installed([abandoned_installed, child_installed])
             .resolve([&atom])
@@ -494,14 +492,14 @@ async fn test_resolve_any_of_rollback_blocker() {
 
 #[tokio::test]
 async fn test_resolve_any_of_prefers_selected() {
-    let atom = "app-misc/root".parse().unwrap();
+    let atom = atom("app-editors/nano");
     let metadata = [(
         "DEPEND",
-        "app-misc/second || ( app-misc/first app-misc/second )",
+        "app-arch/bzip2 || ( app-arch/gzip app-arch/bzip2 )",
     )];
-    let root = pkg("app-misc", "root", "1", &metadata);
-    let first = pkg("app-misc", "first", "1", &[]);
-    let second = pkg("app-misc", "second", "1", &[]);
+    let root = pkg("app-editors/nano-2", &metadata);
+    let first = pkg("app-arch/gzip-2", &[]);
+    let second = pkg("app-arch/bzip2-1", &[]);
     let outcome = ResolverFixture::new([root.clone(), first, second.clone()])
         .resolve([&atom])
         .await;
@@ -518,22 +516,19 @@ async fn test_resolve_any_of_prefers_selected() {
 
 #[tokio::test]
 async fn test_resolve_any_of_failures() {
-    let atom = "app-misc/root".parse().unwrap();
-    let metadata = [("DEPEND", "|| ( app-misc/first app-misc/second )")];
-    let root = pkg("app-misc", "root", "1", &metadata);
-    let first = "app-misc/first".parse().unwrap();
-    let second = "app-misc/second".parse().unwrap();
+    let first = atom("app-arch/gzip");
+    let second = atom("app-arch/bzip2");
+    let atom = atom("app-editors/nano");
+    let metadata = [("DEPEND", "|| ( app-arch/gzip app-arch/bzip2 )")];
+    let root = pkg("app-editors/nano-2", &metadata);
     let outcome = ResolverFixture::new([root.clone()]).resolve([&atom]).await;
-    let expected = RequirementFailure::Exhausted(
+    let expected = Exhausted(
         atom,
         vec![RejectedCandidate::new(
             root,
-            CandidateRejectionReason::Dependency(
+            Dependency(
                 Depend::VAR,
-                Box::new(RequirementFailure::AnyOf(vec![
-                    RequirementFailure::NoCandidate(first),
-                    RequirementFailure::NoCandidate(second),
-                ])),
+                AnyOf(vec![NoCandidate(first), NoCandidate(second)]).into(),
             ),
         )],
     );
@@ -543,95 +538,91 @@ async fn test_resolve_any_of_failures() {
 
 #[tokio::test]
 async fn test_resolve_multiple_roots() {
-    let a = "app-misc/a".parse().unwrap();
-    let b = "app-misc/b".parse().unwrap();
-    let pkg_a = pkg("app-misc", "a", "1", &[]);
-    let pkg_b = pkg("app-misc", "b", "1", &[]);
-    let outcome = ResolverFixture::new([pkg_a.clone(), pkg_b.clone()])
-        .resolve([&a, &b])
+    let grep = atom("sys-apps/grep");
+    let sed = atom("sys-apps/sed");
+    let grep_pkg = pkg("sys-apps/grep-1", &[]);
+    let sed_pkg = pkg("sys-apps/sed-1", &[]);
+    let outcome = ResolverFixture::new([grep_pkg.clone(), sed_pkg.clone()])
+        .resolve([&grep, &sed])
         .await;
 
     assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
     assert_eq!(
         outcome.plan().unwrap().operations(),
         &[
-            Merge(EffectivePackage::new(pkg_a, EffectiveUse::default())),
-            Merge(EffectivePackage::new(pkg_b, EffectiveUse::default()))
+            Merge(EffectivePackage::new(grep_pkg, EffectiveUse::default())),
+            Merge(EffectivePackage::new(sed_pkg, EffectiveUse::default()))
         ]
     );
 }
 
 #[tokio::test]
 async fn test_resolve_partial_roots() {
-    let a = "app-misc/a".parse().unwrap();
-    let b = "app-misc/b".parse().unwrap();
-    let pkg_a = pkg("app-misc", "a", "1", &[]);
-    let outcome = ResolverFixture::new([pkg_a.clone()])
-        .resolve([&a, &b])
+    let grep = atom("sys-apps/grep");
+    let sed = atom("sys-apps/sed");
+    let grep_pkg = pkg("sys-apps/grep-1", &[]);
+    let outcome = ResolverFixture::new([grep_pkg.clone()])
+        .resolve([&grep, &sed])
         .await;
 
     assert!(matches!(outcome, ResolutionOutcome::Partial { .. }));
     assert_eq!(
         outcome.plan().unwrap().operations(),
-        &[Merge(EffectivePackage::new(pkg_a, EffectiveUse::default()))]
+        &[Merge(EffectivePackage::new(
+            grep_pkg,
+            EffectiveUse::default()
+        ))]
     );
-    assert_eq!(outcome.failures(), &[RequirementFailure::NoCandidate(b)]);
+    assert_eq!(outcome.failures(), &[NoCandidate(sed)]);
 }
 
 #[tokio::test]
 async fn test_resolve_failed_roots() {
-    let a = "app-misc/a".parse().unwrap();
-    let b = "app-misc/b".parse().unwrap();
-    let outcome = ResolverFixture::new([]).resolve([&a, &b]).await;
+    let grep = atom("sys-apps/grep");
+    let sed = atom("sys-apps/sed");
+    let outcome = ResolverFixture::new([]).resolve([&grep, &sed]).await;
 
     assert!(matches!(outcome, ResolutionOutcome::Failed { .. }));
     assert!(outcome.plan().is_none());
-    assert_eq!(
-        outcome.failures(),
-        &[
-            RequirementFailure::NoCandidate(a),
-            RequirementFailure::NoCandidate(b),
-        ]
-    );
+    assert_eq!(outcome.failures(), &[NoCandidate(grep), NoCandidate(sed)]);
 }
 
 #[tokio::test]
 async fn test_resolve_partial_rollback() {
-    let a = "app-misc/a".parse().unwrap();
-    let b = "app-misc/b".parse().unwrap();
-    let pkg_a = pkg("app-misc", "a", "1", &[]);
-    let pkg_b = pkg(
-        "app-misc",
-        "b",
-        "1",
-        &[("DEPEND", "app-misc/child app-misc/missing")],
+    let grep = atom("sys-apps/grep");
+    let sed = atom("sys-apps/sed");
+    let grep_pkg = pkg("sys-apps/grep-1", &[]);
+    let sed_pkg = pkg(
+        "sys-apps/sed-1",
+        &[("DEPEND", "sys-libs/zlib dev-libs/libffi")],
     );
-    let child = pkg("app-misc", "child", "1", &[]);
-    let outcome = ResolverFixture::new([pkg_a.clone(), pkg_b, child])
-        .resolve([&a, &b])
+    let child = pkg("sys-libs/zlib-2", &[]);
+    let outcome = ResolverFixture::new([grep_pkg.clone(), sed_pkg, child])
+        .resolve([&grep, &sed])
         .await;
 
     assert!(matches!(outcome, ResolutionOutcome::Partial { .. }));
     assert_eq!(
         outcome.plan().unwrap().operations(),
-        &[Merge(EffectivePackage::new(pkg_a, EffectiveUse::default()))]
+        &[Merge(EffectivePackage::new(
+            grep_pkg,
+            EffectiveUse::default()
+        ))]
     );
 }
 
 #[tokio::test]
 async fn test_resolve_partial_shared_selection() {
-    let a = "app-misc/a".parse().unwrap();
-    let b = "app-misc/b".parse().unwrap();
-    let pkg_a = pkg("app-misc", "a", "1", &[("DEPEND", "app-misc/child")]);
-    let pkg_b = pkg(
-        "app-misc",
-        "b",
-        "1",
-        &[("DEPEND", "app-misc/child app-misc/missing")],
+    let grep = atom("sys-apps/grep");
+    let sed = atom("sys-apps/sed");
+    let grep_pkg = pkg("sys-apps/grep-1", &[("DEPEND", "sys-libs/zlib")]);
+    let sed_pkg = pkg(
+        "sys-apps/sed-1",
+        &[("DEPEND", "sys-libs/zlib dev-libs/libffi")],
     );
-    let child = pkg("app-misc", "child", "1", &[]);
-    let outcome = ResolverFixture::new([pkg_a.clone(), pkg_b, child.clone()])
-        .resolve([&a, &b])
+    let child = pkg("sys-libs/zlib-2", &[]);
+    let outcome = ResolverFixture::new([grep_pkg.clone(), sed_pkg, child.clone()])
+        .resolve([&grep, &sed])
         .await;
 
     assert!(matches!(outcome, ResolutionOutcome::Partial { .. }));
@@ -639,7 +630,7 @@ async fn test_resolve_partial_shared_selection() {
         outcome.plan().unwrap().operations(),
         &[
             Merge(EffectivePackage::new(child, EffectiveUse::default())),
-            Merge(EffectivePackage::new(pkg_a, EffectiveUse::default()))
+            Merge(EffectivePackage::new(grep_pkg, EffectiveUse::default()))
         ]
     );
 }

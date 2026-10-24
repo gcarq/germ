@@ -251,7 +251,7 @@ impl ActiveBlocker {
 
 #[cfg(test)]
 mod tests {
-    use germ_pms::test_support::pkg;
+    use germ_pms::test_support::{atom, pkg};
 
     use super::*;
     use crate::resolver::test_support::installed;
@@ -272,90 +272,63 @@ mod tests {
     }
 
     #[test]
-    fn test_finalize_merge() {
-        let pkg = pkg("app-misc", "foo", "1", &[]);
-        let outcome = selected_state(pkg.clone(), None).finalize(1, Vec::new());
+    fn test_finalize_operations() {
+        #[derive(Clone, Copy)]
+        enum Kind {
+            Merge,
+            Replace,
+            Upgrade,
+            Downgrade,
+        }
 
-        assert_eq!(
-            outcome.plan().unwrap().operations(),
-            &[PackageOperation::Merge(EffectivePackage::new(
-                pkg,
-                EffectiveUse::default(),
-            ))]
-        );
-    }
+        let cases = [
+            ("sys-libs/db-2", None, Kind::Merge),
+            ("sys-libs/db-2", Some("sys-libs/db-2"), Kind::Replace),
+            ("sys-libs/db-2", Some("sys-libs/db-1"), Kind::Upgrade),
+            ("sys-libs/db-1", Some("sys-libs/db-2"), Kind::Downgrade),
+        ];
 
-    #[test]
-    fn test_finalize_replace() {
-        let pkg = pkg("app-misc", "foo", "1", &[]);
-        let installed = installed("foo", "1", "0", &[], &[]);
-        let outcome = selected_state(pkg.clone(), Some(installed.clone())).finalize(1, Vec::new());
-
-        assert_eq!(
-            outcome.plan().unwrap().operations(),
-            &[PackageOperation::Replace(
-                EffectivePackage::new(pkg, EffectiveUse::default()),
-                installed,
-            )]
-        );
-    }
-
-    #[test]
-    fn test_finalize_upgrade() {
-        let pkg = pkg("app-misc", "foo", "2", &[]);
-        let installed = installed("foo", "1", "0", &[], &[]);
-        let outcome = selected_state(pkg.clone(), Some(installed.clone())).finalize(1, Vec::new());
-
-        assert_eq!(
-            outcome.plan().unwrap().operations(),
-            &[PackageOperation::Upgrade(
-                EffectivePackage::new(pkg, EffectiveUse::default()),
-                installed,
-            )]
-        );
-    }
-
-    #[test]
-    fn test_finalize_downgrade() {
-        let pkg = pkg("app-misc", "foo", "1", &[]);
-        let installed = installed("foo", "2", "0", &[], &[]);
-        let outcome = selected_state(pkg.clone(), Some(installed.clone())).finalize(1, Vec::new());
-
-        assert_eq!(
-            outcome.plan().unwrap().operations(),
-            &[PackageOperation::Downgrade(
-                EffectivePackage::new(pkg, EffectiveUse::default()),
-                installed,
-            )]
-        );
+        for (fqn, previous, kind) in cases {
+            let package = pkg(fqn, &[]);
+            let previous = previous.map(|fqn| installed(fqn, "0", &[], &[]));
+            let outcome = selected_state(package.clone(), previous.clone()).finalize(1, Vec::new());
+            let effective = EffectivePackage::new(package, EffectiveUse::default());
+            let expected = match kind {
+                Kind::Merge => PackageOperation::Merge(effective),
+                Kind::Replace => PackageOperation::Replace(effective, previous.unwrap()),
+                Kind::Upgrade => PackageOperation::Upgrade(effective, previous.unwrap()),
+                Kind::Downgrade => PackageOperation::Downgrade(effective, previous.unwrap()),
+            };
+            assert_eq!(outcome.plan().unwrap().operations(), &[expected], "{fqn}");
+        }
     }
 
     #[test]
     fn test_rollback_restores_state() {
-        let foo = pkg("app-misc", "foo", "1", &[]);
-        let bar = pkg("app-misc", "bar", "1", &[]);
-        let mask = pkg("app-misc", "mask", "1", &[]);
-        let foo_id = PackageId::new(&foo);
-        let mask_id = PackageId::new(&mask);
-        let installed = installed("foo", "0", "0", &[], &[]);
-        let effective = EffectivePackage::new(foo, EffectiveUse::default());
+        let pam = pkg("sys-libs/pam-1", &[]);
+        let zlib = pkg("sys-libs/zlib-1", &[]);
+        let glibc = pkg("sys-libs/glibc-1", &[]);
+        let pam_id = PackageId::new(&pam);
+        let glibc_id = PackageId::new(&glibc);
+        let installed = installed("sys-libs/pam-2", "0", &[], &[]);
+        let effective = EffectivePackage::new(pam, EffectiveUse::default());
         let mut state = ResolverState {
-            selected: [(foo_id.clone(), effective.clone())].into_iter().collect(),
+            selected: [(pam_id.clone(), effective.clone())].into_iter().collect(),
             visiting: [(
-                PackageId::new(&bar),
-                EffectivePackage::new(bar, EffectiveUse::default()),
+                PackageId::new(&zlib),
+                EffectivePackage::new(zlib, EffectiveUse::default()),
             )]
             .into_iter()
             .collect(),
-            rejected: [(mask_id.clone(), PolicyRejection::Masked)]
+            rejected: [(glibc_id.clone(), PolicyRejection::Masked)]
                 .into_iter()
                 .collect(),
             blockers: vec![ActiveBlocker {
                 owner: effective,
-                atom: "app-misc/baz".parse().unwrap(),
+                atom: atom("sys-libs/db"),
             }],
             removals: [installed.clone()].into_iter().collect(),
-            replacements: [(foo_id, installed)].into_iter().collect(),
+            replacements: [(pam_id, installed)].into_iter().collect(),
         };
         let checkpoint = ResolverState::default().checkpoint();
 
@@ -366,6 +339,6 @@ mod tests {
         assert!(state.blockers.is_empty());
         assert!(state.removals.is_empty());
         assert!(state.replacements.is_empty());
-        assert_eq!(state.rejection(&mask_id), Some(&PolicyRejection::Masked));
+        assert_eq!(state.rejection(&glibc_id), Some(&PolicyRejection::Masked));
     }
 }

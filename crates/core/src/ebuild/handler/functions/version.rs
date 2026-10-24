@@ -220,7 +220,7 @@ mod tests {
             ("0", Some("1.2.3"), ""),
             ("4-", Some("1.2.3"), ""),
         ];
-        let cpv = cpv("app-editors", "vim", "1.2.3b_alpha4");
+        let cpv = cpv("app-editors/vim-1.2.3b_alpha4");
         for (range, version, expected) in test_cases {
             let response = FunctionReply::Ok(Some(expected.to_owned()));
             assert_eq!(
@@ -255,7 +255,7 @@ mod tests {
             (vec!["3-5", ".", "1.2.3"], "1.2.3"),
             (vec!["2-3", "-"], "1.2-alpha-4"),
         ];
-        let cpv = cpv("app-editors", "vim", "1.2_alpha4");
+        let cpv = cpv("app-editors/vim-1.2_alpha4");
         for (args, expected) in test_cases {
             let response = FunctionReply::Ok(Some(expected.to_owned()));
             let args = args.into_iter().map(String::from).collect::<Vec<_>>();
@@ -269,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_ver_rs_err() {
-        let pkg = cpv("app-editors", "vim", "1.2b_alpha4");
+        let pkg = cpv("app-editors/vim-1.2b_alpha4");
         let test_cases = [vec![], vec!["1"]];
         for args in test_cases {
             let args = args.into_iter().map(String::from).collect::<Vec<_>>();
@@ -376,7 +376,7 @@ mod tests {
             (None, "-eq", "1.0", true),
         ];
 
-        let cpv = cpv("sys-apps", "coreutils", "1.0");
+        let cpv = cpv("sys-apps/coreutils-1.0");
         for (version1, op, version2, expected) in test_cases {
             let response = FunctionReply::from_bool(expected);
             assert_eq!(
@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn test_ver_test_err() {
-        let cpv = cpv("sys-apps", "coreutils", "1.0");
+        let cpv = cpv("sys-apps/coreutils-1.0");
         let test_cases = [
             // Invalid argument order
             (Some("-lt"), "1", "2"),

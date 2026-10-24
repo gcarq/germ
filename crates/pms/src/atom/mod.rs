@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_atom_matches() {
-        let cpv = cpv("sys-devel", "gcc", "15.2.1_p20251122-r1");
+        let cpv = cpv("sys-devel/gcc-15.2.1_p20251122-r1");
         for (atom, expected) in [
             ("sys-devel/gcc", true),
             ("=sys-devel/gcc-15*", true),

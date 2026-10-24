@@ -1,19 +1,8 @@
 use std::fs;
 use std::path::Path;
-use std::sync::LazyLock;
 
-use fancy_regex::Regex;
-use germ_pms::grammar::{REVISION, VERSION, VERSION_SUFFIXES};
 use germ_pms::{CatName, Cpv, PackageVersion, PkgName};
 use log::debug;
-
-/// Regex to validate and parse `version`, `suffixes` and the `revision` from an ebuild file name.
-static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!(
-        r"\A(?<version>{VERSION})(?<suffixes>{VERSION_SUFFIXES})(?:-r(?<revision>{REVISION}))?\z"
-    ))
-    .unwrap()
-});
 
 /// Resolves all [`Cpv`] from the given repository path and categories.
 pub fn resolve_from_repo_path<'r>(
@@ -67,10 +56,6 @@ pub fn resolve_from_pkg_path<'c>(
 /// Parses a [`Cpv`] from the given `category`, `package` and `ebuild_filename`.
 ///
 /// Returns `None` if the file is not a valid ebuild or the package name doesn't match the ebuild name.
-///
-/// # Panics
-///
-/// Will panic if the regex engine fails e.g. backtracking limit is exceeded.
 fn cpv_from_fs_parts(category: &CatName, package: PkgName, ebuild_filename: &str) -> Option<Cpv> {
     let Some(version) = ebuild_filename
         .strip_suffix(".ebuild")?
@@ -81,20 +66,8 @@ fn cpv_from_fs_parts(category: &CatName, package: PkgName, ebuild_filename: &str
         return None;
     };
 
-    let caps = match VERSION_RE.captures(version) {
-        Ok(caps) => caps?,
-        Err(err) => {
-            panic!(
-                "BUG: regex engine error while parsing version from ebuild filename {ebuild_filename}: {err}"
-            );
-        }
-    };
-
-    let revision = caps.name("revision").map(|m| m.as_str());
-    match PackageVersion::new(&caps["version"], Some(&caps["suffixes"]), revision) {
-        Ok(version) => Some(Cpv::new(category.clone(), package, version)),
-        Err(_) => None,
-    }
+    let version = PackageVersion::try_from(version).ok()?;
+    Some(Cpv::new(category.clone(), package, version))
 }
 
 #[cfg(test)]
@@ -109,13 +82,8 @@ mod tests {
         let valid_cases = [
             ("vim", "vim-8.2.3456.ebuild", "vim", "8.2.3456"),
             ("curl", "curl-7.79.1_beta2.ebuild", "curl", "7.79.1_beta2"),
-            ("pkg", "pkg-1.0-r0.ebuild", "pkg", "1.0-r0"),
-            (
-                "example",
-                "example-1.0.0-r0101.ebuild",
-                "example",
-                "1.0.0-r0101",
-            ),
+            ("sed", "sed-1-r0.ebuild", "sed", "1-r0"),
+            ("zlib", "zlib-1-r01.ebuild", "zlib", "1-r01"),
             ("foo-r2", "foo-r2-2.ebuild", "foo-r2", "2"),
             ("foo-", "foo--1.ebuild", "foo-", "1"),
         ];
@@ -128,14 +96,15 @@ mod tests {
             )
             .unwrap();
 
-            assert_eq!(parsed, cpv("dev-libs", expected_package, expected_version));
+            let cpv = cpv(&format!("dev-libs/{expected_package}-{expected_version}"));
+            assert_eq!(parsed, cpv);
         }
     }
 
     #[test]
     fn test_cpv_from_ebuild_err() {
         // packge, ebuild
-        let invalid_cases = [("foo", "bar-1.ebuild"), ("foo", "Manifest")];
+        let invalid_cases = [("nano", "vim-1.ebuild"), ("nano", "Manifest")];
         for (package, ebuild) in invalid_cases {
             let parsed = cpv_from_fs_parts(
                 &"dev-libs".parse().unwrap(),

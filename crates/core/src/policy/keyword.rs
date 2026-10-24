@@ -169,9 +169,7 @@ mod tests {
 
     fn package<'a>(keywords: impl IntoIterator<Item = &'a str>) -> Package {
         pkg(
-            "dev-lang",
-            "rust",
-            "1.0",
+            "dev-lang/rust-1.0",
             &[(
                 "KEYWORDS",
                 &keywords.into_iter().collect::<Vec<_>>().join(" "),
@@ -248,7 +246,7 @@ mod tests {
     fn test_policy_installed_package() {
         let policy = policy("amd64", "");
         let pkg = InstalledPackage::from_parts(
-            cpv("dev-lang", "rust", "1.0"),
+            cpv("dev-lang/rust-1.0"),
             "gentoo".parse().unwrap(),
             pkg_metadata(&[("KEYWORDS", "amd64")]),
             EffectiveUse::default(),

@@ -61,7 +61,7 @@ mod tests {
 
     fn with_handler(eapi: Eapi, test: impl FnOnce(&EbuildPhaseHandler)) {
         let reposet = repo_set(vec![RepoBuilder::new("repo")]).unwrap();
-        let cpv = cpv("app-editors", "vim", "1.2.3b_alpha4");
+        let cpv = cpv("app-editors/vim-1.2.3b_alpha4");
         let ebuild = Ebuild {
             eapi,
             cpv: &cpv,
