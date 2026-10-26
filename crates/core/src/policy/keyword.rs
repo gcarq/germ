@@ -245,7 +245,7 @@ mod tests {
     #[test]
     fn test_policy_installed_package() {
         let policy = policy("amd64", "");
-        let pkg = InstalledPackage::from_parts(
+        let pkg = InstalledPackage::new_unchecked(
             cpv("dev-lang/rust-1.0"),
             "gentoo".parse().unwrap(),
             pkg_metadata(&[("KEYWORDS", "amd64")]),

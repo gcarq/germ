@@ -46,7 +46,8 @@ impl InstalledPackage {
     }
 
     /// Creates a new [`InstalledPackage`] from the given parts.
-    pub const fn from_parts(
+    #[cfg(test)]
+    pub(crate) const fn new_unchecked(
         cpv: Cpv,
         repo: RepoName,
         metadata: PackageMetadata,
@@ -154,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_installed_package_matches_atoms() {
-        let pkg = InstalledPackage::from_parts(
+        let pkg = InstalledPackage::new_unchecked(
             cpv("sys-devel/gcc-15.2.1_p20251122-r1"),
             "gentoo".parse().unwrap(),
             pkg_metadata(&[("SLOT", "15")]),
@@ -166,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_installed_package_fmt() {
-        let pkg = InstalledPackage::from_parts(
+        let pkg = InstalledPackage::new_unchecked(
             cpv("app-editors/vim-7.0.174-r1"),
             "gentoo".parse().unwrap(),
             pkg_metadata(&[]),
@@ -188,7 +189,7 @@ mod tests {
     #[test]
     fn test_effective_use() {
         let flag: UseFlag = "flag".parse().unwrap();
-        let pkg = InstalledPackage::from_parts(
+        let pkg = InstalledPackage::new_unchecked(
             cpv("sys-libs/pam-1"),
             "gentoo".parse().unwrap(),
             pkg_metadata(&[]),

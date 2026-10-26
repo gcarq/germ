@@ -14,7 +14,7 @@ pub fn installed(
     iuse_effective: &[&str],
     enabled: &[&str],
 ) -> InstalledPackage {
-    InstalledPackage::from_parts(
+    InstalledPackage::new_unchecked(
         cpv(fqn),
         "gentoo".parse().unwrap(),
         pkg_metadata(&[("SLOT", slot)]),
