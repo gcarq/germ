@@ -1,5 +1,4 @@
-use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -31,45 +30,11 @@ impl Operation {
 
 /// Defines the precedence in inheritance chains for resolving
 /// keywords and masks in the correct order.
-#[derive(Eq, Copy, Clone, Debug)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Copy, Clone, Debug)]
 pub enum Precedence {
     Profile(usize),
     Repository,
     User,
-}
-
-impl Precedence {
-    pub const fn ordinal(&self) -> usize {
-        match self {
-            Self::Profile(ord) => *ord,
-            Self::Repository => 65536,
-            Self::User => usize::MAX,
-        }
-    }
-}
-
-impl PartialEq for Precedence {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == Ordering::Equal
-    }
-}
-
-impl Ord for Precedence {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.ordinal().cmp(&other.ordinal())
-    }
-}
-
-impl PartialOrd for Precedence {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Hash for Precedence {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.ordinal().hash(state);
-    }
 }
 
 /// This wraps a [`EntryValue`], usually a [`Atom`] or USE flags in line based files.
