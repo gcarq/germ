@@ -21,7 +21,7 @@ impl NumericComponent {
     }
 
     /// Creates a [`NumericComponent`] from the given `value` without validation.
-    pub fn new_unchecked(value: &str) -> Self {
+    pub(super) fn new_unchecked(value: &str) -> Self {
         Self(value.into())
     }
 
