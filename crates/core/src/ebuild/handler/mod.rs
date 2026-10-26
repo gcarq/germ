@@ -77,7 +77,7 @@ impl<'r> EbuildPhaseHandler<'r> {
 
         let args = Self::build_args();
         let (ipc, child) = IpcHandler::spawn(SANDBOX_BINARY_PATH, &args, &self.env)?;
-        let mut execution = EbuildExecution::new(ipc, child)?;
+        let execution = EbuildExecution::new(ipc, child)?;
         execution
             .run(async |channel| self.handle_messages(channel).await)
             .await
@@ -216,18 +216,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_abort_ipc_ordering() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ipc");
         let args = vec![
             "-c".into(),
             r#"
-                trap 'if IFS= read -r <&${CHILD_READ_FD}; then exit 2; else exit 0; fi' TERM
+                trap 'if IFS= read -r <&${CHILD_READ_FD}; then : > "${MARKER}.data"; else : > "${MARKER}.eof"; exit 0; fi' TERM
                 printf 'ready\4' >&${CHILD_WRITE_FD} || exit 3
                 while :; do :; done
             "#
             .into(),
         ];
-        let (ipc, child) =
-            IpcHandler::spawn(BASH_BINARY_PATH, &args, &FxHashMap::default()).unwrap();
-        let mut execution = EbuildExecution::new(ipc, child).unwrap();
+        let env: FxHashMap<String, String> = [("MARKER".to_owned(), marker.display().to_string())]
+            .into_iter()
+            .collect();
+        let (ipc, child) = IpcHandler::spawn(BASH_BINARY_PATH, &args, &env).unwrap();
+        let execution = EbuildExecution::new(ipc, child).unwrap();
 
         let result: Result<(), PhaseExecutionError> = execution
             .run(async |channel| {
@@ -239,11 +243,10 @@ mod tests {
             })
             .await;
 
+        assert!(result.is_err());
         assert!(
-            result.is_err()
-                && execution
-                    .exit_status()
-                    .is_some_and(|status| status.success())
+            marker.with_extension("eof").exists(),
+            "child did not observe IPC close before SIGTERM"
         );
     }
 }
