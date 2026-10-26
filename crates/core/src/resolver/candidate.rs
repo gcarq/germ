@@ -41,8 +41,8 @@ impl<U: PackageLookup> Resolver<U> {
                 continue;
             }
 
-            if self.state.is_selected(&id) || self.state.is_visiting(&id) {
-                if self.state.satisfies(&id, &requirement)? {
+            if let Some(known) = self.state.candidate(&id) {
+                if known.matches(&requirement)? {
                     trace!("already selected: {pkg}");
                     return Ok(None);
                 }
@@ -113,11 +113,8 @@ impl<U: PackageLookup> Resolver<U> {
 
         match self.resolve_dependencies(candidate).await {
             Ok(None) => match self.provider.vdb_match_by_pkg(&candidate.pkg).await {
-                Ok(installed) => {
-                    if let Some(installed) = installed {
-                        self.state.insert_replacement(id.clone(), installed);
-                    }
-                    self.state.select(id);
+                Ok(replaces) => {
+                    self.state.select(id, replaces);
                     Ok(None)
                 }
                 Err(error) => {

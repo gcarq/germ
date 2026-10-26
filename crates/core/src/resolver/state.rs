@@ -10,36 +10,59 @@ use crate::policy::PolicyRejection;
 use crate::types::{FxIndexMap, FxIndexSet};
 use crate::vdb::package::InstalledPackage;
 
+/// Represents the state of a candidate package in the resolver.
+#[derive(Debug)]
+enum CandidateState {
+    /// Package that is currently being visited.
+    Visiting(EffectivePackage),
+    /// Package that has been selected for the execution plan.
+    Selected {
+        package: EffectivePackage,
+        replaces: Option<Box<InstalledPackage>>,
+    },
+}
+
+impl CandidateState {
+    const fn package(&self) -> &EffectivePackage {
+        match self {
+            Self::Visiting(package) | Self::Selected { package, .. } => package,
+        }
+    }
+
+    fn into_operation(self) -> Option<PackageOperation> {
+        let Self::Selected { package, replaces } = self else {
+            return None;
+        };
+        Some(match replaces {
+            Some(installed) => match package.pkg.cpv().cmp(installed.cpv()) {
+                Ordering::Equal => PackageOperation::Replace(package, *installed),
+                Ordering::Greater => PackageOperation::Upgrade(package, *installed),
+                Ordering::Less => PackageOperation::Downgrade(package, *installed),
+            },
+            None => PackageOperation::Merge(package),
+        })
+    }
+}
+
 /// Holds the current resolver state.
 ///
 /// Every package blocker must hold in the final state.
 #[derive(Debug, Default)]
 pub struct ResolverState {
-    /// Holds packages that have been selected for installation.
-    selected: FxIndexMap<PackageId, EffectivePackage>,
-    /// Holds temporary packages that are currently being visited.
-    visiting: FxIndexMap<PackageId, EffectivePackage>,
+    /// Holds candidate records, with selected candidates in commit order.
+    candidates: FxIndexMap<PackageId, CandidateState>,
     /// Holds rejected candidates.
     rejected: FxIndexMap<PackageId, PolicyRejection>,
     /// Holds active blockers that need to be resolved.
     blockers: Vec<ActiveBlocker>,
     /// Holds installed packages that are planned for removal after the owner is merged.
     removals: FxIndexSet<InstalledPackage>,
-    /// Holds installed package versions that should be replaced.
-    replacements: FxIndexMap<PackageId, InstalledPackage>,
 }
 
 impl ResolverState {
-    /// Returns whether a selected or visiting package with `id` satisfies `requirement`.
-    pub fn satisfies(
-        &self,
-        id: &PackageId,
-        requirement: &AtomRequirement<'_>,
-    ) -> anyhow::Result<bool> {
-        self.selected
-            .get(id)
-            .or_else(|| self.visiting.get(id))
-            .map_or(Ok(false), |pkg| pkg.matches(requirement))
+    /// Returns the candidate package for the given `id` or `None` if it is not known yet.
+    pub fn candidate(&self, id: &PackageId) -> Option<&EffectivePackage> {
+        self.candidates.get(id).map(CandidateState::package)
     }
 
     /// Returns whether a selected or visiting package satisfies `requirement`.
@@ -61,27 +84,27 @@ impl ResolverState {
     }
 
     /// Marks the package for the given `id` as selected.
-    pub fn select(&mut self, id: PackageId) {
-        let pkg = self
-            .visiting
-            .shift_remove(&id)
-            .expect("BUG: selected package must be visited");
-        self.selected.insert(id, pkg);
-    }
-
-    /// Checks if a package with the given `id` is already selected.
-    pub fn is_selected(&self, id: &PackageId) -> bool {
-        self.selected.contains_key(id)
-    }
-
-    /// Checks if a package with the given `id` is currently being visited.
-    pub fn is_visiting(&self, id: &PackageId) -> bool {
-        self.visiting.contains_key(id)
+    ///
+    /// `replaces` is the installed package version the selected package supersedes in its slot.
+    pub fn select(&mut self, id: PackageId, replaces: Option<InstalledPackage>) {
+        // We have to use `shift_remove()` and `insert()` to preserve the order,
+        // because `StateCheckpoint` just truncates `candidates` to a previous length.
+        let Some(CandidateState::Visiting(package)) = self.candidates.shift_remove(&id) else {
+            panic!("BUG: selected package must be visited");
+        };
+        self.candidates.insert(
+            id,
+            CandidateState::Selected {
+                package,
+                replaces: replaces.map(Box::new),
+            },
+        );
     }
 
     /// Marks a package as being visited.
     pub fn visit(&mut self, id: PackageId, candidate: &EffectivePackage) {
-        self.visiting.insert(id, candidate.clone());
+        self.candidates
+            .insert(id, CandidateState::Visiting(candidate.clone()));
     }
 
     /// Marks a package as rejected.
@@ -156,50 +179,30 @@ impl ResolverState {
     /// Creates a [`StateCheckpoint`] for speculative resolver state.
     pub fn checkpoint(&self) -> StateCheckpoint {
         StateCheckpoint {
-            selected: self.selected.len(),
-            visiting: self.visiting.len(),
+            candidates: self.candidates.len(),
             blockers: self.blockers.len(),
             removals: self.removals.len(),
-            replacements: self.replacements.len(),
         }
     }
 
     /// Rolls back to the given `checkpoint`.
     pub fn rollback(&mut self, checkpoint: StateCheckpoint) {
-        self.selected.truncate(checkpoint.selected);
-        self.visiting.truncate(checkpoint.visiting);
+        self.candidates.truncate(checkpoint.candidates);
         self.blockers.truncate(checkpoint.blockers);
         self.removals.truncate(checkpoint.removals);
-        self.replacements.truncate(checkpoint.replacements);
-    }
-
-    /// Records `installed` as replaced by the selected package with `id`.
-    pub fn insert_replacement(&mut self, id: PackageId, installed: InstalledPackage) {
-        self.replacements.insert(id, installed);
     }
 
     /// Consumes the state and creates a [`ResolutionOutcome`] for `roots` root atoms.
     ///
     /// The resolution is failed when every root failed, partial when only some failed,
     /// and complete when none failed.
-    pub fn finalize(
-        mut self,
-        roots: usize,
-        failures: Vec<RequirementFailure>,
-    ) -> ResolutionOutcome {
-        let mut ops = Vec::with_capacity(self.selected.len() + self.removals.len());
-        for (id, sel) in self.selected {
-            let op = match self.replacements.shift_remove(&id) {
-                Some(installed) => match sel.pkg.cpv().cmp(installed.cpv()) {
-                    Ordering::Equal => PackageOperation::Replace(sel, installed),
-                    Ordering::Greater => PackageOperation::Upgrade(sel, installed),
-                    Ordering::Less => PackageOperation::Downgrade(sel, installed),
-                },
-                None => PackageOperation::Merge(sel),
-            };
-            ops.push(op);
-        }
-        ops.extend(self.removals.into_iter().map(PackageOperation::Unmerge));
+    pub fn finalize(self, roots: usize, failures: Vec<RequirementFailure>) -> ResolutionOutcome {
+        let ops = self
+            .candidates
+            .into_values()
+            .filter_map(CandidateState::into_operation)
+            .chain(self.removals.into_iter().map(PackageOperation::Unmerge))
+            .collect();
         let plan = ExecutionPlan::new(ops);
         let rejected = self.rejected;
         if failures.is_empty() {
@@ -217,18 +220,16 @@ impl ResolverState {
 
     /// Returns an iterator over all selected and "visiting" candidates.
     fn candidates(&self) -> impl Iterator<Item = &EffectivePackage> {
-        self.selected.values().chain(self.visiting.values())
+        self.candidates.values().map(CandidateState::package)
     }
 }
 
 /// A resolver state checkpoint for speculative traversal.
 #[derive(Clone, Copy, Debug)]
 pub struct StateCheckpoint {
-    selected: usize,
-    visiting: usize,
+    candidates: usize,
     blockers: usize,
     removals: usize,
-    replacements: usize,
 }
 
 /// Represents a unique identifier for a package based on its CPV and repo name.
@@ -277,10 +278,7 @@ mod tests {
             id.clone(),
             &EffectivePackage::new(package, EffectiveUse::default()),
         );
-        state.select(id.clone());
-        if let Some(installed) = replacement {
-            state.insert_replacement(id, installed);
-        }
+        state.select(id, replacement);
         state
     }
 
@@ -317,55 +315,51 @@ mod tests {
     }
 
     #[test]
-    fn test_rollback_restores_state() {
+    fn test_rollback() -> anyhow::Result<()> {
         let pam = pkg("sys-libs/pam-1", &[]);
         let zlib = pkg("sys-libs/zlib-1", &[]);
         let glibc = pkg("sys-libs/glibc-1", &[]);
-        let pam_id = PackageId::new(&pam);
+        let replaced = installed("sys-libs/pam-1", "0", &[], &[]);
+        let removal = installed("sys-libs/db-1", "0", &[], &[]);
+        let effective = EffectivePackage::new(pam.clone(), EffectiveUse::default());
+        let mut state = selected_state(pam, Some(replaced.clone()));
         let glibc_id = PackageId::new(&glibc);
-        let installed = installed("sys-libs/pam-2", "0", &[], &[]);
-        let effective = EffectivePackage::new(pam, EffectiveUse::default());
-        let mut state = ResolverState {
-            selected: [(pam_id.clone(), effective.clone())].into_iter().collect(),
-            visiting: [(
-                PackageId::new(&zlib),
-                EffectivePackage::new(zlib, EffectiveUse::default()),
-            )]
-            .into_iter()
-            .collect(),
-            rejected: [(glibc_id.clone(), PolicyRejection::Masked)]
-                .into_iter()
-                .collect(),
-            blockers: vec![ActiveBlocker {
-                owner: effective,
-                atom: atom("sys-libs/db"),
-            }],
-            removals: [installed.clone()].into_iter().collect(),
-            replacements: [(pam_id, installed)].into_iter().collect(),
-        };
-        let checkpoint = ResolverState::default().checkpoint();
+        let zlib_id = PackageId::new(&zlib);
+        state.reject(glibc_id.clone(), PolicyRejection::Masked);
+        let checkpoint = state.checkpoint();
+
+        state.visit(
+            zlib_id.clone(),
+            &EffectivePackage::new(zlib, EffectiveUse::default()),
+        );
+        state.visit(
+            glibc_id.clone(),
+            &EffectivePackage::new(glibc, EffectiveUse::default()),
+        );
+        state.select(zlib_id, None);
+        assert!(
+            state
+                .register_blocker(
+                    &effective,
+                    &atom("sys-libs/db"),
+                    BlockerStrength::Weak,
+                    [removal],
+                )?
+                .is_none()
+        );
 
         state.rollback(checkpoint);
 
-        assert!(state.selected.is_empty());
-        assert!(state.visiting.is_empty());
         assert!(state.blockers.is_empty());
-        assert!(state.removals.is_empty());
-        assert!(state.replacements.is_empty());
-        assert_eq!(state.rejection(&glibc_id), Some(&PolicyRejection::Masked));
-    }
-
-    #[test]
-    fn test_candidates() {
-        let pam = pkg("sys-libs/pam-1", &[]);
-        let zlib = pkg("sys-libs/zlib-1", &[]);
-        let mut state = selected_state(pam.clone(), None);
-        state.visit(
-            PackageId::new(&zlib),
-            &EffectivePackage::new(zlib.clone(), EffectiveUse::default()),
+        let outcome = state.finalize(1, Vec::new());
+        assert_eq!(
+            outcome.plan().unwrap().operations(),
+            &[PackageOperation::Replace(effective, replaced)]
         );
-
-        let candidates: Vec<_> = state.candidates().map(|candidate| &candidate.pkg).collect();
-        assert_eq!(candidates, vec![&pam, &zlib]);
+        assert_eq!(
+            outcome.rejected().get(&glibc_id).copied(),
+            Some(PolicyRejection::Masked)
+        );
+        Ok(())
     }
 }
