@@ -41,7 +41,7 @@ impl EffectiveKeywords {
     /// Evaluates whether the given [`PackageView`] is accepted for the effective keywords.
     pub fn eval<P: PackageView>(&self, pkg: &P) -> KeywordEvalResult {
         if !self.keywords_accepted(pkg, pkg.metadata().keywords()) {
-            return KeywordEvalResult::new(false, false);
+            return KeywordEvalResult::Rejected;
         }
 
         // PMS 5.2.11: Stable restrictions “stable keyword in use” are applied exactly if
@@ -58,7 +58,8 @@ impl EffectiveKeywords {
             })
             .collect::<Vec<_>>();
 
-        KeywordEvalResult::new(true, !self.keywords_accepted(pkg, &testing_only))
+        let stable_in_use = !self.keywords_accepted(pkg, &testing_only);
+        KeywordEvalResult::Accepted { stable_in_use }
     }
 
     /// Returns `true` if the given [`PackageView`] accepts the given `keywords`.
@@ -89,18 +90,9 @@ impl EffectiveKeywords {
 /// Holds the result of evaluating a [`PackageView`]
 /// against the effective keywords policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct KeywordEvalResult {
-    pub accepted: bool,
-    pub stable_in_use: bool,
-}
-
-impl KeywordEvalResult {
-    pub const fn new(accepted: bool, stable_in_use: bool) -> Self {
-        Self {
-            accepted,
-            stable_in_use,
-        }
-    }
+pub enum KeywordEvalResult {
+    Accepted { stable_in_use: bool },
+    Rejected,
 }
 
 /// Defines a compiled keyword rule that can be used to check whether a keyword is accepted.
@@ -179,30 +171,30 @@ mod tests {
 
     #[test]
     fn test_policy() {
+        #[rustfmt::skip]
         let cases = [
-            ("amd64 ~arm64", "", "amd64", (true, true)),
-            ("amd64 ~arm64", "", "~arm64", (true, false)),
-            ("amd64 ~arm64", "", "~amd64", (false, false)),
-            ("*", "", "amd64", (true, true)),
-            ("*", "", "~amd64", (false, false)),
-            ("~*", "", "~amd64", (true, false)),
-            ("~*", "", "amd64", (false, false)),
-            ("**", "", "", (true, false)),
-            ("**", "", "-amd64", (true, false)),
-            ("amd64", "dev-lang/rust -amd64", "amd64", (false, false)),
-            ("amd64", "dev-lang/rust -* ~amd64", "~amd64", (true, false)),
-            ("amd64", "dev-lang/rust", "~amd64", (true, false)),
-            ("amd64", "dev-lang/rust", "~arm64", (false, false)),
-            ("*", "dev-lang/rust", "~arm64", (true, false)),
-            ("", "dev-lang/rust **", "", (true, false)),
-            ("", "dev-lang/rust **", "-amd64", (true, false)),
-            ("", "dev-lang/rust **", "-*", (true, false)),
+            ("amd64 ~arm64", "", "amd64", KeywordEvalResult::Accepted { stable_in_use: true }),
+            ("amd64 ~arm64", "", "~arm64", KeywordEvalResult::Accepted { stable_in_use: false }),
+            ("amd64 ~arm64", "", "~amd64", KeywordEvalResult::Rejected),
+            ("*", "", "amd64", KeywordEvalResult::Accepted { stable_in_use: true }),
+            ("*", "", "~amd64", KeywordEvalResult::Rejected),
+            ("~*", "", "~amd64", KeywordEvalResult::Accepted { stable_in_use: false }),
+            ("~*", "", "amd64", KeywordEvalResult::Rejected),
+            ("**", "", "", KeywordEvalResult::Accepted { stable_in_use: false }),
+            ("**", "", "-amd64", KeywordEvalResult::Accepted { stable_in_use: false }),
+            ("amd64", "dev-lang/rust -amd64", "amd64", KeywordEvalResult::Rejected),
+            ("amd64", "dev-lang/rust -* ~amd64", "~amd64", KeywordEvalResult::Accepted { stable_in_use: false }),
+            ("amd64", "dev-lang/rust", "~amd64", KeywordEvalResult::Accepted { stable_in_use: false }),
+            ("amd64", "dev-lang/rust", "~arm64", KeywordEvalResult::Rejected),
+            ("*", "dev-lang/rust", "~arm64", KeywordEvalResult::Accepted { stable_in_use: false }),
+            ("", "dev-lang/rust **", "", KeywordEvalResult::Accepted { stable_in_use: false }),
+            ("", "dev-lang/rust **", "-amd64", KeywordEvalResult::Accepted { stable_in_use: false }),
+            ("", "dev-lang/rust **", "-*", KeywordEvalResult::Accepted { stable_in_use: false }),
         ];
 
-        for (accept_keywords, package_accept_keywords, keywords, (accepted, stable)) in cases {
+        for (accept_keywords, package_accept_keywords, keywords, expected) in cases {
             let policy = policy(accept_keywords, package_accept_keywords);
             let pkg = package(keywords.split_whitespace());
-            let expected = KeywordEvalResult::new(accepted, stable);
             assert_eq!(policy.eval(&pkg), expected, "{keywords}");
         }
     }
@@ -212,11 +204,13 @@ mod tests {
         let test_cases = [
             (
                 "*/* -~amd64\ndev-lang/rust ~amd64",
-                KeywordEvalResult::new(true, false),
+                KeywordEvalResult::Accepted {
+                    stable_in_use: false,
+                },
             ),
             (
                 "dev-lang/rust ~amd64\n*/* -~amd64",
-                KeywordEvalResult::new(false, false),
+                KeywordEvalResult::Rejected,
             ),
         ];
 
@@ -238,7 +232,7 @@ mod tests {
         let policy = EffectiveKeywords::new(Vec::default(), package_accept_keywords);
 
         let pkg = package(["amd64"]);
-        assert_eq!(policy.eval(&pkg), KeywordEvalResult::new(false, false));
+        assert_eq!(policy.eval(&pkg), KeywordEvalResult::Rejected);
         Ok(())
     }
 
@@ -251,21 +245,41 @@ mod tests {
             pkg_metadata(&[("KEYWORDS", "amd64")]),
             EffectiveUse::default(),
         );
-        assert_eq!(policy.eval(&pkg), KeywordEvalResult::new(true, true));
+        assert_eq!(
+            policy.eval(&pkg),
+            KeywordEvalResult::Accepted {
+                stable_in_use: true
+            }
+        );
     }
 
     #[test]
     fn test_policy_stable_keywords() {
         let keywords = policy("amd64 ~amd64", "");
         let pkg = package(["amd64"]);
-        assert_eq!(keywords.eval(&pkg), KeywordEvalResult::new(true, false));
+        assert_eq!(
+            keywords.eval(&pkg),
+            KeywordEvalResult::Accepted {
+                stable_in_use: false
+            }
+        );
 
         let keywords = policy("amd64 ~arm64", "");
         let pkg = package(["amd64", "arm64"]);
-        assert_eq!(keywords.eval(&pkg), KeywordEvalResult::new(true, false));
+        assert_eq!(
+            keywords.eval(&pkg),
+            KeywordEvalResult::Accepted {
+                stable_in_use: false
+            }
+        );
 
         let keywords = policy("amd64", "dev-lang/rust ~amd64");
         let pkg = package(["amd64"]);
-        assert_eq!(keywords.eval(&pkg), KeywordEvalResult::new(true, false));
+        assert_eq!(
+            keywords.eval(&pkg),
+            KeywordEvalResult::Accepted {
+                stable_in_use: false
+            }
+        );
     }
 }

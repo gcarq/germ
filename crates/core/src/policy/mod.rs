@@ -13,6 +13,7 @@ use germ_pms::PackageView;
 use self::keyword::EffectiveKeywords;
 use self::pkgmask::PackageMasks;
 use self::useflag::UsePolicy;
+use crate::policy::keyword::KeywordEvalResult;
 use crate::useflag::EffectiveUse;
 
 /// Defines the outcome of the package evaluation against the policies.
@@ -67,10 +68,12 @@ impl PackagePolicy {
     where
         P: PackageView,
     {
-        let keyword = self.keywords.eval(pkg);
-        if !keyword.accepted {
-            return Ok(PolicyResult::Rejected(PolicyRejection::MissingKeyword));
-        }
+        let stable_in_use = match self.keywords.eval(pkg) {
+            KeywordEvalResult::Accepted { stable_in_use } => stable_in_use,
+            KeywordEvalResult::Rejected => {
+                return Ok(PolicyResult::Rejected(PolicyRejection::MissingKeyword));
+            }
+        };
 
         if self.pkgmasks.is_masked(pkg) {
             return Ok(PolicyResult::Rejected(PolicyRejection::Masked));
@@ -78,7 +81,7 @@ impl PackagePolicy {
 
         let (effective_use, use_satisfied) = self
             .usepolicy
-            .eval(pkg, keyword.stable_in_use)
+            .eval(pkg, stable_in_use)
             .context("failed to evaluate required USE flags")?;
 
         let result = if use_satisfied {
