@@ -100,14 +100,13 @@ impl RepoSet {
     /// If `repo` is provided, only it will be synced, overriding `auto-sync`,
     /// otherwise all repos with `auto-sync` enabled will be synced.
     /// A sync failure is logged as error but doesn't return an `Err`.
-    pub fn maybe_sync(&mut self, repo: Option<&str>) -> Result<(), RepoSetError> {
+    pub fn maybe_sync(&mut self, repo: Option<&RepoName>) -> Result<(), RepoSetError> {
         if let Some(name) = repo {
-            let name = RepoName::new(name).map_err(RepoSetError::Sync)?;
             let entry = self
                 .entries
-                .get(&name)
+                .get(name)
                 .ok_or_else(|| RepoSetError::Sync(anyhow!("unknown repository '{name}'")))?;
-            entry.sync(&name, true).map_err(|err| {
+            entry.sync(name, true).map_err(|err| {
                 RepoSetError::Sync(err.context(anyhow!("unable to sync repository '{name}'")))
             })?;
         } else {

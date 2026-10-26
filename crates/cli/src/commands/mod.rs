@@ -10,7 +10,7 @@ use clap::Subcommand;
 use germ_core::SysConf;
 use germ_core::package_set::Target;
 use germ_core::repository::RepoSet;
-use germ_pms::Atom;
+use germ_pms::{Atom, RepoName};
 
 use crate::Args;
 use crate::commands::gencache::gencache;
@@ -40,14 +40,14 @@ pub enum Command {
 
         /// Only generate cache for the given repository [default: all]
         #[arg(value_name = "repo")]
-        repo: Option<String>,
+        repo: Option<RepoName>,
     },
 
     /// Sync repositories
     Sync {
         /// Only sync the given repository [default: all]
         #[arg(value_name = "repo")]
-        repo: Option<String>,
+        repo: Option<RepoName>,
     },
 }
 
@@ -55,14 +55,14 @@ pub async fn execute(args: &Args, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     match &args.command {
         Command::Info { atom } => info(atom.as_ref(), &sysconf)?,
         Command::Install { targets } => install(targets, sysconf).await?,
-        Command::Gencache { force, repo } => gencache(repo.as_deref(), *force, sysconf).await?,
-        Command::Sync { repo } => sync(repo.as_deref(), sysconf)?,
+        Command::Gencache { force, repo } => gencache(repo.as_ref(), *force, sysconf).await?,
+        Command::Sync { repo } => sync(repo.as_ref(), sysconf)?,
     }
     Ok(())
 }
 
 /// Sync either all or the provided `repo`.
-fn sync(repo: Option<&str>, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
+fn sync(repo: Option<&RepoName>, sysconf: Arc<SysConf>) -> anyhow::Result<()> {
     Ok(RepoSet::new(sysconf)
         .context("unable to build repo set")?
         .maybe_sync(repo)?)

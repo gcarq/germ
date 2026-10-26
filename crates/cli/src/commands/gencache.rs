@@ -4,11 +4,12 @@ use anyhow::Context;
 use either::Either;
 use germ_core::SysConf;
 use germ_core::repository::RepoSet;
+use germ_pms::RepoName;
 use log::{info, warn};
 
 /// Generates metadata cache for repositories.
 pub async fn gencache(
-    repo_name: Option<&str>,
+    repo_name: Option<&RepoName>,
     force: bool,
     sysconf: Arc<SysConf>,
 ) -> anyhow::Result<()> {
