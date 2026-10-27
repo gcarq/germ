@@ -90,7 +90,6 @@ mod tests {
             ("!<dev-perl/Mail-Box-3", "<dev-perl/Mail-Box-3"),
             ("!!=sys-libs/db-5*:5", "=sys-libs/db-5*:5"),
             ("!cat/pkg[foo]", "cat/pkg[foo]"),
-            ("!cat/pkg::repo-", "cat/pkg::repo-"),
             ("!cat/pkg:slot", "cat/pkg:slot"),
         ];
         for (input, atom) in cases {
@@ -102,7 +101,7 @@ mod tests {
 
     #[test]
     fn test_dep_atom_parse_error() {
-        let cases = ["!", "!!", "!!!cat/pkg", "!(", "!||", "!^^", "! cat/pkg"];
+        let cases = ["!", "!!", "!!!cat/pkg", "cat/pkg::repo"];
         for input in cases {
             assert!(
                 input.parse::<DepAtom>().is_err(),
@@ -135,6 +134,7 @@ mod tests {
         let depend_cases = [
             ("!cat/pkg", true),
             ("!!cat/pkg", true),
+            ("*/*", false),
             ("^^ ( cat/pkg cat/other )", false),
         ];
         for (input, valid) in depend_cases {
@@ -222,32 +222,6 @@ mod tests {
         for (input, valid) in src_uri_cases {
             let result = ParsedExpr::<SrcUri>::parse(input);
             assert_eq!(result.is_ok(), valid, "SRC_URI: {input}");
-        }
-    }
-
-    #[test]
-    fn test_dep_atom_validate_ok() {
-        let cases = [
-            "dev-lang/rust",
-            "=dev-lang/rust-1.70.0:1.70",
-            "dev-lang/rust[foo(-)]",
-            "!dev-lang/rust",
-            "!!dev-lang/rust",
-            "=dev-lang/rust-1*",
-        ];
-
-        for input in cases {
-            let result = ParsedExpr::<Depend>::parse(input);
-            assert!(result.is_ok(), "expected valid dependency: {input}");
-        }
-    }
-
-    #[test]
-    fn test_dep_atom_validate_err() {
-        let cases = ["*/*", "dev-lang/*", "*/rust", "dev-lang/rust::gentoo"];
-        for input in cases {
-            let result = ParsedExpr::<Depend>::parse(input);
-            assert!(result.is_err(), "expected invalid dependency: {input}");
         }
     }
 

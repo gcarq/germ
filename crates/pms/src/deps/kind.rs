@@ -26,7 +26,7 @@ pub trait ExprKind {
     /// the implementation should just assert the given [`Expr`] and not recurse further.
     fn validate_expr(expr: &Expr<'_, Self::Item>, in_any_of: bool) -> anyhow::Result<()>;
 
-    /// Validates the given [`ExprTree`] item syntax and field specific rules.
+    /// Validates the given [`ExprTree`] syntax and field specific rules.
     ///
     /// Returns an `Err` if the expression violates the field rules.
     fn validate(tree: ExprTree<'_, Self::Item>) -> anyhow::Result<()> {
@@ -253,7 +253,7 @@ fn validate_nodes<K: ExprKind + ?Sized>(
     for expr in nodes {
         K::validate_expr(&expr, in_any_of)?;
         match expr {
-            Expr::Item(item) => item.validate()?,
+            Expr::Item(_) => {}
             Expr::AnyOf(nodes) => validate_nodes::<K>(nodes, true)?,
             Expr::AllOf(nodes)
             | Expr::ExactlyOneOf(nodes)

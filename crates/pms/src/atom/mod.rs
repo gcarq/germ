@@ -303,6 +303,34 @@ impl fmt::Display for Atom {
     }
 }
 
+/// A qualified atom is an [`Atom`] that has a category and package name, but no repository restriction,
+/// e.g.: `sys-libs/glibc`
+#[derive(Archive, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct QualifiedAtom(Atom);
+
+impl QualifiedAtom {
+    pub const fn inner(&self) -> &Atom {
+        &self.0
+    }
+}
+
+impl TryFrom<Atom> for QualifiedAtom {
+    type Error = anyhow::Error;
+
+    fn try_from(atom: Atom) -> Result<Self, Self::Error> {
+        if atom.category().is_none() || atom.package().is_none() || atom.repo().is_some() {
+            bail!("atom is not qualified: {atom}");
+        }
+        Ok(Self(atom))
+    }
+}
+
+impl fmt::Display for QualifiedAtom {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Classifies an [`Atom`] into two categories.
 ///
 /// See `man 5 ebuild` for more information.
@@ -450,6 +478,27 @@ mod tests {
             ("=dev-lang/rust-1", "dev-lang/rust"),
         ] {
             assert_eq!(Atom::new(atom).unwrap().qualified_name(), expected);
+        }
+    }
+
+    #[test]
+    fn test_qualified_atom_ok() {
+        for atom in [
+            "dev-lang/rust",
+            "=dev-lang/rust-1.70.0:1.70",
+            "sys-libs/glibc[audit,caps(-)]",
+        ] {
+            let atom = Atom::new(atom).unwrap();
+            let qualified = QualifiedAtom::try_from(atom.clone()).unwrap();
+            assert_eq!(qualified.inner(), &atom);
+        }
+    }
+
+    #[test]
+    fn test_qualified_atom_err() {
+        for atom in ["*/*", "dev-lang/*", "*/rust", "dev-lang/rust::gentoo"] {
+            let result = QualifiedAtom::try_from(Atom::new(atom).unwrap());
+            assert!(result.is_err(), "{atom}");
         }
     }
 

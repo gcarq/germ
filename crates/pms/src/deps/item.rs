@@ -5,7 +5,7 @@ use std::str::FromStr;
 use anyhow::bail;
 use rkyv::{Archive, Deserialize, Serialize};
 
-use crate::atom::{Atom, BlockerStrength};
+use crate::atom::{Atom, BlockerStrength, QualifiedAtom};
 use crate::uri::Uri;
 use crate::useflag::UseFlag;
 
@@ -17,29 +17,22 @@ pub const ARROW: &str = "->";
 pub trait ExprItem: FromStr<Err = anyhow::Error> + fmt::Display {
     /// Whether items of this type accept the `SRC_URI` arrow syntax `left -> right`.
     const SUPPORTS_ARROW: bool = false;
-
-    /// Validates if the item is valid in a dependency expression.
-    ///
-    /// Returns `Err` if the item is invalid.
-    fn validate(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
 }
 
 /// Extends an [`Atom`] with an optional blocker, e.g.:
 /// `!<app-misc/foo-1.3` or `!!app-misc/foo`.
 ///
 /// [`BlockerStrength`] only makes sense when used a dependency, and is not part of the atom itself.
-#[derive(Archive, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Archive, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct DepAtom {
-    atom: Atom,
+    atom: QualifiedAtom,
     blocker: Option<BlockerStrength>,
 }
 
 impl DepAtom {
     /// Returns the inner [`Atom`].
     pub const fn inner(&self) -> &Atom {
-        &self.atom
+        self.atom.inner()
     }
 
     /// Returns the blocker, if any.
@@ -48,17 +41,7 @@ impl DepAtom {
     }
 }
 
-impl ExprItem for DepAtom {
-    fn validate(&self) -> anyhow::Result<()> {
-        if self.atom.category().is_none()
-            || self.atom.package().is_none()
-            || self.atom.repo().is_some()
-        {
-            bail!("{self} is not valid in dependency expression");
-        }
-        Ok(())
-    }
-}
+impl ExprItem for DepAtom {}
 
 impl FromStr for DepAtom {
     type Err = anyhow::Error;
@@ -71,7 +54,7 @@ impl FromStr for DepAtom {
             },
             None => (None, value),
         };
-        let atom = Atom::new(atom)?;
+        let atom = Atom::new(atom)?.try_into()?;
         Ok(Self { blocker, atom })
     }
 }
