@@ -249,29 +249,29 @@ impl PackageMetadata {
         Ok(Self {
             eapi,
             description: vars.required(MetaVar::Description)?.to_owned(),
-            homepage: vars.expression::<Homepage>(MetaVar::Homepage)?,
+            homepage: vars.expression::<Homepage>()?,
             src_uri: parse_src_uri(vars, eapi)?,
-            license: vars.expression::<License>(MetaVar::License)?,
-            properties: vars.expression::<Properties>(MetaVar::Properties)?,
+            license: vars.expression::<License>()?,
+            properties: vars.expression::<Properties>()?,
             keywords: vars.words(MetaVar::Keywords)?,
             inherit: vars.words(MetaVar::Inherited)?,
-            restrict: vars.expression::<Restrict>(MetaVar::Restrict)?,
+            restrict: vars.expression::<Restrict>()?,
             defined_phases: vars.words(MetaVar::DefinedPhases)?,
             iuse: vars.words(MetaVar::IUse)?,
-            required_use: vars.expression::<RequiredUse>(MetaVar::RequiredUse)?,
+            required_use: vars.expression::<RequiredUse>()?,
             slot: vars
                 .required(MetaVar::Slot)?
                 .parse()
                 .map_err(|err| invalid(MetaVar::Slot, err))?,
-            depend: vars.expression::<Depend>(MetaVar::Depend)?,
-            bdepend: vars.expression::<BDepend>(MetaVar::BDepend)?,
+            depend: vars.expression::<Depend>()?,
+            bdepend: vars.expression::<BDepend>()?,
             idepend: eapi
                 .supports_idepend()
-                .then(|| vars.expression::<IDepend>(MetaVar::IDepend))
+                .then(|| vars.expression::<IDepend>())
                 .transpose()?
                 .unwrap_or_default(),
-            pdepend: vars.expression::<PDepend>(MetaVar::PDepend)?,
-            rdepend: vars.expression::<RDepend>(MetaVar::RDepend)?,
+            pdepend: vars.expression::<PDepend>()?,
+            rdepend: vars.expression::<RDepend>()?,
         })
     }
 }
@@ -356,8 +356,8 @@ impl<'a> RawPackageMetadata<'a> {
     }
 
     /// Parses the value of `var` as an expression of the field `F`.
-    fn expression<F: ExprKind>(&self, var: MetaVar) -> Result<ParsedExpr<F>, PackageMetadataError> {
-        ParsedExpr::parse(optional(self.get(var))).map_err(|err| invalid(var, err))
+    fn expression<F: ExprKind>(&self) -> Result<ParsedExpr<F>, PackageMetadataError> {
+        ParsedExpr::parse(optional(self.get(F::VAR))).map_err(|err| invalid(F::VAR, err))
     }
 }
 
@@ -384,7 +384,7 @@ fn parse_src_uri(
     vars: &RawPackageMetadata<'_>,
     eapi: Eapi,
 ) -> Result<ParsedExpr<SrcUri>, PackageMetadataError> {
-    let src_uri = vars.expression::<SrcUri>(MetaVar::SrcUri)?;
+    let src_uri = vars.expression::<SrcUri>()?;
     if !eapi.supports_selective_uri_restrictions() {
         src_uri
             .try_for_each_item(|item| {
