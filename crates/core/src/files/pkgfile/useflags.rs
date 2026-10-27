@@ -275,15 +275,15 @@ impl UseReset {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::makenv::MakeEnv;
     use crate::types::FxHashSet;
+    use crate::useflag::test_support::expand_config;
 
-    fn config() -> anyhow::Result<UseExpandConfig> {
-        let makenv = MakeEnv::from_content(
+    fn config() -> UseExpandConfig {
+        expand_config(
             "USE_EXPAND=\"LLVM_TARGETS\"
             USE_EXPAND_UNPREFIXED=\"ARCH\"",
-        )?;
-        UseExpandConfig::from_makenv(&makenv)
+        )
+        .unwrap()
     }
 
     fn flags_for<'a>(rules: &'a [(Atom, UseFlags)], atom: &str) -> anyhow::Result<&'a UseFlags> {
@@ -300,7 +300,7 @@ mod tests {
             ["app-admin/sudo foo -bar baz", "app-admin/sudo -foo"],
             Precedence::User,
         )?;
-        let resolved = policy.expand(&config()?)?;
+        let resolved = policy.expand(&config())?;
         let sudo = flags_for(&resolved, "app-admin/sudo")?;
 
         assert_eq!(
@@ -327,7 +327,7 @@ mod tests {
             ],
             Precedence::User,
         )?;
-        let resolved = records.expand(&config()?)?;
+        let resolved = records.expand(&config())?;
         let xz = flags_for(&resolved, "app-arch/xz-utils")?;
 
         assert_eq!(
@@ -339,11 +339,12 @@ mod tests {
 
     #[test]
     fn test_parse_resets() -> anyhow::Result<()> {
+        let config = config();
         let records = PackageUseRecords::from_lines(
             "dev-lang/rust foo bar -* baz".lines(),
             Precedence::User,
         )?;
-        let resolved = records.expand(&config()?)?;
+        let resolved = records.expand(&config)?;
         let rust = flags_for(&resolved, "dev-lang/rust")?;
 
         assert_eq!(rust.get(&UseFlag::new("foo")?), None);
@@ -355,7 +356,7 @@ mod tests {
             "dev-lang/rust LLVM_TARGETS: X86 -* AMDGPU".lines(),
             Precedence::User,
         )?;
-        let resolved = records.expand(&config()?)?;
+        let resolved = records.expand(&config)?;
         let rust = flags_for(&resolved, "dev-lang/rust")?;
 
         assert_eq!(rust.get(&UseFlag::new("llvm_targets_X86")?), None);
@@ -373,7 +374,7 @@ mod tests {
             "dev-lang/rust LLVM_TARGETS: WebAssembly -AMDGPU ARCH: amd64 -x86".lines(),
             Precedence::Profile(2),
         )?;
-        let resolved = entries.expand(&config()?)?;
+        let resolved = entries.expand(&config())?;
         let flags = flags_for(&resolved, "dev-lang/rust")?;
 
         assert_eq!(
@@ -403,6 +404,7 @@ mod tests {
 
     #[test]
     fn test_resolve_rejects_invalid_groups() -> anyhow::Result<()> {
+        let config = config();
         let cases = [
             "dev-lang/rust UNKNOWN: value",
             "dev-lang/rust llvm_targets: AMDGPU",
@@ -410,12 +412,12 @@ mod tests {
         ];
         for line in cases {
             let entries = PackageUseRecords::from_lines(line.lines(), Precedence::User)?;
-            assert!(entries.expand(&config()?).is_err(), "{line}");
+            assert!(entries.expand(&config).is_err(), "{line}");
         }
 
         let trailing =
             PackageUseRecords::from_lines("dev-lang/rust UNKNOWN:".lines(), Precedence::User)?;
-        assert!(trailing.expand(&config()?).is_ok());
+        assert!(trailing.expand(&config).is_ok());
         Ok(())
     }
 
@@ -428,7 +430,7 @@ mod tests {
         let child =
             PackageUseRecords::from_lines("dev-lang/rust UNKNOWN: -*".lines(), Precedence::User)?
                 .inherit(&parent)?;
-        let resolved = child.expand(&config()?)?;
+        let resolved = child.expand(&config())?;
         let flags = flags_for(&resolved, "dev-lang/rust")?;
 
         assert_eq!(
@@ -443,6 +445,7 @@ mod tests {
 
     #[test]
     fn test_inherit_group_reset() -> anyhow::Result<()> {
+        let config = config();
         let grand_parent = PackageUseRecords::from_lines(
             "dev-lang/rust lto LLVM_TARGETS: X86".lines(),
             Precedence::Profile(0),
@@ -453,7 +456,7 @@ mod tests {
         )?
         .inherit(&grand_parent)?;
 
-        let parent_flags = parent.clone().expand(&config()?)?;
+        let parent_flags = parent.clone().expand(&config)?;
         let parent_flags = flags_for(&parent_flags, "dev-lang/rust")?;
         assert_eq!(
             parent_flags.get(&UseFlag::new("lto")?),
@@ -473,7 +476,7 @@ mod tests {
             Precedence::User,
         )?
         .inherit(&parent)?;
-        let flags = child.expand(&config()?)?;
+        let flags = child.expand(&config)?;
         let flags = flags_for(&flags, "dev-lang/rust")?;
         assert_eq!(
             flags.get(&UseFlag::new("lto")?),
@@ -500,7 +503,7 @@ mod tests {
             ],
             Precedence::User,
         )?;
-        let resolved = entries.expand(&config()?)?;
+        let resolved = entries.expand(&config())?;
 
         let rust = flags_for(&resolved, "dev-lang/rust")?;
         assert_eq!(
@@ -519,7 +522,7 @@ mod tests {
 
     #[test]
     fn test_matched_use() -> anyhow::Result<()> {
-        let config = config()?;
+        let config = config();
         let profile = PackageUseRecords::from_lines(
             "llvm-core/clang LLVM_TARGETS: NVPTX".lines(),
             Precedence::Profile(0),
