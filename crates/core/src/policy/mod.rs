@@ -14,6 +14,7 @@ use self::keyword::EffectiveKeywords;
 use self::pkgmask::PackageMasks;
 use self::useflag::UsePolicy;
 use crate::policy::keyword::KeywordEvalResult;
+use crate::policy::useflag::UseFlagEvalResult;
 use crate::useflag::EffectiveUse;
 
 /// Defines the outcome of the package evaluation against the policies.
@@ -21,6 +22,17 @@ use crate::useflag::EffectiveUse;
 pub enum PolicyResult {
     Accepted(EffectiveUse),
     Rejected(PolicyRejection),
+}
+
+impl From<UseFlagEvalResult> for PolicyResult {
+    fn from(result: UseFlagEvalResult) -> Self {
+        match result {
+            UseFlagEvalResult::Satisfied(effective_use) => Self::Accepted(effective_use),
+            UseFlagEvalResult::Unsatisfied => {
+                Self::Rejected(PolicyRejection::RequiredUseUnsatisfied)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -79,16 +91,10 @@ impl PackagePolicy {
             return Ok(PolicyResult::Rejected(PolicyRejection::Masked));
         }
 
-        let (effective_use, use_satisfied) = self
+        let result = self
             .usepolicy
             .eval(pkg, stable_in_use)
             .context("failed to evaluate required USE flags")?;
-
-        let result = if use_satisfied {
-            PolicyResult::Accepted(effective_use)
-        } else {
-            PolicyResult::Rejected(PolicyRejection::RequiredUseUnsatisfied)
-        };
-        Ok(result)
+        Ok(PolicyResult::from(result))
     }
 }

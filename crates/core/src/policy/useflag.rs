@@ -10,6 +10,14 @@ use crate::types::{FxHashMap, FxHashSet};
 use crate::useflag::{EffectiveUse, UseExpandConfig};
 use crate::utils::Inherit;
 
+/// Holds the result of evaluating a [`PackageView`]
+/// against the effective USE flags.
+#[derive(Debug, PartialEq, Eq)]
+pub enum UseFlagEvalResult {
+    Satisfied(EffectiveUse),
+    Unsatisfied,
+}
+
 /// Simple DTO used to build [`UsePolicy`] from user configured USE entries.
 #[derive(Default)]
 pub struct LocalUseRecords {
@@ -115,14 +123,17 @@ impl UsePolicy {
     ///
     /// TODO: This currently only checks the required USE flags to satisfy the expression,
     ///       inactive branches can contain unreferenced USE flags which might not be PMS compatible.
-    pub fn eval<P>(&self, pkg: &P, stable_in_use: bool) -> anyhow::Result<(EffectiveUse, bool)>
+    pub fn eval<P>(&self, pkg: &P, stable_in_use: bool) -> anyhow::Result<UseFlagEvalResult>
     where
         P: PackageView,
     {
         let effective_use = self.effective_for(pkg, stable_in_use);
         let mut evaluator = ReqUseEval::new(&effective_use);
-        let use_satisfied = pkg.metadata().required_use().view().eval(&mut evaluator)?;
-        Ok((effective_use, use_satisfied))
+        let result = match pkg.metadata().required_use().view().eval(&mut evaluator)? {
+            true => UseFlagEvalResult::Satisfied(effective_use),
+            false => UseFlagEvalResult::Unsatisfied,
+        };
+        Ok(result)
     }
 
     /// Returns the effective USE state for the given [`PackageView`].
