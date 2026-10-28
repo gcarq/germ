@@ -3,7 +3,15 @@ use germ_pms::{Keyword, PackageView};
 use super::index::AtomIndex;
 use crate::files::entry::Operation;
 use crate::files::pkgfile::{KeywordRule, PackageAcceptKeywords};
-use crate::keyword::KeywordSelector;
+use crate::keyword::{KeywordSelector, KeywordView};
+
+/// Holds the result of evaluating a [`PackageView`]
+/// against the effective keywords policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeywordEvalResult {
+    Accepted { stable_in_use: bool },
+    Rejected,
+}
 
 /// Immutable runtime policy that determines whether a package is accepted based on its keywords.
 pub struct EffectiveKeywords {
@@ -40,7 +48,7 @@ impl EffectiveKeywords {
 
     /// Evaluates whether the given [`PackageView`] is accepted for the effective keywords.
     pub fn eval<P: PackageView>(&self, pkg: &P) -> KeywordEvalResult {
-        if !self.keywords_accepted(pkg, pkg.metadata().keywords()) {
+        if !self.keywords_accepted(pkg, KeywordView::AsIs) {
             return KeywordEvalResult::Rejected;
         }
 
@@ -48,51 +56,39 @@ impl EffectiveKeywords {
         //             replacing all stable keywords in `KEYWORDS` by the corresponding
         //             tilde prefixed keywords would result in the package installation
         //             being prevented due to the KEYWORDS setting.
-        let testing_only = pkg
-            .metadata()
-            .keywords()
-            .iter()
-            .map(|keyword| match keyword {
-                Keyword::Stable(arch) => Keyword::Testing(arch.clone()),
-                keyword => keyword.clone(),
-            })
-            .collect::<Vec<_>>();
-
-        let stable_in_use = !self.keywords_accepted(pkg, &testing_only);
+        let stable_in_use = !self.keywords_accepted(pkg, KeywordView::StableAsTesting);
         KeywordEvalResult::Accepted { stable_in_use }
     }
 
-    /// Returns `true` if the given [`PackageView`] accepts the given `keywords`.
-    fn keywords_accepted<P: PackageView>(&self, pkg: &P, keywords: &[Keyword]) -> bool {
+    /// Returns `true` if the keywords of the given [`PackageView`] are accepted with [`KeywordView`].
+    fn keywords_accepted<P: PackageView>(&self, pkg: &P, view: KeywordView) -> bool {
+        let keywords = pkg.metadata().keywords();
         if keywords.is_empty() {
-            return self.evaluate_keyword(pkg, None);
+            return self.evaluate_keyword(pkg, None, view);
         }
 
         keywords
             .iter()
-            .any(|keyword| self.evaluate_keyword(pkg, Some(keyword)))
+            .any(|keyword| self.evaluate_keyword(pkg, Some(keyword), view))
     }
 
     /// Evaluates whether the given `keyword` is accepted for the given [`PackageView`].
-    fn evaluate_keyword<P: PackageView>(&self, pkg: &P, keyword: Option<&Keyword>) -> bool {
-        let mut accepted = self
+    fn evaluate_keyword<P: PackageView>(
+        &self,
+        pkg: &P,
+        keyword: Option<&Keyword>,
+        view: KeywordView,
+    ) -> bool {
+        let base = self
             .accept_keywords
             .iter()
-            .any(|selector| selector.matches(keyword));
+            .any(|selector| selector.matches(keyword, view));
 
+        let mut forced = None;
         self.rules
-            .visit_matches(pkg, |action| action.apply(keyword, &mut accepted));
-
-        accepted
+            .visit_matches(pkg, |action| forced = action.apply(keyword, view));
+        forced.unwrap_or(base)
     }
-}
-
-/// Holds the result of evaluating a [`PackageView`]
-/// against the effective keywords policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeywordEvalResult {
-    Accepted { stable_in_use: bool },
-    Rejected,
 }
 
 /// Defines a compiled keyword rule that can be used to check whether a keyword is accepted.
@@ -127,12 +123,13 @@ impl KeywordAction {
         }
     }
 
-    fn apply(&self, keyword: Option<&Keyword>, accepted: &mut bool) {
+    /// Returns a boolean if this action applies to the given `keyword` and `view`.
+    fn apply(&self, keyword: Option<&Keyword>, view: KeywordView) -> Option<bool> {
         match self {
-            Self::Reset => *accepted = false,
-            Self::Accept(selector) if selector.matches(keyword) => *accepted = true,
-            Self::Reject(selector) if selector.matches(keyword) => *accepted = false,
-            _ => {}
+            Self::Accept(selector) if selector.matches(keyword, view) => Some(true),
+            Self::Reject(selector) if selector.matches(keyword, view) => Some(false),
+            Self::Reset => Some(false),
+            _ => None,
         }
     }
 }

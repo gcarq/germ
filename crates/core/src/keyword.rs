@@ -13,13 +13,20 @@ pub enum KeywordSelector {
 }
 
 impl KeywordSelector {
-    /// Checks if the given metadata keyword matches this selector.
-    pub fn matches(&self, keyword: Option<&Keyword>) -> bool {
+    /// Checks if the given metadata keyword matches this selector,
+    /// interpreting stable keywords according to [`KeywordView].
+    pub fn matches(&self, keyword: Option<&Keyword>, view: KeywordView) -> bool {
         match (self, keyword) {
-            (Self::Stable(expected), Some(Keyword::Stable(actual))) => expected == actual,
+            (Self::Stable(expected), Some(Keyword::Stable(actual))) => {
+                view == KeywordView::AsIs && expected == actual
+            }
             (Self::Testing(expected), Some(Keyword::Testing(actual))) => expected == actual,
-            (Self::AnyStable, Some(Keyword::Stable(_))) => true,
+            (Self::Testing(expected), Some(Keyword::Stable(actual))) => {
+                view == KeywordView::StableAsTesting && expected == actual
+            }
+            (Self::AnyStable, Some(Keyword::Stable(_))) => view == KeywordView::AsIs,
             (Self::AnyTesting, Some(Keyword::Testing(_))) => true,
+            (Self::AnyTesting, Some(Keyword::Stable(_))) => view == KeywordView::StableAsTesting,
             (Self::Any, _) => true,
             _ => false,
         }
@@ -42,18 +49,43 @@ impl FromStr for KeywordSelector {
     }
 }
 
+/// Determines how a [`Keyword`] is interpreted when matched against a [`KeywordSelector`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeywordView {
+    /// The keyword is interpreted as written.
+    AsIs,
+    /// Stable keywords are interpreted as their testing counterparts.
+    StableAsTesting,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_keyword_selector_match() -> anyhow::Result<()> {
-        assert!(KeywordSelector::from_str("amd64")?.matches(Some(&"amd64".parse()?)));
-        assert!(KeywordSelector::from_str("~*")?.matches(Some(&"~arm64".parse()?)));
-        assert!(!KeywordSelector::from_str("*")?.matches(Some(&"~amd64".parse()?)));
-        assert!(!KeywordSelector::from_str("~*")?.matches(Some(&"-amd64".parse()?)));
-        assert!(KeywordSelector::from_str("**")?.matches(Some(&"-*".parse()?)));
-        assert!(KeywordSelector::from_str("**")?.matches(None));
+        let cases = [
+            ("amd64", Some("amd64"), KeywordView::AsIs, true),
+            ("~amd64", Some("~amd64"), KeywordView::AsIs, true),
+            ("~amd64", Some("amd64"), KeywordView::AsIs, false),
+            ("*", Some("amd64"), KeywordView::AsIs, true),
+            ("*", Some("~amd64"), KeywordView::AsIs, false),
+            ("~*", Some("~amd64"), KeywordView::AsIs, true),
+            ("~*", Some("amd64"), KeywordView::AsIs, false),
+            ("~*", Some("-amd64"), KeywordView::AsIs, false),
+            ("**", None, KeywordView::AsIs, true),
+            ("**", Some("-amd64"), KeywordView::AsIs, true),
+            ("amd64", Some("amd64"), KeywordView::StableAsTesting, false),
+            ("~amd64", Some("amd64"), KeywordView::StableAsTesting, true),
+            ("*", Some("amd64"), KeywordView::StableAsTesting, false),
+            ("~*", Some("amd64"), KeywordView::StableAsTesting, true),
+        ];
+
+        for (selector, keyword, view, expected) in cases {
+            let keyword = keyword.map(str::parse::<Keyword>).transpose()?;
+            let result = KeywordSelector::from_str(selector)?.matches(keyword.as_ref(), view);
+            assert_eq!(result, expected);
+        }
         Ok(())
     }
 }
