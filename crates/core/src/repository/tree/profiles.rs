@@ -17,7 +17,9 @@ pub struct ProfileDescriptions(Vec<ProfileDescription>);
 
 impl ProfileDescriptions {
     pub fn from_path(path: &Path) -> anyhow::Result<Self> {
-        let descriptions = parse_from_path(path, false, true, ProfileDescription::from_line)?;
+        let descriptions = parse_from_path(path, false, true, |line, _| {
+            ProfileDescription::from_line(line)
+        })?;
         Ok(Self(descriptions))
     }
 }
@@ -61,7 +63,7 @@ pub struct Arches(Vec<Arch>);
 
 impl Arches {
     pub fn from_path(path: &Path) -> anyhow::Result<Self> {
-        let archs = parse_from_path(path, false, true, |line| Arch::new(line))?;
+        let archs = parse_from_path(path, false, true, |line, _| Arch::new(line))?;
         Ok(Self(archs))
     }
 

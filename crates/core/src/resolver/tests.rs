@@ -6,6 +6,7 @@ use super::CandidateRejectionReason::{ActiveBlocker, Dependency, Policy, SlotCon
 use super::RequirementFailure::{AnyOf, Blocker, Exhausted, NoCandidate};
 use super::test_support::{ResolverFixture, installed};
 use super::*;
+use crate::files::test_support::origin;
 use crate::policy::PolicyRejection;
 use crate::resolver::PackageOperation::{Merge, Replace, Unmerge, Upgrade};
 use crate::useflag::EffectiveUse;
@@ -485,7 +486,7 @@ async fn test_resolve_rejected_dependency_candidates() {
                     zlib_atom,
                     vec![RejectedCandidate::new(
                         child,
-                        Policy(PolicyRejection::Masked),
+                        Policy(PolicyRejection::Masked(origin(1))),
                     )],
                 )
                 .into(),

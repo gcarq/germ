@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::{fmt, fs, io};
 
 use tempfile::TempDir;
@@ -31,4 +31,38 @@ pub fn write_file(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Res
         fs::create_dir_all(parent)?;
     }
     fs::write(path, contents)
+}
+
+/// A file or file-directory entry in a fixture tree.
+pub enum FixtureFile {
+    File { path: PathBuf, contents: String },
+    Directory { path: PathBuf, contents: String },
+}
+
+impl FixtureFile {
+    /// Creates a file at `path`.
+    pub fn file(path: impl Into<PathBuf>, contents: impl Into<String>) -> Self {
+        Self::File {
+            path: path.into(),
+            contents: contents.into(),
+        }
+    }
+
+    /// Creates a `path/entries` file-directory entry.
+    pub fn entries_dir(path: impl Into<PathBuf>, contents: impl Into<String>) -> Self {
+        Self::Directory {
+            path: path.into(),
+            contents: contents.into(),
+        }
+    }
+
+    /// Writes the entry below `root`.
+    pub fn write_to(&self, root: &Path) -> io::Result<()> {
+        match self {
+            Self::File { path, contents } => write_file(root.join(path), contents),
+            Self::Directory { path, contents } => {
+                write_file(root.join(path).join("entries"), contents)
+            }
+        }
+    }
 }

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::ops::{Deref, DerefMut};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::{fs, io};
 
 use anyhow::{Context, bail};
@@ -8,7 +8,8 @@ use germ_pms::test_support::cpv;
 use germ_pms::{Cpv, RepoName};
 
 use super::{RepoSet, Repository};
-use crate::test_support::{build_sysconf, write_file};
+use crate::profile::test_support::ProfileBuilder;
+use crate::test_support::{FixtureFile, build_sysconf, write_file};
 use crate::types::FxHashSet;
 
 /// Owns a temporary directory together with a value that depends on it.
@@ -40,19 +41,14 @@ impl<T> DerefMut for Temp<T> {
     }
 }
 
-enum FixtureEntry {
-    File { path: PathBuf, contents: String },
-    Directory { path: PathBuf, contents: String },
-}
-
 pub struct RepoBuilder {
     repo_name: RepoName,
     repos_conf: BTreeMap<String, String>,
     masters: Option<Vec<String>>,
     formats: Option<Vec<String>>,
     eapi: Option<String>,
-    profiles: Vec<PathBuf>,
-    entries: Vec<FixtureEntry>,
+    profiles: Vec<ProfileBuilder>,
+    files: Vec<FixtureFile>,
     categories: FxHashSet<String>,
     eclasses: Vec<String>,
     licenses: Vec<String>,
@@ -73,7 +69,7 @@ impl RepoBuilder {
             formats: None,
             eapi: None,
             profiles: Vec::new(),
-            entries: Vec::new(),
+            files: Vec::new(),
             categories: FxHashSet::default(),
             eclasses: Vec::new(),
             licenses: Vec::new(),
@@ -105,43 +101,31 @@ impl RepoBuilder {
         self
     }
 
-    pub fn profile(mut self, profile: impl Into<PathBuf>) -> Self {
+    /// Adds a profile directory to the fixture.
+    pub fn profile(mut self, profile: impl Into<ProfileBuilder>) -> Self {
         self.profiles.push(profile.into());
         self
     }
 
-    pub fn profile_eapi(self, profile: impl AsRef<Path>, eapi: impl Into<String>) -> Self {
-        self.profile_file(profile.as_ref().join("eapi"), format!("{}\n", eapi.into()))
-    }
-
-    pub fn parents(
-        self,
-        profile: impl AsRef<Path>,
-        parents: impl IntoIterator<Item = impl Into<String>>,
+    /// Adds multiple profile directories to the fixture.
+    pub fn profiles(
+        mut self,
+        profiles: impl IntoIterator<Item = impl Into<ProfileBuilder>>,
     ) -> Self {
-        let parents = parents.into_iter().map(Into::into).collect::<Vec<_>>();
-        self.profile_file(profile.as_ref().join("parent"), parents.join("\n"))
-    }
-
-    /// Adds a profile file by creating `profiles/<path>`.
-    pub fn profile_file(mut self, path: impl AsRef<Path>, contents: impl Into<String>) -> Self {
-        self.entries.push(FixtureEntry::File {
-            path: Path::new("profiles").join(path.as_ref()),
-            contents: contents.into(),
-        });
+        self.profiles.extend(profiles.into_iter().map(Into::into));
         self
     }
 
-    /// Adds a profile file-directory entry by creating `profiles/<path>/entries`.
-    pub fn profile_entries_dir(
-        mut self,
-        path: impl AsRef<Path>,
-        contents: impl Into<String>,
-    ) -> Self {
-        self.entries.push(FixtureEntry::Directory {
-            path: Path::new("profiles").join(path.as_ref()),
-            contents: contents.into(),
-        });
+    /// Adds a file relative to the repository root.
+    pub fn file(mut self, path: impl AsRef<Path>, contents: impl Into<String>) -> Self {
+        self.files.push(FixtureFile::file(path.as_ref(), contents));
+        self
+    }
+
+    /// Adds a file-directory entry relative to the repository root.
+    pub fn entries_dir(mut self, path: impl AsRef<Path>, contents: impl Into<String>) -> Self {
+        self.files
+            .push(FixtureFile::entries_dir(path.as_ref(), contents));
         self
     }
 
@@ -211,20 +195,11 @@ impl RepoBuilder {
         write_file(profiles.join("categories"), categories.join("\n"))?;
 
         for profile in self.profiles {
-            fs::create_dir_all(profiles.join(profile))?;
+            profile.write_to(&profiles)?;
         }
 
-        for entry in self.entries {
-            match entry {
-                FixtureEntry::File { path, contents } => {
-                    let path = location.join(path);
-                    write_file(path, contents)?;
-                }
-                FixtureEntry::Directory { path, contents } => {
-                    let path = location.join(path);
-                    write_file(path.join("entries"), contents)?;
-                }
-            }
+        for file in &self.files {
+            file.write_to(location)?;
         }
 
         for eclass in self.eclasses {

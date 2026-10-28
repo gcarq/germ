@@ -13,6 +13,7 @@ use germ_pms::PackageView;
 use self::keyword::EffectiveKeywords;
 use self::pkgmask::PackageMasks;
 use self::useflag::UsePolicy;
+use crate::files::entry::LineOrigin;
 use crate::policy::keyword::KeywordEvalResult;
 use crate::policy::useflag::UseFlagEvalResult;
 use crate::useflag::EffectiveUse;
@@ -35,9 +36,9 @@ impl From<UseFlagEvalResult> for PolicyResult {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum PolicyRejection {
-    Masked,
+    Masked(LineOrigin),
     MissingKeyword,
     RequiredUseUnsatisfied,
 }
@@ -46,7 +47,7 @@ impl fmt::Display for PolicyRejection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingKeyword => f.write_str("missing keyword"),
-            Self::Masked => f.write_str("masked"),
+            Self::Masked(origin) => write!(f, "masked (by {origin})"),
             Self::RequiredUseUnsatisfied => f.write_str("required USE unsatisfied"),
         }
     }
@@ -87,8 +88,8 @@ impl PackagePolicy {
             }
         };
 
-        if self.pkgmasks.is_masked(pkg) {
-            return Ok(PolicyResult::Rejected(PolicyRejection::Masked));
+        if let Some(masked_by) = self.pkgmasks.masking(pkg) {
+            return Ok(PolicyResult::Rejected(PolicyRejection::Masked(masked_by)));
         }
 
         let result = self
@@ -96,5 +97,19 @@ impl PackagePolicy {
             .eval(pkg, stable_in_use)
             .context("failed to evaluate required USE flags")?;
         Ok(PolicyResult::from(result))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::files::test_support::origin;
+
+    #[test]
+    fn test_masked_display() {
+        assert_eq!(
+            PolicyRejection::Masked(origin(3)).to_string(),
+            "masked (by /dev/null:3)"
+        );
     }
 }

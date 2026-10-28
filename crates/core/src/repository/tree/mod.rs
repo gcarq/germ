@@ -569,7 +569,7 @@ mod tests {
             let result = RepoBuilder::new("repo")
                 .formats([format])
                 .eapi(eapi)
-                .profile_entries_dir("package.mask", "sys-apps/grep\n")
+                .entries_dir("profiles/package.mask", "sys-apps/grep\n")
                 .finalize();
 
             assert_eq!(result.is_ok(), supported);

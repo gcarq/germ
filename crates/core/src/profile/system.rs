@@ -4,7 +4,7 @@ use std::path::Path;
 use germ_pms::Atom;
 use log::warn;
 
-use crate::files::entry::Precedence;
+use crate::files::entry::{LineOrigin, Precedence};
 use crate::files::{AtomEntries, parse_from_path};
 use crate::utils::Inherit;
 
@@ -18,7 +18,9 @@ impl SystemPackages {
     /// Parses a profile `packages` file.
     pub fn from_path(path: &Path, order: Precedence) -> anyhow::Result<Self> {
         let mut system = Self::default();
-        parse_from_path(path, false, true, |line| system.push(line, order))?;
+        parse_from_path(path, false, true, |text, origin| {
+            system.push(text, order, origin)
+        })?;
         Ok(system)
     }
 
@@ -30,9 +32,9 @@ impl SystemPackages {
     /// Adds one `packages` entry.
     ///
     /// Only package entries with the format `*<atom>` and `-*` are considered.
-    fn push(&mut self, line: &str, order: Precedence) -> anyhow::Result<()> {
+    fn push(&mut self, line: &str, order: Precedence, origin: LineOrigin) -> anyhow::Result<()> {
         if line == "-*" {
-            return self.0.push(line, order);
+            return self.0.push(line, order, origin);
         }
 
         let (negated, body) = match line.strip_prefix('-') {
@@ -46,7 +48,7 @@ impl SystemPackages {
                     true => Cow::Owned(format!("-{atom}")),
                     false => Cow::Borrowed(atom),
                 };
-                self.0.push(&entry, order)?;
+                self.0.push(&entry, order, origin)?;
             }
             None => (),
         }
@@ -63,12 +65,13 @@ impl Inherit for SystemPackages {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::files::test_support::with_origins;
     use crate::test_support::{assert_display_eq, write_file};
 
     fn parse(lines: &str) -> anyhow::Result<SystemPackages> {
         let mut system = SystemPackages::default();
-        for line in lines.lines() {
-            system.push(line, Precedence::Profile(0))?;
+        for (line, origin) in with_origins(lines.lines()) {
+            system.push(line, Precedence::Profile(0), origin)?;
         }
         Ok(system)
     }

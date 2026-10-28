@@ -3,7 +3,7 @@ use log::debug;
 
 use super::index::AtomIndex;
 use crate::files::AtomEntries;
-use crate::files::entry::{Operation, Precedence};
+use crate::files::entry::{LineOrigin, Operation, Precedence};
 use crate::utils::Inherit;
 
 /// Simple DTO used to build [`PackageMasks`] from repo entries.
@@ -22,10 +22,16 @@ pub struct PortageSource {
     pub local_unmask: AtomEntries,
 }
 
+/// A compiled mask or unmask entry with its precedence and origin.
+struct MaskEntry {
+    prec: Precedence,
+    origin: LineOrigin,
+}
+
 /// Immutable runtime policy that determines whether a package is masked.
 pub struct PackageMasks {
-    mask: AtomIndex<Precedence>,
-    unmask: AtomIndex<Precedence>,
+    mask: AtomIndex<MaskEntry>,
+    unmask: AtomIndex<MaskEntry>,
 }
 
 impl PackageMasks {
@@ -51,41 +57,40 @@ impl PackageMasks {
         })
     }
 
-    /// Checks if the given `package` is masked.
-    pub fn is_masked<P: PackageView>(&self, package: &P) -> bool {
-        match Self::max_precedence(&self.mask, package) {
-            Some(mask) => match Self::max_precedence(&self.unmask, package) {
-                Some(unmask) => mask > unmask,
-                None => true,
-            },
-            None => false,
+    /// Returns the origin of the entry masking `package`.
+    pub fn masking<P: PackageView>(&self, package: &P) -> Option<LineOrigin> {
+        let mask = Self::strongest(&self.mask, package)?;
+        match Self::strongest(&self.unmask, package) {
+            Some(unmask) if unmask.prec >= mask.prec => None,
+            _ => Some(mask.origin.clone()),
         }
     }
 
-    /// Returns the highest precedence among the entries matching `package`.
-    fn max_precedence<P: PackageView>(
-        index: &AtomIndex<Precedence>,
+    /// Returns the strongest entry matching `package`.
+    fn strongest<'a, P: PackageView>(
+        index: &'a AtomIndex<MaskEntry>,
         pkg: &P,
-    ) -> Option<Precedence> {
-        let mut max = None;
-        index.visit_matches(pkg, |prec| {
-            if max.is_none_or(|cur| *prec > cur) {
-                max = Some(*prec);
+    ) -> Option<&'a MaskEntry> {
+        let mut strongest: Option<&MaskEntry> = None;
+        index.visit_matches(pkg, |entry| {
+            if strongest.is_none_or(|cur| entry.prec > cur.prec) {
+                strongest = Some(entry);
             }
         });
-        max
+        strongest
     }
 
-    /// Converts `entries` into an ordered list of `(atom, precedence)` masks.
+    /// Converts `entries` into an ordered list of `(atom, mask entry)` masks.
     ///
     /// Only entries with [`Operation::Set`] are included in the resulting list.
-    fn map_from_entries(entries: AtomEntries) -> Vec<(Atom, Precedence)> {
+    fn map_from_entries(entries: AtomEntries) -> Vec<(Atom, MaskEntry)> {
         entries
             .into_entries()
             .filter_map(|entry| {
                 matches!(entry.op, Operation::Set).then(|| {
                     let prec = entry.prec;
-                    (entry.into_inner(), prec)
+                    let origin = entry.origin.clone();
+                    (entry.into_inner(), MaskEntry { prec, origin })
                 })
             })
             .collect()
@@ -98,9 +103,10 @@ mod tests {
 
     use super::*;
     use crate::files::entry::Precedence;
+    use crate::files::test_support::origin;
 
     #[test]
-    fn test_is_masked() -> anyhow::Result<()> {
+    fn test_masking() -> anyhow::Result<()> {
         let masks = PackageMasks::new(
             &RepositorySource::default(),
             PortageSource {
@@ -116,15 +122,53 @@ mod tests {
             },
         )?;
 
-        let rust_unmasked = pkg("dev-lang/rust-1.50-r2", &[]);
-        let rust_masked = pkg("dev-lang/rust-1.60-r1", &[]);
-        let vim = pkg("app-editors/vim-8.2", &[]);
-        let nano = pkg("app-editors/nano-5.0", &[]);
+        let cases = [
+            ("dev-lang/rust-1.50-r2", None),
+            ("dev-lang/rust-1.60-r1", Some(origin(1))),
+            ("app-editors/vim-8.2", Some(origin(2))),
+            ("app-editors/nano-5.0", None),
+        ];
+        for (fqn, expected) in cases {
+            assert_eq!(masks.masking(&pkg(fqn, &[])), expected, "{fqn}");
+        }
 
-        assert!(!masks.is_masked(&rust_unmasked));
-        assert!(masks.is_masked(&rust_masked));
-        assert!(masks.is_masked(&vim));
-        assert!(!masks.is_masked(&nano));
+        // A user mask beats a repository unmask, and a user unmask beats a repository mask.
+        let rust = pkg("dev-lang/rust-1.60", &[]);
+        let cases = [
+            (
+                RepositorySource {
+                    unmask: AtomEntries::from_lines(
+                        ["app-editors/vim", "dev-lang/rust"],
+                        Precedence::Repository,
+                    )?,
+                    ..Default::default()
+                },
+                PortageSource {
+                    local_mask: AtomEntries::from_lines("dev-lang/rust".lines(), Precedence::User)?,
+                    ..Default::default()
+                },
+                Some(origin(1)),
+            ),
+            (
+                RepositorySource {
+                    mask: AtomEntries::from_lines("dev-lang/rust".lines(), Precedence::Repository)?,
+                    ..Default::default()
+                },
+                PortageSource {
+                    local_unmask: AtomEntries::from_lines(
+                        "dev-lang/rust".lines(),
+                        Precedence::User,
+                    )?,
+                    ..Default::default()
+                },
+                None,
+            ),
+        ];
+
+        for (repository, portage, expected) in cases {
+            let masks = PackageMasks::new(&repository, portage)?;
+            assert_eq!(masks.masking(&rust), expected);
+        }
         Ok(())
     }
 }

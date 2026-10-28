@@ -95,17 +95,16 @@ impl PackageSets {
         );
         members.insert(
             SELECTED_PACKAGES_SET.parse()?,
-            parse_from_path(&sysconf.world_path(), false, true, |line| {
+            parse_from_path(&sysconf.world_path(), false, true, |line, _| {
                 Ok(Target::Atom(line.parse()?))
             })?,
         );
+        let world_sets = sysconf.world_sets_path();
         members.insert(
             SELECTED_SETS_SET.parse()?,
-            parse_from_path(&sysconf.world_sets_path(), false, true, |line| {
-                match line.parse()? {
-                    target @ Target::Set(_) => Ok(target),
-                    Target::Atom(_) => bail!("expected a set, found {line}"),
-                }
+            parse_from_path(&world_sets, false, true, |line, _| match line.parse()? {
+                target @ Target::Set(_) => Ok(target),
+                Target::Atom(_) => bail!("expected a set, found {line}"),
             })?,
         );
         members.insert(
@@ -179,7 +178,7 @@ fn add_static_sets(sysconf: &SysConf, members: &mut SetMembers) -> anyhow::Resul
             warn!("Ignoring static package set {name}, which shadows a built-in set");
             continue;
         }
-        let targets = parse_from_path(&file, false, false, str::parse)?;
+        let targets = parse_from_path(&file, false, false, |line, _| line.parse())?;
         members.insert(name, targets);
     }
     Ok(())
@@ -239,6 +238,14 @@ mod tests {
 
     #[test]
     fn test_resolve_world() -> anyhow::Result<()> {
+        // A static set named `world` is ignored, so `@world` is always the built-in set.
+        let builtin: &[&[(&str, &str)]] = &[&[], &[("sets/world", "dev-lang/rust\n")]];
+        for entries in builtin {
+            let sets = build_sets(entries)?;
+            let result = sets.resolve(&[Target::Set("world".parse()?)]);
+            assert_display_eq(result?, ["sys-libs/glibc"]);
+        }
+
         let entries = [
             (
                 "world",
@@ -284,18 +291,6 @@ mod tests {
     }
 
     #[test]
-    fn test_builtin_world() -> anyhow::Result<()> {
-        let cases: &[&[(&str, &str)]] = &[&[], &[("sets/world", "dev-lang/rust\n")]];
-
-        for entries in cases {
-            let sets = build_sets(entries)?;
-            let result = sets.resolve(&[Target::Set("world".parse()?)]);
-            assert_display_eq(result?, ["sys-libs/glibc"]);
-        }
-        Ok(())
-    }
-
-    #[test]
     fn test_build_errors() {
         for (path, contents) in [
             ("world", "not-an-atom\n"),
@@ -307,22 +302,13 @@ mod tests {
     }
 
     #[test]
-    fn test_shared_sets() -> anyhow::Result<()> {
-        let sets = build_sets(&[
-            ("sets/top", "@left\n@right\n"),
-            ("sets/left", "dev-lang/rust\n@right\n"),
-            ("sets/right", "dev-lang/python\n@left\n"),
-        ])?;
-        let result = sets.resolve(&[Target::Set("top".parse()?)]);
-        assert_display_eq(result?, ["dev-lang/rust", "dev-lang/python"]);
-        Ok(())
-    }
-
-    #[test]
     fn test_resolve() -> anyhow::Result<()> {
         let sets = build_sets(&[
             ("sets/extra", "dev-lang/rust\ndev-lang/python\n"),
             ("sets/broken", "@missing\n"),
+            ("sets/top", "@left\n@right\n"),
+            ("sets/left", "dev-lang/rust\n@right\n"),
+            ("sets/right", "dev-lang/python\n@left\n"),
         ])?;
         let targets = ["dev-lang/rust", "@extra", "@extra", "dev-lang/rust"]
             .iter()
@@ -332,6 +318,10 @@ mod tests {
             sets.resolve(&targets)?,
             ["dev-lang/rust", "dev-lang/python"],
         );
+
+        let result = sets.resolve(&[Target::Set("top".parse()?)]);
+        assert_display_eq(result?, ["dev-lang/rust", "dev-lang/python"]);
+
         for name in ["missing", "broken", "preserved-rebuild"] {
             let result = sets.resolve(&[Target::Set(name.parse()?)]);
             assert!(result.is_err(), "{name}");

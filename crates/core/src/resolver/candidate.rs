@@ -35,7 +35,7 @@ impl<U: PackageLookup> Resolver<U> {
         for pkg in pkgs {
             let id = PackageId::new(&pkg);
 
-            if let Some(rejection) = self.state.rejection(&id).copied() {
+            if let Some(rejection) = self.state.rejection(&id).cloned() {
                 trace!("skipping {}: cached rejection {rejection}", pkg.cpv());
                 rejected.push(RejectedCandidate::policy(pkg, rejection));
                 continue;
@@ -61,7 +61,7 @@ impl<U: PackageLookup> Resolver<U> {
                     }
                 }
                 Ok(PolicyResult::Rejected(rejection)) => {
-                    self.state.reject(id, rejection);
+                    self.state.reject(id, rejection.clone());
                     rejected.push(RejectedCandidate::policy(pkg, rejection));
                 }
                 Err(error) => {

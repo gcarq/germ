@@ -7,14 +7,16 @@ use germ_pms::Atom;
 pub(crate) use keywords::{KeywordRule, PackageAcceptKeywords};
 pub(crate) use useflags::{MatchedUse, PackageUseRecords, UseFlags};
 
-use crate::files::entry::Precedence;
+use crate::files::entry::{LineOrigin, Precedence};
 use crate::files::parse_from_path;
+#[cfg(test)]
+use crate::files::test_support::with_origins;
 use crate::types::FxIndexMap;
 use crate::utils::Inherit;
 
 /// This trait abstracts multiple values in a line-based file, such as `package.use`.
 pub trait AtomPolicy: Default + Inherit {
-    fn parse(value: &str, precedence: Precedence) -> anyhow::Result<Self>;
+    fn parse(value: &str, precedence: Precedence, origin: LineOrigin) -> anyhow::Result<Self>;
     fn update_from(&mut self, other: Self);
 }
 
@@ -24,18 +26,22 @@ pub struct AtomPolicies<T: AtomPolicy>(FxIndexMap<Atom, T>);
 
 impl<T: AtomPolicy> AtomPolicies<T> {
     pub fn from_path(path: &Path, precedence: Precedence, recursive: bool) -> anyhow::Result<Self> {
-        let pairs = parse_from_path(path, recursive, true, |line| {
-            Self::parse_line(line, precedence)
+        let pairs = parse_from_path(path, recursive, true, |text, origin| {
+            Self::parse_line(text, precedence, origin)
         })?;
         Ok(Self::from_pairs(pairs))
     }
 
-    fn parse_line(line: &str, precedence: Precedence) -> anyhow::Result<(Atom, T)> {
+    fn parse_line(
+        line: &str,
+        precedence: Precedence,
+        origin: LineOrigin,
+    ) -> anyhow::Result<(Atom, T)> {
         let (atom, value) = match line.split_once(char::is_whitespace) {
             Some((atom, value)) => (atom, value),
             None => (line, ""),
         };
-        Ok((atom.parse()?, T::parse(value, precedence)?))
+        Ok((atom.parse()?, T::parse(value, precedence, origin)?))
     }
 
     /// Merges `pairs` into one policy per atom, preserving order.
@@ -52,9 +58,8 @@ impl<T: AtomPolicy> AtomPolicies<T> {
         lines: impl IntoIterator<Item = &'a str>,
         precedence: Precedence,
     ) -> anyhow::Result<Self> {
-        let pairs = lines
-            .into_iter()
-            .map(|line| Self::parse_line(line, precedence))
+        let pairs = with_origins(lines)
+            .map(|(line, origin)| Self::parse_line(line, precedence, origin))
             .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(Self::from_pairs(pairs))
     }
@@ -92,7 +97,11 @@ mod tests {
     struct TestPolicy(Vec<Box<str>>);
 
     impl AtomPolicy for TestPolicy {
-        fn parse(value: &str, _precedence: Precedence) -> anyhow::Result<Self> {
+        fn parse(
+            value: &str,
+            _precedence: Precedence,
+            _origin: LineOrigin,
+        ) -> anyhow::Result<Self> {
             Ok(Self(
                 value.split_ascii_whitespace().map(Into::into).collect(),
             ))
@@ -116,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_atom_order() -> anyhow::Result<()> {
+    fn test_atom_policies() -> anyhow::Result<()> {
         let policies = AtomPolicies::<TestPolicy>::from_lines(
             [
                 "dev-lang/rust first",
@@ -141,11 +150,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [Atom::new("dev-lang/rust")?, Atom::new("app-editors/vim")?,]
         );
-        Ok(())
-    }
 
-    #[test]
-    fn test_inherit_atom_order() -> anyhow::Result<()> {
         let parent = AtomPolicies::<TestPolicy>::from_lines(
             ["dev-lang/rust parent", "app-editors/vim inherited"],
             Precedence::Profile(0),

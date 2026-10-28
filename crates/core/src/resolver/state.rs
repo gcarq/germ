@@ -268,6 +268,7 @@ mod tests {
     use germ_pms::test_support::{atom, pkg};
 
     use super::*;
+    use crate::files::test_support::origin;
     use crate::resolver::test_support::installed;
     use crate::useflag::EffectiveUse;
 
@@ -325,7 +326,7 @@ mod tests {
         let mut state = selected_state(pam, Some(replaced.clone()));
         let glibc_id = PackageId::new(&glibc);
         let zlib_id = PackageId::new(&zlib);
-        state.reject(glibc_id.clone(), PolicyRejection::Masked);
+        state.reject(glibc_id.clone(), PolicyRejection::Masked(origin(1)));
         let checkpoint = state.checkpoint();
 
         state.visit(
@@ -357,8 +358,8 @@ mod tests {
             &[PackageOperation::Replace(effective, replaced)]
         );
         assert_eq!(
-            outcome.rejected().get(&glibc_id).copied(),
-            Some(PolicyRejection::Masked)
+            outcome.rejected().get(&glibc_id).cloned(),
+            Some(PolicyRejection::Masked(origin(1)))
         );
         Ok(())
     }

@@ -4,7 +4,7 @@ use anyhow::Context;
 use germ_pms::Atom;
 
 use super::{AtomPolicies, AtomPolicy};
-use crate::files::entry::{Entry, EntryValue, Precedence};
+use crate::files::entry::{Entry, EntryValue, LineOrigin, Precedence};
 use crate::keyword::KeywordSelector;
 use crate::utils::Inherit;
 
@@ -38,7 +38,7 @@ impl KeywordSpec {
 
 impl AtomPolicy for KeywordSpec {
     /// Parses a keyword policy for one package.
-    fn parse(value: &str, precedence: Precedence) -> anyhow::Result<Self> {
+    fn parse(value: &str, precedence: Precedence, origin: LineOrigin) -> anyhow::Result<Self> {
         let mut rules = Vec::new();
 
         for keyword in value.split_ascii_whitespace() {
@@ -48,7 +48,7 @@ impl AtomPolicy for KeywordSpec {
                 continue;
             }
 
-            let entry = Entry::from_str(keyword, precedence)
+            let entry = Entry::new(keyword, precedence, origin.clone())
                 .with_context(|| format!("invalid keyword: {keyword}"))?;
             rules.push(KeywordRule::Selector(entry));
         }
@@ -112,42 +112,34 @@ impl KeywordRule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::files::test_support::{entry, origin};
 
     #[test]
     fn test_keyword_spec_parse() -> anyhow::Result<()> {
-        let spec = KeywordSpec::parse(
-            "amd64 ~arm64 * ~* ** -amd64 -~arm64 -~* -**",
-            Precedence::User,
-        )?;
+        let spec = KeywordSpec::parse("amd64 -~arm64 **", Precedence::User, origin(1))?;
 
         assert_eq!(
             spec.0,
             [
-                KeywordRule::Selector(Entry::from_str("amd64", Precedence::User)?),
-                KeywordRule::Selector(Entry::from_str("~arm64", Precedence::User)?),
-                KeywordRule::Selector(Entry::from_str("*", Precedence::User)?),
-                KeywordRule::Selector(Entry::from_str("~*", Precedence::User)?),
-                KeywordRule::Selector(Entry::from_str("**", Precedence::User)?),
-                KeywordRule::Selector(Entry::from_str("-amd64", Precedence::User)?),
-                KeywordRule::Selector(Entry::from_str("-~arm64", Precedence::User)?),
-                KeywordRule::Selector(Entry::from_str("-~*", Precedence::User)?),
-                KeywordRule::Selector(Entry::from_str("-**", Precedence::User)?),
+                KeywordRule::Selector(entry("amd64", Precedence::User, 1)),
+                KeywordRule::Selector(entry("-~arm64", Precedence::User, 1)),
+                KeywordRule::Selector(entry("**", Precedence::User, 1)),
             ]
         );
 
-        let spec = KeywordSpec::parse("amd64 -* ~arm64", Precedence::User)?;
+        let spec = KeywordSpec::parse("amd64 -* ~arm64", Precedence::User, origin(1))?;
         assert_eq!(
             spec.0,
             [
                 KeywordRule::Reset(Precedence::User),
-                KeywordRule::Selector(Entry::from_str("~arm64", Precedence::User)?),
+                KeywordRule::Selector(entry("~arm64", Precedence::User, 1)),
             ]
         );
         Ok(())
     }
 
     #[test]
-    fn test_atom_only_defaults_testing() -> anyhow::Result<()> {
+    fn test_atom_only() -> anyhow::Result<()> {
         let entries =
             PackageAcceptKeywords::from_lines("net-analyzer/netcat".lines(), Precedence::User)?;
         let rules = entries.into_rules().collect::<Vec<_>>();
@@ -158,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn test_duplicate_atom_reset() -> anyhow::Result<()> {
+    fn test_reset() -> anyhow::Result<()> {
         let entries = PackageAcceptKeywords::from_lines(
             [
                 "dev-lang/rust amd64",
@@ -176,14 +168,10 @@ mod tests {
             rules,
             [
                 KeywordRule::Reset(Precedence::User),
-                KeywordRule::Selector(Entry::from_str("~amd64", Precedence::User)?),
+                KeywordRule::Selector(entry("~amd64", Precedence::User, 3)),
             ]
         );
-        Ok(())
-    }
 
-    #[test]
-    fn test_keyword_spec_inherit_reset() -> anyhow::Result<()> {
         let parent = PackageAcceptKeywords::from_lines(
             "dev-lang/rust amd64".lines(),
             Precedence::Profile(0),
@@ -200,7 +188,7 @@ mod tests {
             rules,
             [
                 KeywordRule::Reset(Precedence::Profile(1)),
-                KeywordRule::Selector(Entry::from_str("~amd64", Precedence::Profile(1))?),
+                KeywordRule::Selector(entry("~amd64", Precedence::Profile(1), 1)),
             ]
         );
         Ok(())

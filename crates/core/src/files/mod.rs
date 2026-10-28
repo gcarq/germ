@@ -8,11 +8,15 @@
 pub mod entry;
 mod linefile;
 pub mod pkgfile;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, bail};
+use entry::LineOrigin;
 use germ_pms::{Atom, UseFlag};
 use linefile::LineEntries;
 
@@ -49,12 +53,13 @@ pub fn parse_from_path<T>(
     path: &Path,
     recursive: bool,
     optional: bool,
-    mut parse: impl FnMut(&str) -> anyhow::Result<T>,
+    mut parse: impl FnMut(&str, LineOrigin) -> anyhow::Result<T>,
 ) -> anyhow::Result<Vec<T>> {
     let mut values = Vec::new();
     for file in files_from_path(path, recursive, optional)? {
+        let file: Arc<Path> = file.into();
         let content = read_file(&file)?;
-        let parsed = parse_lines(&content, &mut parse)
+        let parsed = parse_lines(&content, &file, &mut parse)
             .with_context(|| format!("failed to parse {}", file.display()))?;
         values.extend(parsed);
     }
@@ -64,17 +69,19 @@ pub fn parse_from_path<T>(
 /// Calls `parse` for each non-empty line in `content`, with inline comments stripped.
 fn parse_lines<T>(
     content: &str,
-    mut parse: impl FnMut(&str) -> anyhow::Result<T>,
+    file: &Arc<Path>,
+    mut parse: impl FnMut(&str, LineOrigin) -> anyhow::Result<T>,
 ) -> anyhow::Result<Vec<T>> {
     content
         .lines()
         .enumerate()
         .filter_map(|(index, line)| {
             let line = strip_line_comment(line);
-            (!line.is_empty()).then_some((index + 1, line))
+            (!line.is_empty()).then_some(((index + 1) as u32, line))
         })
         .map(|(lineno, line)| {
-            parse(line).with_context(|| format!("error in line {lineno}: {line}"))
+            parse(line, LineOrigin::new(file.clone(), lineno))
+                .with_context(|| format!("error in line {lineno}: {line}"))
         })
         .collect()
 }
@@ -117,11 +124,11 @@ mod tests {
         fs::write(directory.join("b"), "second # inline comment\n")?;
         fs::write(directory.join("a"), "# ignored\n\nfirst\n")?;
 
-        let values = parse_from_path(&directory, true, true, |line| Ok(line.to_owned()))?;
+        let values = parse_from_path(&directory, true, true, |line, _| Ok(line.to_owned()))?;
         assert_eq!(values, ["first", "second"]);
 
         let missing = temp.path().join("missing");
-        let values = parse_from_path::<String>(&missing, false, true, |_| unreachable!())?;
+        let values = parse_from_path::<String>(&missing, false, true, |_, _| unreachable!())?;
         assert!(values.is_empty());
         Ok(())
     }

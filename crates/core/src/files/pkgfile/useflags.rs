@@ -2,7 +2,7 @@ use anyhow::{Context, bail};
 use germ_pms::{Atom, UseFlag};
 
 use super::{AtomPolicies, AtomPolicy};
-use crate::files::entry::{Entry, Precedence};
+use crate::files::entry::{Entry, LineOrigin, Precedence};
 use crate::makenv::EnvVarName;
 use crate::types::FxHashMap;
 use crate::useflag::UseExpandConfig;
@@ -68,7 +68,7 @@ impl UseSpec {
 
 impl AtomPolicy for UseSpec {
     /// Parses one package USE policy value while retaining expansion groups symbolically.
-    fn parse(value: &str, precedence: Precedence) -> anyhow::Result<Self> {
+    fn parse(value: &str, precedence: Precedence, origin: LineOrigin) -> anyhow::Result<Self> {
         if value.is_empty() {
             bail!("invalid package.use definition");
         }
@@ -91,7 +91,7 @@ impl AtomPolicy for UseSpec {
                 continue;
             }
 
-            let entry: Entry<UseFlag> = Entry::from_str(flag, precedence)?;
+            let entry: Entry<UseFlag> = Entry::new(flag, precedence, origin.clone())?;
             // Check if we're in an expansion group
             let target = match &cur_group {
                 Some(group) => PackageUseTarget::Expand {
@@ -142,7 +142,7 @@ enum PackageUseTarget {
 /// Holds the resolved USE flags for a single atom after expansion and inheritance.
 ///
 /// It maps a [`UseFlag`] to its corresponding [`Entry<UseFlag>`],
-/// which contains the operation (set/unset) and precedence.
+/// which contains the operation (set/unset), precedence and origin.
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct UseFlags {
     flags: FxHashMap<UseFlag, Entry<UseFlag>>,
@@ -275,6 +275,7 @@ impl UseReset {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::files::test_support::{entry, flags_for};
     use crate::types::FxHashSet;
     use crate::useflag::test_support::expand_config;
 
@@ -286,124 +287,107 @@ mod tests {
         .unwrap()
     }
 
-    fn flags_for<'a>(rules: &'a [(Atom, UseFlags)], atom: &str) -> anyhow::Result<&'a UseFlags> {
-        let atom = Atom::new(atom)?;
-        rules
-            .iter()
-            .find_map(|(rule_atom, flags)| (rule_atom == &atom).then_some(flags))
-            .context("missing package USE rule")
-    }
-
     #[test]
-    fn test_parse_duplicate_atom_updates_flags() -> anyhow::Result<()> {
-        let policy = PackageUseRecords::from_lines(
-            ["app-admin/sudo foo -bar baz", "app-admin/sudo -foo"],
-            Precedence::User,
-        )?;
-        let resolved = policy.expand(&config())?;
-        let sudo = flags_for(&resolved, "app-admin/sudo")?;
-
-        assert_eq!(
-            sudo.get(&UseFlag::new("foo")?),
-            Some(&Entry::from_str("-foo", Precedence::User)?)
-        );
-        assert_eq!(
-            sudo.get(&UseFlag::new("bar")?),
-            Some(&Entry::from_str("-bar", Precedence::User)?)
-        );
-        assert_eq!(
-            sudo.get(&UseFlag::new("baz")?),
-            Some(&Entry::from_str("baz", Precedence::User)?)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_parse_group_context_is_line_local() -> anyhow::Result<()> {
-        let records = PackageUseRecords::from_lines(
-            [
-                "dev-lang/rust LLVM_TARGETS: AMDGPU",
-                "app-arch/xz-utils direct_flag",
-            ],
-            Precedence::User,
-        )?;
-        let resolved = records.expand(&config())?;
-        let xz = flags_for(&resolved, "app-arch/xz-utils")?;
-
-        assert_eq!(
-            xz.get(&UseFlag::new("direct_flag")?),
-            Some(&Entry::from_str("direct_flag", Precedence::User)?)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_parse_resets() -> anyhow::Result<()> {
-        let config = config();
-        let records = PackageUseRecords::from_lines(
-            "dev-lang/rust foo bar -* baz".lines(),
-            Precedence::User,
-        )?;
-        let resolved = records.expand(&config)?;
-        let rust = flags_for(&resolved, "dev-lang/rust")?;
-
-        assert_eq!(rust.get(&UseFlag::new("foo")?), None);
-        assert_eq!(rust.get(&UseFlag::new("bar")?), None);
-        let entry = rust.get(&UseFlag::new("baz")?);
-        assert_eq!(entry, Some(&Entry::from_str("baz", Precedence::User)?));
-
-        let records = PackageUseRecords::from_lines(
-            "dev-lang/rust LLVM_TARGETS: X86 -* AMDGPU".lines(),
-            Precedence::User,
-        )?;
-        let resolved = records.expand(&config)?;
-        let rust = flags_for(&resolved, "dev-lang/rust")?;
-
-        assert_eq!(rust.get(&UseFlag::new("llvm_targets_X86")?), None);
-        let entry = rust.get(&UseFlag::new("llvm_targets_AMDGPU")?);
-        assert_eq!(
-            entry,
-            Some(&Entry::from_str("llvm_targets_AMDGPU", Precedence::User)?)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_resolve_expansion_groups() -> anyhow::Result<()> {
-        let entries = PackageUseRecords::from_lines(
-            "dev-lang/rust LLVM_TARGETS: WebAssembly -AMDGPU ARCH: amd64 -x86".lines(),
-            Precedence::Profile(2),
-        )?;
-        let resolved = entries.expand(&config())?;
-        let flags = flags_for(&resolved, "dev-lang/rust")?;
-
-        assert_eq!(
-            flags.get(&UseFlag::new("llvm_targets_WebAssembly")?),
-            Some(&Entry::from_str(
-                "llvm_targets_WebAssembly",
-                Precedence::Profile(2)
-            )?)
-        );
-        assert_eq!(
-            flags.get(&UseFlag::new("llvm_targets_AMDGPU")?),
-            Some(&Entry::from_str(
-                "-llvm_targets_AMDGPU",
+    fn test_expand() -> anyhow::Result<()> {
+        // Parsed lines, precedence, target atom, and expected flag states.
+        let cases = [
+            (
+                "dev-lang/rust foo bar -* baz",
+                Precedence::User,
+                "dev-lang/rust",
+                vec![
+                    ("foo", None),
+                    ("bar", None),
+                    ("baz", Some(entry("baz", Precedence::User, 1))),
+                ],
+            ),
+            (
+                "dev-lang/rust LLVM_TARGETS: X86 -* AMDGPU",
+                Precedence::User,
+                "dev-lang/rust",
+                vec![
+                    ("llvm_targets_X86", None),
+                    (
+                        "llvm_targets_AMDGPU",
+                        Some(entry("llvm_targets_AMDGPU", Precedence::User, 1)),
+                    ),
+                ],
+            ),
+            (
+                "dev-lang/rust LLVM_TARGETS: WebAssembly -AMDGPU ARCH: amd64 -x86",
                 Precedence::Profile(2),
-            )?)
-        );
-        assert_eq!(
-            flags.get(&UseFlag::new("amd64")?),
-            Some(&Entry::from_str("amd64", Precedence::Profile(2))?)
-        );
-        assert_eq!(
-            flags.get(&UseFlag::new("x86")?),
-            Some(&Entry::from_str("-x86", Precedence::Profile(2))?)
-        );
+                "dev-lang/rust",
+                vec![
+                    (
+                        "llvm_targets_WebAssembly",
+                        Some(entry("llvm_targets_WebAssembly", Precedence::Profile(2), 1)),
+                    ),
+                    (
+                        "llvm_targets_AMDGPU",
+                        Some(entry("-llvm_targets_AMDGPU", Precedence::Profile(2), 1)),
+                    ),
+                    ("amd64", Some(entry("amd64", Precedence::Profile(2), 1))),
+                    ("x86", Some(entry("-x86", Precedence::Profile(2), 1))),
+                ],
+            ),
+            (
+                "app-admin/sudo foo -bar baz\napp-admin/sudo -foo",
+                Precedence::User,
+                "app-admin/sudo",
+                vec![
+                    ("foo", Some(entry("-foo", Precedence::User, 2))),
+                    ("bar", Some(entry("-bar", Precedence::User, 1))),
+                    ("baz", Some(entry("baz", Precedence::User, 1))),
+                ],
+            ),
+            (
+                "dev-lang/rust LLVM_TARGETS: AMDGPU\napp-arch/xz-utils direct_flag",
+                Precedence::User,
+                "app-arch/xz-utils",
+                vec![(
+                    "direct_flag",
+                    Some(entry("direct_flag", Precedence::User, 2)),
+                )],
+            ),
+            (
+                "dev-lang/rust LLVM_TARGETS: -* AMDGPU\n*/* LLVM_TARGETS: X86",
+                Precedence::User,
+                "dev-lang/rust",
+                vec![
+                    (
+                        "llvm_targets_AMDGPU",
+                        Some(entry("llvm_targets_AMDGPU", Precedence::User, 1)),
+                    ),
+                    ("llvm_targets_X86", None),
+                ],
+            ),
+            (
+                "dev-lang/rust LLVM_TARGETS: -* AMDGPU\n*/* LLVM_TARGETS: X86",
+                Precedence::User,
+                "*/*",
+                vec![(
+                    "llvm_targets_X86",
+                    Some(entry("llvm_targets_X86", Precedence::User, 2)),
+                )],
+            ),
+        ];
+
+        let config = config();
+        for (lines, precedence, atom, expected) in cases {
+            let records = PackageUseRecords::from_lines(lines.lines(), precedence)?;
+            let resolved = records.expand(&config)?;
+            let flags = flags_for(&resolved, atom)?;
+
+            for (flag, expected) in expected {
+                let result = flags.get(&UseFlag::new(flag)?);
+                assert_eq!(result, expected.as_ref(), "{lines} {flag}");
+            }
+        }
         Ok(())
     }
 
     #[test]
-    fn test_resolve_rejects_invalid_groups() -> anyhow::Result<()> {
+    fn test_invalid_groups() -> anyhow::Result<()> {
         let config = config();
         let cases = [
             "dev-lang/rust UNKNOWN: value",
@@ -422,29 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inherit_ignores_reset_only_group() -> anyhow::Result<()> {
-        let parent = PackageUseRecords::from_lines(
-            "dev-lang/rust LLVM_TARGETS: X86".lines(),
-            Precedence::Profile(0),
-        )?;
-        let child =
-            PackageUseRecords::from_lines("dev-lang/rust UNKNOWN: -*".lines(), Precedence::User)?
-                .inherit(&parent)?;
-        let resolved = child.expand(&config())?;
-        let flags = flags_for(&resolved, "dev-lang/rust")?;
-
-        assert_eq!(
-            flags.get(&UseFlag::new("llvm_targets_X86")?),
-            Some(&Entry::from_str(
-                "llvm_targets_X86",
-                Precedence::Profile(0)
-            )?)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_inherit_group_reset() -> anyhow::Result<()> {
+    fn test_inherit() -> anyhow::Result<()> {
         let config = config();
         let grand_parent = PackageUseRecords::from_lines(
             "dev-lang/rust lto LLVM_TARGETS: X86".lines(),
@@ -460,15 +422,12 @@ mod tests {
         let parent_flags = flags_for(&parent_flags, "dev-lang/rust")?;
         assert_eq!(
             parent_flags.get(&UseFlag::new("lto")?),
-            Some(&Entry::from_str("-lto", Precedence::Profile(1))?)
+            Some(&entry("-lto", Precedence::Profile(1), 1))
         );
         assert_eq!(parent_flags.get(&UseFlag::new("llvm_targets_X86")?), None);
         assert_eq!(
             parent_flags.get(&UseFlag::new("llvm_targets_AMDGPU")?),
-            Some(&Entry::from_str(
-                "llvm_targets_AMDGPU",
-                Precedence::Profile(1)
-            )?)
+            Some(&entry("llvm_targets_AMDGPU", Precedence::Profile(1), 1))
         );
 
         let child = PackageUseRecords::from_lines(
@@ -480,42 +439,28 @@ mod tests {
         let flags = flags_for(&flags, "dev-lang/rust")?;
         assert_eq!(
             flags.get(&UseFlag::new("lto")?),
-            Some(&Entry::from_str("lto", Precedence::User)?)
+            Some(&entry("lto", Precedence::User, 1))
         );
         assert_eq!(flags.get(&UseFlag::new("llvm_targets_X86")?), None);
         assert_eq!(flags.get(&UseFlag::new("llvm_targets_AMDGPU")?), None);
         assert_eq!(
             flags.get(&UseFlag::new("llvm_targets_WebAssembly")?),
-            Some(&Entry::from_str(
-                "llvm_targets_WebAssembly",
-                Precedence::User
-            )?)
+            Some(&entry("llvm_targets_WebAssembly", Precedence::User, 1))
         );
-        Ok(())
-    }
 
-    #[test]
-    fn test_resets_are_local_to_atom() -> anyhow::Result<()> {
-        let entries = PackageUseRecords::from_lines(
-            [
-                "dev-lang/rust LLVM_TARGETS: -* AMDGPU",
-                "*/* LLVM_TARGETS: X86",
-            ],
-            Precedence::User,
+        // Resetting an unvalidated group does not discard inherited flags.
+        let parent = PackageUseRecords::from_lines(
+            "dev-lang/rust LLVM_TARGETS: X86".lines(),
+            Precedence::Profile(0),
         )?;
-        let resolved = entries.expand(&config())?;
-
-        let rust = flags_for(&resolved, "dev-lang/rust")?;
+        let child =
+            PackageUseRecords::from_lines("dev-lang/rust UNKNOWN: -*".lines(), Precedence::User)?
+                .inherit(&parent)?;
+        let resolved = child.expand(&config)?;
+        let flags = flags_for(&resolved, "dev-lang/rust")?;
         assert_eq!(
-            rust.get(&UseFlag::new("llvm_targets_AMDGPU")?),
-            Some(&Entry::from_str("llvm_targets_AMDGPU", Precedence::User)?)
-        );
-        assert_eq!(rust.get(&UseFlag::new("llvm_targets_X86")?), None);
-
-        let wildcard = flags_for(&resolved, "*/*")?;
-        assert_eq!(
-            wildcard.get(&UseFlag::new("llvm_targets_X86")?),
-            Some(&Entry::from_str("llvm_targets_X86", Precedence::User)?)
+            flags.get(&UseFlag::new("llvm_targets_X86")?),
+            Some(&entry("llvm_targets_X86", Precedence::Profile(0), 1))
         );
         Ok(())
     }

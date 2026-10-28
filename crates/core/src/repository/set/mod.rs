@@ -383,6 +383,7 @@ mod tests {
     use super::super::test_support::{RepoBuilder, repo_set};
     use super::*;
     use crate::files::entry::Precedence;
+    use crate::profile::test_support::resolve_profile;
     use crate::test_support::build_sysconf;
 
     #[test]
@@ -396,15 +397,9 @@ mod tests {
 
     #[test]
     fn test_validate_profile() -> anyhow::Result<()> {
-        let reposet = repo_set([RepoBuilder::new("repo")
-            .profile("default/linux")
-            .profile("other")])?;
-        let repository = reposet.get("repo").unwrap();
-        let valid = Profile::resolve(
-            &repository.location().join("profiles/default/linux"),
-            &reposet,
-        )?;
-        let invalid = Profile::resolve(&repository.location().join("profiles/other"), &reposet)?;
+        let reposet = repo_set([RepoBuilder::new("repo").profiles(["default/linux", "other"])])?;
+        let valid = resolve_profile(&reposet, "repo", "default/linux")?;
+        let invalid = resolve_profile(&reposet, "repo", "other")?;
 
         assert!(reposet.validate_profile(&valid, &"amd64".parse()?).is_ok());
         assert!(
@@ -418,8 +413,8 @@ mod tests {
     #[test]
     fn test_package_mask_source() -> anyhow::Result<()> {
         let reposet = repo_set([RepoBuilder::new("repo")
-            .profile_file("package.mask", "dev-lang/rust")
-            .profile_file("package.unmask", "app-editors/vim")])?;
+            .file("profiles/package.mask", "dev-lang/rust")
+            .file("profiles/package.unmask", "app-editors/vim")])?;
 
         let source = reposet.package_mask_source()?;
         let mask = source.mask.into_entries().next().expect("repository mask");
@@ -644,7 +639,7 @@ mod tests {
             RepoBuilder::new("second")
                 .formats(["pms"])
                 .eapi("0")
-                .profile_entries_dir("package.mask", "sys-apps/grep\n")
+                .entries_dir("profiles/package.mask", "sys-apps/grep\n")
                 .repos_conf_property("masters", "first"),
         ]);
 

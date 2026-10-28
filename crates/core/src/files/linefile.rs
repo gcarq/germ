@@ -1,7 +1,9 @@
 use std::path::Path;
 
-use super::entry::{Entry, EntryValue, Precedence};
+use super::entry::{Entry, EntryValue, LineOrigin, Precedence};
 use super::parse_from_path;
+#[cfg(test)]
+use super::test_support::with_origins;
 use crate::types::FxHashSet;
 use crate::utils::Inherit;
 
@@ -18,8 +20,8 @@ impl<T: EntryValue> LineEntries<T> {
     ///
     /// if `recursive` is set, `path` is treated as directory and all files in that directory are merged together.
     pub fn from_path(path: &Path, order: Precedence, recursive: bool) -> anyhow::Result<Self> {
-        let entries = parse_from_path(path, recursive, true, |entry| {
-            Self::parse_entry(entry, order)
+        let entries = parse_from_path(path, recursive, true, |text, source| {
+            Self::parse_entry(text, order, source)
         })?;
         Ok(Self::from_entries(entries))
     }
@@ -41,8 +43,13 @@ impl<T: EntryValue> LineEntries<T> {
     }
 
     /// Appends the parsed `line`, treating a bare `-*` as a reset.
-    pub fn push(&mut self, line: &str, order: Precedence) -> anyhow::Result<()> {
-        self.0.push(Self::parse_entry(line, order)?);
+    pub fn push(
+        &mut self,
+        line: &str,
+        order: Precedence,
+        origin: LineOrigin,
+    ) -> anyhow::Result<()> {
+        self.0.push(Self::parse_entry(line, order, origin)?);
         Ok(())
     }
 
@@ -52,10 +59,14 @@ impl<T: EntryValue> LineEntries<T> {
     }
 
     /// Parses a single line, treating a bare `-*` as a reset.
-    fn parse_entry(entry: &str, order: Precedence) -> anyhow::Result<LineEntry<T>> {
-        match entry {
+    fn parse_entry(
+        line: &str,
+        order: Precedence,
+        origin: LineOrigin,
+    ) -> anyhow::Result<LineEntry<T>> {
+        match line {
             "-*" => Ok(LineEntry::Reset),
-            entry => Entry::from_str(entry, order).map(LineEntry::Value),
+            line => Entry::new(line, order, origin).map(LineEntry::Value),
         }
     }
 
@@ -85,9 +96,8 @@ impl<T: EntryValue> LineEntries<T> {
         lines: impl IntoIterator<Item = &'a str>,
         order: Precedence,
     ) -> anyhow::Result<Self> {
-        let entries = lines
-            .into_iter()
-            .map(|entry| Self::parse_entry(entry, order))
+        let entries = with_origins(lines)
+            .map(|(line, origin)| Self::parse_entry(line, order, origin))
             .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(Self::from_entries(entries))
     }
@@ -119,6 +129,7 @@ enum LineEntry<T: EntryValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::files::test_support::entry;
     use crate::files::{AtomEntries, UseEntries};
 
     #[test]
@@ -134,17 +145,17 @@ mod tests {
         assert_eq!(
             file.into_entries().collect::<Vec<_>>(),
             vec![
-                Entry::from_str("dev-libs/libffi", Precedence::Repository)?,
-                Entry::from_str("app-arch/xz-utils", Precedence::Repository)?,
-                Entry::from_str("app-arch/zstd", Precedence::Repository)?,
-                Entry::from_str("-app-arch/rpm", Precedence::Repository)?,
+                entry("dev-libs/libffi", Precedence::Repository, 1),
+                entry("app-arch/xz-utils", Precedence::Repository, 2),
+                entry("app-arch/zstd", Precedence::Repository, 3),
+                entry("-app-arch/rpm", Precedence::Repository, 4),
             ]
         );
         Ok(())
     }
 
     #[test]
-    fn test_inherit_from() -> anyhow::Result<()> {
+    fn test_inherit() -> anyhow::Result<()> {
         let grand_parent = AtomEntries::from_lines(
             [
                 "dev-libs/libffi",
@@ -173,18 +184,15 @@ mod tests {
         assert_eq!(
             child.into_entries().collect::<Vec<_>>(),
             vec![
-                Entry::from_str("dev-libs/libffi", Precedence::Repository)?,
-                Entry::from_str("-sys-libs/glibc", Precedence::Profile(0))?,
-                Entry::from_str("-app-arch/xz-utils", Precedence::Profile(1))?,
-                Entry::from_str("app-arch/zstd", Precedence::Profile(1))?,
-                Entry::from_str("-app-arch/rpm", Precedence::Profile(1))?,
+                entry("dev-libs/libffi", Precedence::Repository, 1),
+                entry("-sys-libs/glibc", Precedence::Profile(0), 2),
+                entry("-app-arch/xz-utils", Precedence::Profile(1), 1),
+                entry("app-arch/zstd", Precedence::Profile(1), 2),
+                entry("-app-arch/rpm", Precedence::Profile(1), 4),
             ]
         );
-        Ok(())
-    }
 
-    #[test]
-    fn test_inherit_reset() -> anyhow::Result<()> {
+        // A reset in an inherited parent discards its own ancestors.
         let grand_parent = UseEntries::from_lines("foo\nbar\n".lines(), Precedence::Profile(0))?;
         let parent = UseEntries::from_lines("-*\nbaz\n".lines(), Precedence::Profile(1))?;
         let mut child = UseEntries::from_lines("qux\n".lines(), Precedence::Profile(2))?;
@@ -193,17 +201,18 @@ mod tests {
         assert_eq!(
             child.into_entries().collect::<Vec<_>>(),
             vec![
-                Entry::from_str("baz", Precedence::Profile(1))?,
-                Entry::from_str("qux", Precedence::Profile(2))?,
+                entry("baz", Precedence::Profile(1), 2),
+                entry("qux", Precedence::Profile(2), 1),
             ]
         );
 
+        // A reset in the child discards everything inherited.
         let parent = UseEntries::from_lines("foo\nbar\n".lines(), Precedence::Profile(0))?;
         let mut child = UseEntries::from_lines("baz\n-*\nqux\n".lines(), Precedence::Profile(1))?;
         child.inherit_from(&parent)?;
         assert_eq!(
             child.into_entries().collect::<Vec<_>>(),
-            vec![Entry::from_str("qux", Precedence::Profile(1))?]
+            vec![entry("qux", Precedence::Profile(1), 3)]
         );
         Ok(())
     }

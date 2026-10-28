@@ -1,6 +1,8 @@
 mod deprecation;
 mod parent;
 mod system;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use std::path::{Path, PathBuf};
 use std::{fmt, iter};
@@ -287,119 +289,149 @@ impl ProfileUseRecords {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
+
+    use germ_pms::Atom;
 
     use super::*;
-    use crate::files::entry::Entry;
+    use crate::files::entry::Precedence;
     use crate::files::pkgfile::KeywordRule;
+    use crate::files::test_support::flags_for;
+    use crate::profile::test_support::{
+        ProfileBuilder, ProfileEntry, keyword_selectors, profile_entries, profile_entry,
+        resolve_profile,
+    };
     use crate::repository::test_support::{RepoBuilder, repo_set};
     use crate::test_support::assert_display_eq;
 
-    fn profile_path(repository: &Path, profile: &str) -> PathBuf {
-        repository.join("profiles").join(profile)
+    fn rules_for(profile: &Profile, atom: &str) -> anyhow::Result<Vec<KeywordRule>> {
+        let atom: Atom = atom.parse()?;
+        Ok(profile
+            .package_accept_keywords
+            .clone()
+            .into_rules()
+            .filter_map(|(rule_atom, rule)| (rule_atom == atom).then_some(rule))
+            .collect())
     }
 
-    fn assert_parent_case(format: &str, parent: &str, succeeds: bool) -> anyhow::Result<()> {
+    fn assert_parent_cases(format: &str) -> anyhow::Result<()> {
+        let cross_repo = format == "portage-2";
         let reposet = repo_set(vec![
-            RepoBuilder::new("source")
-                .formats([format])
-                .profile("base")
-                .parents("child", [parent]),
+            RepoBuilder::new("source").formats([format]).profiles([
+                ProfileBuilder::new("base"),
+                ProfileBuilder::new("relative").parent("../base"),
+                ProfileBuilder::new("cross-repo").parent("target:base"),
+                ProfileBuilder::new("root-relative").parent(":base"),
+            ]),
             RepoBuilder::new("target").formats(["pms"]).profile("base"),
         ])?;
 
-        let source_path = reposet.get("source").unwrap().location();
-        let selected = profile_path(source_path, "child");
-
-        assert_eq!(Profile::resolve(&selected, &reposet).is_ok(), succeeds);
+        let cases = [
+            ("relative", true),
+            ("cross-repo", cross_repo),
+            ("root-relative", cross_repo),
+        ];
+        for (profile, succeeds) in cases {
+            assert_eq!(
+                resolve_profile(&reposet, "source", profile).is_ok(),
+                succeeds,
+                "{format} {profile}"
+            );
+        }
         Ok(())
     }
 
-    fn assert_package_accept_keywords(profile: &Profile) -> anyhow::Result<()> {
-        let rust_atom = "dev-lang/rust".parse()?;
-        let rust_keywords = profile
-            .package_accept_keywords
-            .clone()
-            .into_rules()
-            .filter_map(|(atom, rule)| (atom == rust_atom).then_some(rule))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            rust_keywords,
-            [
-                KeywordRule::Selector(Entry::from_str("amd64", Precedence::Profile(0))?),
-                KeywordRule::Selector(Entry::from_str("~amd64", Precedence::Profile(1))?),
-                KeywordRule::Selector(Entry::from_str("**", Precedence::Profile(2))?),
-            ]
+    fn assert_package_accept_keywords(location: &Path, profile: &Profile) -> anyhow::Result<()> {
+        let atom = "dev-lang/rust";
+        let expected = keyword_selectors(
+            location,
+            "package.accept_keywords",
+            &[
+                ProfileEntry::new("base", "amd64", Precedence::Profile(0), 1),
+                ProfileEntry::new("parent", "~amd64", Precedence::Profile(1), 1),
+                ProfileEntry::new("selected", "**", Precedence::Profile(2), 1),
+            ],
         );
 
-        let vim_atom = "app-editors/vim".parse()?;
-        let vim_keywords = profile
-            .package_accept_keywords
+        assert_eq!(rules_for(profile, atom)?, expected, "{atom}");
+        Ok(())
+    }
+
+    fn assert_package_use_mask(location: &Path, profile: &Profile) -> anyhow::Result<()> {
+        let package_use_mask = profile
+            .use_records
+            .package_use_mask
             .clone()
-            .into_rules()
-            .filter_map(|(atom, rule)| (atom == vim_atom).then_some(rule))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            vim_keywords,
-            [
-                KeywordRule::Reset(Precedence::Profile(1)),
-                KeywordRule::Selector(Entry::from_str("~amd64", Precedence::Profile(1))?),
-            ]
-        );
+            .expand(&profile.use_records.expand_config)?;
+        let flags = flags_for(&package_use_mask, "dev-lang/rust")?;
+
+        let cases: &[(&str, Option<ProfileEntry<'_>>)] = &[
+            (
+                "llvm_targets_AMDGPU",
+                Some(ProfileEntry::new(
+                    "parent",
+                    "llvm_targets_AMDGPU",
+                    Precedence::Profile(1),
+                    1,
+                )),
+            ),
+            ("llvm_targets_X86", None),
+            (
+                "baz",
+                Some(ProfileEntry::new(
+                    "selected",
+                    "baz",
+                    Precedence::Profile(2),
+                    1,
+                )),
+            ),
+        ];
+
+        for &(flag, expected) in cases {
+            let expected = expected.map(|entry| profile_entry(location, "package.use.mask", entry));
+            assert_eq!(flags.get(&flag.parse()?), expected.as_ref(), "{flag}");
+        }
         Ok(())
     }
 
     #[test]
     fn test_profile_resolve() -> anyhow::Result<()> {
         let reposet = repo_set(vec![
-            RepoBuilder::new("repo")
-                .formats(["pms"])
-                .profile("base")
-                .profile("parent")
-                .profile("selected")
-                .parents("parent", ["../base"])
-                .parents("selected", ["../parent"])
-                .profile_file(
-                    "base/make.defaults",
-                    "USE_EXPAND=\"CAMERAS LLVM_TARGETS\"\n\
-                    CAMERAS=\"canon ptp2\"\n",
-                )
-                .profile_file("parent/make.defaults", "CAMERAS=\"-canon nikon\"\n")
-                .profile_file("base/use.mask", "foo\nbar\n")
-                .profile_file("parent/use.mask", "-bar\nbaz\n")
-                .profile_file("selected/use.mask", "-bar\nqux\n")
-                .profile_file(
-                    "base/package.accept_keywords",
-                    "dev-lang/rust amd64\n\
-                    app-editors/vim amd64\n",
-                )
-                .profile_file(
-                    "parent/package.accept_keywords",
-                    "dev-lang/rust ~amd64\n\
-                    app-editors/vim -* ~amd64\n",
-                )
-                .profile_file("selected/package.accept_keywords", "dev-lang/rust **\n")
-                .profile_file(
-                    "base/package.use.mask",
-                    "sys-libs/glibc cet stack-realign\n\
-                     dev-lang/rust LLVM_TARGETS: X86\n",
-                )
-                .profile_file(
-                    "parent/package.use.mask",
-                    "sys-libs/glibc -stack-realign\n\
-                     dev-lang/rust LLVM_TARGETS: -* AMDGPU\n",
-                )
-                .profile_file("selected/package.use.mask", "dev-lang/rust baz\n"),
+            RepoBuilder::new("repo").formats(["pms"]).profiles([
+                ProfileBuilder::new("base")
+                    .file(
+                        "make.defaults",
+                        "USE_EXPAND=\"CAMERAS LLVM_TARGETS\"\nCAMERAS=\"canon ptp2\"\n",
+                    )
+                    .file("use.mask", "foo\nbar\n")
+                    .file("package.accept_keywords", "dev-lang/rust amd64\n")
+                    .file("package.use.mask", "dev-lang/rust LLVM_TARGETS: X86\n"),
+                ProfileBuilder::new("parent")
+                    .parent("../base")
+                    .file("make.defaults", "CAMERAS=\"-canon nikon\"\n")
+                    .file("use.mask", "-bar\nbaz\n")
+                    .file("package.accept_keywords", "dev-lang/rust ~amd64\n")
+                    .file(
+                        "package.use.mask",
+                        "dev-lang/rust LLVM_TARGETS: -* AMDGPU\n",
+                    ),
+                ProfileBuilder::new("selected")
+                    .parent("../parent")
+                    .file("use.mask", "-bar\nqux\n")
+                    .file("package.accept_keywords", "dev-lang/rust **\n")
+                    .file("package.use.mask", "dev-lang/rust baz\n"),
+            ]),
         ])?;
 
         let repository = reposet.get("repo").unwrap();
-        let selected = profile_path(repository.location(), "selected");
-        let profile = Profile::resolve(&selected, &reposet)?;
+        let profile = resolve_profile(&reposet, "repo", "selected")?;
 
         assert_eq!(
             profile.make_defaults.get("CAMERAS").unwrap().to_string(),
             "ptp2 nikon"
         );
-        assert_package_accept_keywords(&profile)?;
+        assert_package_accept_keywords(repository.location(), &profile)?;
+        assert_package_use_mask(repository.location(), &profile)?;
 
         assert_eq!(
             profile
@@ -407,175 +439,88 @@ mod tests {
                 .use_mask
                 .into_entries()
                 .collect::<Vec<_>>(),
-            vec![
-                Entry::from_str("foo", Precedence::Profile(0))?,
-                Entry::from_str("baz", Precedence::Profile(1))?,
-                Entry::from_str("-bar", Precedence::Profile(2))?,
-                Entry::from_str("qux", Precedence::Profile(2))?,
-            ]
-        );
-        let package_use_mask = profile
-            .use_records
-            .package_use_mask
-            .expand(&profile.use_records.expand_config)?;
-        let glibc_atom = "sys-libs/glibc".parse()?;
-        let glibc = package_use_mask
-            .iter()
-            .find_map(|(atom, flags)| (atom == &glibc_atom).then_some(flags))
-            .unwrap();
-        assert_eq!(
-            glibc.get(&"cet".parse()?),
-            Some(&Entry::from_str("cet", Precedence::Profile(0))?)
-        );
-        assert_eq!(
-            glibc.get(&"stack-realign".parse()?),
-            Some(&Entry::from_str("-stack-realign", Precedence::Profile(1))?)
-        );
-
-        let rust_atom = "dev-lang/rust".parse()?;
-        let rust = package_use_mask
-            .iter()
-            .find_map(|(atom, flags)| (atom == &rust_atom).then_some(flags))
-            .unwrap();
-        assert_eq!(
-            rust.get(&"llvm_targets_AMDGPU".parse()?),
-            Some(&Entry::from_str(
-                "llvm_targets_AMDGPU",
-                Precedence::Profile(1)
-            )?)
-        );
-        assert_eq!(rust.get(&"llvm_targets_X86".parse()?), None);
-        assert_eq!(
-            rust.get(&"baz".parse()?),
-            Some(&Entry::from_str("baz", Precedence::Profile(2))?)
+            profile_entries(
+                repository.location(),
+                "use.mask",
+                &[
+                    ProfileEntry::new("base", "foo", Precedence::Profile(0), 1),
+                    ProfileEntry::new("parent", "baz", Precedence::Profile(1), 2),
+                    ProfileEntry::new("selected", "-bar", Precedence::Profile(2), 1),
+                    ProfileEntry::new("selected", "qux", Precedence::Profile(2), 2),
+                ],
+            )
         );
         Ok(())
     }
 
     #[test]
-    fn test_profile_directories() -> anyhow::Result<()> {
+    fn test_profile_file_dirs() -> anyhow::Result<()> {
         let cases = [
-            ("pms-eapi", "pms", "0", false),
-            ("portage-one-eapi", "portage-1", "0", true),
-            ("pms-eapi-seven", "pms", "7", true),
+            ("pms", "0", "use.mask", "test\n", false),
+            ("pms", "7", "use.mask", "test\n", true),
+            ("portage-2", "8", "packages", "sys-apps/coreutils\n", false),
         ];
 
-        for (name, format, eapi, succeeds) in cases {
-            let reposet = repo_set(vec![
-                RepoBuilder::new(name)
-                    .formats([format])
-                    .profile_eapi("selected", eapi)
-                    .profile_entries_dir("selected/use.mask", "test\n"),
-            ])?;
+        for (format, eapi, file, contents, succeeds) in cases {
+            let reposet = repo_set([RepoBuilder::new("repo").formats([format]).profile(
+                ProfileBuilder::new("selected")
+                    .eapi(eapi)
+                    .entries_dir(file, contents),
+            )])?;
 
-            let repo_path = reposet.get(name).unwrap().location();
-            let selected = profile_path(repo_path, "selected");
-
-            assert_eq!(Profile::resolve(&selected, &reposet).is_ok(), succeeds);
+            assert_eq!(
+                resolve_profile(&reposet, "repo", "selected").is_ok(),
+                succeeds,
+                "{format} eapi {eapi} {file}"
+            );
         }
         Ok(())
     }
 
     #[test]
-    fn test_system_set() -> anyhow::Result<()> {
+    fn test_system_set_inherit() -> anyhow::Result<()> {
         let reposet = repo_set(vec![
-            RepoBuilder::new("repo")
-                .formats(["portage-2"])
-                .profile("base")
-                .profile("selected")
-                .parents("selected", ["../base"])
-                .profile_file(
-                    "base/packages",
-                    "app-misc/base\n*sys-apps/coreutils\n*sys-apps/busybox\n",
-                )
-                .profile_file(
-                    "selected/packages",
-                    "-*\n*sys-apps/busybox\napp-misc/tool\n",
-                ),
+            RepoBuilder::new("repo").formats(["portage-2"]).profiles([
+                ProfileBuilder::new("base")
+                    .file("packages", "*sys-apps/coreutils\n*sys-apps/busybox\n"),
+                ProfileBuilder::new("selected")
+                    .parent("../base")
+                    .file("packages", "-*\n*sys-apps/busybox\n"),
+            ]),
         ])?;
 
-        let repository = reposet.get("repo").unwrap();
-        let selected = profile_path(repository.location(), "selected");
-        let profile = Profile::resolve(&selected, &reposet)?;
+        let profile = resolve_profile(&reposet, "repo", "selected")?;
 
         assert_display_eq(profile.system_set.finalize(), ["sys-apps/busybox"]);
         Ok(())
     }
 
     #[test]
-    fn test_packages_are_file_only() -> anyhow::Result<()> {
-        let reposet = repo_set(vec![
-            RepoBuilder::new("repo")
-                .formats(["portage-2"])
-                .profile_eapi("selected", "8")
-                .profile_entries_dir("selected/packages", "sys-apps/coreutils\n"),
-        ])?;
-
-        let repo_path = reposet.get("repo").unwrap().location();
-        let selected = profile_path(repo_path, "selected");
-
-        assert!(Profile::resolve(&selected, &reposet).is_err());
-        Ok(())
-    }
-
-    #[test]
     fn test_parent_formats() -> anyhow::Result<()> {
         for format in ["pms", "portage-1", "portage-2"] {
-            assert_parent_case(format, "../base", true)?;
-            assert_parent_case(format, "target:base", format == "portage-2")?;
-            assert_parent_case(format, ":base", format == "portage-2")?;
+            assert_parent_cases(format)?;
         }
         Ok(())
     }
 
     #[test]
-    fn test_root_parent_escape() -> anyhow::Result<()> {
-        let reposet = repo_set(vec![
-            RepoBuilder::new("source")
-                .formats(["portage-2"])
-                .parents("root-relative", [":../outside"])
-                .parents("ordinary-relative", ["../../outside"]),
-        ])?;
+    fn test_invalid_parents() -> anyhow::Result<()> {
+        let reposet = repo_set([RepoBuilder::new("repo").formats(["portage-2"]).profiles([
+            ProfileBuilder::new("root-relative").parent(":../outside"),
+            ProfileBuilder::new("ordinary-relative").parent("../../outside"),
+            ProfileBuilder::new("selected").parent("../selected"),
+            ProfileBuilder::new("first").parent("../second"),
+            ProfileBuilder::new("second").parent("../third"),
+            ProfileBuilder::new("third").parent("../first"),
+        ])])?;
 
-        let source_path = reposet.get("source").unwrap().location();
-        fs::create_dir(source_path.join("outside"))?;
+        let repo_path = reposet.get("repo").unwrap().location();
+        fs::create_dir(repo_path.join("outside"))?;
 
-        assert!(Profile::resolve(&profile_path(source_path, "root-relative"), &reposet).is_err());
-        assert!(
-            Profile::resolve(&profile_path(source_path, "ordinary-relative"), &reposet).is_err()
-        );
+        for profile in ["root-relative", "ordinary-relative", "selected", "first"] {
+            let result = resolve_profile(&reposet, "repo", profile);
+            assert!(result.is_err(), "{profile}");
+        }
         Ok(())
-    }
-
-    #[test]
-    fn test_parent_direct_cycle() {
-        let reposet = repo_set(vec![
-            RepoBuilder::new("repo")
-                .formats(["pms"])
-                .profile("selected")
-                .parents("selected", ["../selected"]),
-        ])
-        .unwrap();
-        let repo_path = reposet.get("repo").unwrap().location();
-
-        assert!(Profile::resolve(&profile_path(repo_path, "selected"), &reposet).is_err());
-    }
-
-    #[test]
-    fn test_parent_indirect_cycle() {
-        let reposet = repo_set(vec![
-            RepoBuilder::new("repo")
-                .formats(["pms"])
-                .profile("first")
-                .profile("second")
-                .profile("third")
-                .parents("first", ["../second"])
-                .parents("second", ["../third"])
-                .parents("third", ["../first"]),
-        ])
-        .unwrap();
-        let repo_path = reposet.get("repo").unwrap().location();
-
-        assert!(Profile::resolve(&profile_path(repo_path, "first"), &reposet).is_err());
     }
 }
