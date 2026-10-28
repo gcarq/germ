@@ -53,11 +53,11 @@ pub struct UsePolicy {
     global_use: GlobalUseRules,
     iuse_implicit: FxHashSet<UseFlag>,
 
-    use_mask: FxHashSet<UseFlag>,
-    use_force: FxHashSet<UseFlag>,
+    use_mask: Box<[UseFlag]>,
+    use_force: Box<[UseFlag]>,
 
-    use_stable_mask: FxHashSet<UseFlag>,
-    use_stable_force: FxHashSet<UseFlag>,
+    use_stable_mask: Box<[UseFlag]>,
+    use_stable_force: Box<[UseFlag]>,
 
     package_use: PackageUse,
     package_use_mask: PackageUse,
