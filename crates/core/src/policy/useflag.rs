@@ -494,36 +494,27 @@ mod tests {
 
     #[test]
     fn test_effective_use() {
-        // flag, makenv, make_conf, profile_use, package_use, iuse, implicit, expected
+        // flag, makenv, make_conf, package_use, iuse, implicit, expected
         #[rustfmt::skip]
         let cases = [
-            ("foo", "USE=foo", "", "", "*/* -foo", "+foo", "", Some(false)),
-            ("foo", "", "USE=-foo", "", "*/* foo", "foo", "", Some(true)),
-            ("foo", "USE=foo", "", "", "", "", "", None),
-            ("foo", "", "", "", "", "+foo", "", Some(true)),
-            ("foo", "", "USE=-foo", "", "", "+foo", "", Some(false)),
+            ("foo", "USE=foo", "", "*/* -foo", "+foo", "", Some(false)),
+            ("foo", "", "USE=-foo", "*/* foo", "foo", "", Some(true)),
+            ("foo", "USE=foo", "", "", "", "", None),
+            ("foo", "", "", "", "+foo", "", Some(true)),
+            ("foo", "", "USE=-foo", "", "+foo", "", Some(false)),
             // Explicit overrides implicit IUSE.
-            ("foo", "", "", "", "", "+foo", "foo", Some(true)),
+            ("foo", "", "", "", "+foo", "foo", Some(true)),
+            // A bare duplicate does not cancel an explicit IUSE default (mingw64-toolchain).
+            ("foo", "", "", "", "+foo foo", "", Some(true)),
             // An implicit flag is available without appearing in IUSE; package.use
             // overrides the global state, otherwise it defaults to disabled.
-            ("implicit", "", "USE=-implicit", "", "dev-lang/rust implicit", "", "implicit", Some(true)),
-            ("implicit", "", "", "", "", "", "implicit", Some(false)),
+            ("implicit", "", "USE=-implicit", "*/* implicit", "", "implicit", Some(true)),
+            ("implicit", "", "", "", "", "implicit", Some(false)),
         ];
 
-        for (flag, makenv, make_conf, profile_use, package_use, iuse, implicit, expected) in cases {
-            assert_eq!(
-                use_state(
-                    makenv,
-                    make_conf,
-                    profile_use,
-                    package_use,
-                    iuse,
-                    implicit,
-                    flag
-                )
-                .unwrap(),
-                expected
-            );
+        for (flag, makenv, make_conf, package_use, iuse, implicit, expected) in cases {
+            let result = use_state(makenv, make_conf, "", package_use, iuse, implicit, flag);
+            assert_eq!(result.unwrap(), expected);
         }
     }
 }

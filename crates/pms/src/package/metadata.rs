@@ -257,7 +257,7 @@ impl PackageMetadata {
             inherit: vars.words(MetaVar::Inherited)?,
             restrict: vars.expression::<Restrict>()?,
             defined_phases: vars.words(MetaVar::DefinedPhases)?,
-            iuse: vars.words(MetaVar::IUse)?,
+            iuse: fold_iuse(vars.words(MetaVar::IUse)?),
             required_use: vars.expression::<RequiredUse>()?,
             slot: vars
                 .required(MetaVar::Slot)?
@@ -402,6 +402,20 @@ const fn invalid(var: MetaVar, source: anyhow::Error) -> PackageMetadataError {
     PackageMetadataError::Invalid { var, source }
 }
 
+/// Folds duplicate IUSE entries.
+/// A later explicit `+`/`-` default wins over a bare duplicate.
+fn fold_iuse(entries: Vec<IUseEntry>) -> Vec<IUseEntry> {
+    let mut folded: Vec<IUseEntry> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        match folded.iter_mut().find(|kept| kept.flag() == entry.flag()) {
+            Some(kept) if entry.state().is_some() => *kept = entry,
+            Some(_) => {}
+            None => folded.push(entry),
+        }
+    }
+    folded
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,6 +514,34 @@ mod tests {
         let metadata = PackageMetadata::from_raw(&variables, None).unwrap();
         assert_eq!(metadata.bdepend().to_string(), "dev-python/setuptools");
         assert_eq!(metadata.idepend().to_string(), "");
+    }
+
+    #[test]
+    fn test_metadata_from_raw_iuse_duplicates() {
+        // The last explicit default wins; a bare duplicate adds nothing and
+        // keeps its first position.
+        let cases: [(&str, &[&str]); 5] = [
+            ("+foo foo", &["+foo"]),
+            ("foo +foo", &["+foo"]),
+            ("+foo -foo", &["-foo"]),
+            ("foo foo", &["foo"]),
+            ("+foo bar foo", &["+foo", "bar"]),
+        ];
+
+        for (iuse, expected) in cases {
+            let variables = raw(&[
+                ("EAPI", "8"),
+                ("DESCRIPTION", "Test package"),
+                ("SLOT", "0"),
+                ("IUSE", iuse),
+            ]);
+            let metadata = PackageMetadata::from_raw(&variables, None).unwrap();
+            let expected: Vec<IUseEntry> = expected
+                .iter()
+                .map(|entry| entry.parse().unwrap())
+                .collect();
+            assert_eq!(metadata.iuse(), &expected, "{iuse}");
+        }
     }
 
     #[test]
