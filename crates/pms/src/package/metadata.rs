@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use anyhow::bail;
 use fxhash::FxHashMap;
+use itertools::Itertools;
 use rkyv::{Archive, Deserialize, Serialize};
 use thiserror::Error;
 
@@ -279,31 +280,19 @@ impl PackageMetadata {
 impl fmt::Display for PackageMetadata {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "BDEPEND={}", self.bdepend)?;
-        writeln!(f, "DEFINED_PHASES={}", self.defined_phases.join(" "))?;
+        writeln!(
+            f,
+            "DEFINED_PHASES={}",
+            self.defined_phases.iter().format(" ")
+        )?;
         writeln!(f, "DEPEND={}", self.depend)?;
         writeln!(f, "DESCRIPTION={}", self.description)?;
         writeln!(f, "EAPI={}", self.eapi)?;
         writeln!(f, "HOMEPAGE={}", self.homepage)?;
         writeln!(f, "IDEPEND={}", self.idepend)?;
-        writeln!(f, "INHERITED={}", self.inherit.join(" "))?;
-        writeln!(
-            f,
-            "IUSE={}",
-            self.iuse
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(" ")
-        )?;
-        writeln!(
-            f,
-            "KEYWORDS={}",
-            self.keywords
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(" ")
-        )?;
+        writeln!(f, "INHERITED={}", self.inherit.iter().format(" "))?;
+        writeln!(f, "IUSE={}", self.iuse.iter().format(" "))?;
+        writeln!(f, "KEYWORDS={}", self.keywords.iter().format(" "))?;
         writeln!(f, "LICENSE={}", self.license)?;
         writeln!(f, "PDEPEND={}", self.pdepend)?;
         writeln!(f, "PROPERTIES={}", self.properties)?;

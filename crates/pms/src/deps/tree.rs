@@ -1,6 +1,8 @@
 use std::ops::Range;
 use std::{fmt, slice};
 
+use itertools::Itertools;
+
 use super::ExprItem;
 use super::arena::{ExprArena, ExprEntry, ExprId};
 use crate::useflag::UseFlag;
@@ -199,13 +201,12 @@ pub struct ExprNodes<'a, T: ExprItem> {
 
 impl<T: ExprItem> fmt::Display for ExprNodes<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (index, id) in self.nodes.as_slice().iter().enumerate() {
-            if index > 0 {
-                f.write_str(" ")?;
-            }
-            Expr::new(self.tree, id).fmt(f)?;
-        }
-        Ok(())
+        let iter = self
+            .nodes
+            .as_slice()
+            .iter()
+            .map(|id| Expr::new(self.tree, id));
+        write!(f, "{}", iter.format(" "))
     }
 }
 

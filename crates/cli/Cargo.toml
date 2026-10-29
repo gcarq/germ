@@ -11,6 +11,7 @@ either.workspace = true
 fern.workspace = true
 germ-core.workspace = true
 germ-pms.workspace = true
+itertools.workspace = true
 log.workspace = true
 tokio.workspace = true
 xdg.workspace = true

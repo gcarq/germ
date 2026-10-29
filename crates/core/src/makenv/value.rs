@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 
 use anyhow::anyhow;
 use fancy_regex::Regex;
+use itertools::Itertools;
 
 /// Regex to capture variable references for expansion.
 static VAR_EXPAND_RE: LazyLock<Regex> =
@@ -15,13 +16,7 @@ pub struct EnvValue(Box<str>);
 
 impl EnvValue {
     pub fn new(value: &str) -> Self {
-        Self(
-            value
-                .split_ascii_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .into(),
-        )
+        Self(value.split_ascii_whitespace().join(" ").into())
     }
 
     /// Expands and returns a string by substituting variables from the given `lookup` function.

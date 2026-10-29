@@ -3,6 +3,7 @@ use std::path::Path;
 
 use anyhow::anyhow;
 use germ_pms::Arch;
+use itertools::Itertools;
 use thiserror::Error;
 
 use crate::files::parse_from_path;
@@ -45,15 +46,16 @@ impl ProfileDescription {
     /// Parses a profile description from a single line.
     /// The line must consist of `<arch> <profile_path> <stability>` otherwise an Err is returned.
     fn from_line(line: &str) -> anyhow::Result<Self> {
-        let parts = line.split_ascii_whitespace().collect::<Vec<_>>();
-        match parts.as_slice() {
-            [arch, profile_path, stability] => Ok(Self {
-                arch: arch.parse()?,
-                profile_path: (*profile_path).to_owned(),
-                stability: (*stability).to_owned(),
-            }),
-            _ => Err(anyhow!("Invalid profile description line: {line}")),
-        }
+        let (arch, profile_path, stability) = line
+            .split_ascii_whitespace()
+            .collect_tuple()
+            .ok_or_else(|| anyhow!("Invalid profile description line: {line}"))?;
+
+        Ok(Self {
+            arch: arch.parse()?,
+            profile_path: profile_path.to_owned(),
+            stability: stability.to_owned(),
+        })
     }
 }
 

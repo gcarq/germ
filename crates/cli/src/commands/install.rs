@@ -14,6 +14,7 @@ use germ_core::resolver::{
 use germ_core::useflag::{EffectiveUse, UseExpandConfig};
 use germ_core::vdb::Vdb;
 use germ_pms::{PackageView, UseFlag};
+use itertools::Itertools;
 use log::{info, warn};
 
 /// Installs the best matching package for each of the given `targets`.
@@ -31,14 +32,7 @@ pub async fn install(targets: &[Target], sysconf: Arc<SysConf>) -> anyhow::Resul
 
     let vdb = Vdb::from_path(sysconf.vdb_path()).context("unable to read VDB")?;
 
-    info!(
-        "Creating plan for {}...",
-        targets
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<String>>()
-            .join(" ")
-    );
+    info!("Creating plan for {}...", targets.iter().format(" "));
     let outcome = Resolver::new(PackageProvider::new(&reposet, vdb), policy)
         .resolve(&atoms)
         .await?;
@@ -60,11 +54,7 @@ pub async fn install(targets: &[Target], sysconf: Arc<SysConf>) -> anyhow::Resul
             print_summary(&plan, rejected.len());
         }
         ResolutionOutcome::Failed { failures, .. } => {
-            let failures = failures
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("\n");
+            let failures = failures.iter().format("\n");
             bail!("unable to produce an install plan:\n{failures}");
         }
     }
@@ -73,9 +63,9 @@ pub async fn install(targets: &[Target], sysconf: Arc<SysConf>) -> anyhow::Resul
 }
 
 fn changed_use<'a>(old: &'a EffectiveUse, new: &'a EffectiveUse) -> Vec<(&'a UseFlag, bool)> {
-    let mut changes = new.changes(old).collect::<Vec<_>>();
-    changes.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(b.0)));
-    changes
+    new.changes(old)
+        .sorted_by_key(|&(flag, enabled)| (enabled, flag))
+        .collect()
 }
 
 fn fmt_flags<'a>(
@@ -98,7 +88,6 @@ fn fmt_flags<'a>(
     groups
         .into_iter()
         .map(|(name, values)| format!("{name}=\"{}\"", values.join(" ")))
-        .collect::<Vec<_>>()
         .join(" ")
 }
 

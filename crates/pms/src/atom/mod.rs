@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 use anyhow::{Context, anyhow, bail};
 pub use constraints::{SlotConstraint, VersionConstraint};
 use fancy_regex::{Captures, Regex};
+use itertools::Itertools;
 use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::grammar::{CATEGORY, PACKAGE, REPOSITORY, REVISION, VERSION, VERSION_SUFFIXES};
@@ -290,14 +291,7 @@ impl fmt::Display for Atom {
             write!(f, "::{repo}")?;
         }
         if !self.use_deps.is_empty() {
-            f.write_char('[')?;
-            for (i, use_dep) in self.use_deps.iter().enumerate() {
-                if i > 0 {
-                    f.write_char(',')?;
-                }
-                write!(f, "{use_dep}")?;
-            }
-            f.write_char(']')?;
+            write!(f, "[{}]", self.use_deps.iter().format(","))?;
         }
         Ok(())
     }

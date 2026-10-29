@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 
 use anyhow::bail;
 use germ_pms::{Cpv, PackageVersion};
+use itertools::Itertools;
 
 use crate::ebuild::handler::protocol::FunctionReply;
 
@@ -65,8 +66,7 @@ pub fn ver_rs(cpv: &Cpv, args: &[String]) -> anyhow::Result<FunctionReply> {
     let mut parts: Vec<(String, String)> = ver_split(version);
     let max_idx = parts.len().saturating_sub(1);
 
-    let mut it = pairs.iter();
-    while let (Some(range), Some(repl)) = (it.next(), it.next()) {
+    for (range, repl) in pairs.iter().tuples() {
         let (start, end) = parse_range(range, max_idx)?;
         if start > end || start > max_idx {
             continue;

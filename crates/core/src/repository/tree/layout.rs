@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{Context, anyhow};
 use germ_pms::RepoName;
 use ini::Ini;
+use itertools::Itertools;
 use log::warn;
 use thiserror::Error;
 
@@ -16,7 +17,7 @@ pub enum LayoutError {
 
 /// Holds all supported profile formats and their capabilities.
 /// See `man portage 5` and https://www.gentoo.org/glep/glep-0082.html
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum ProfileFormat {
     Pms,
     Portage1,
@@ -102,16 +103,17 @@ impl Layout {
 
     /// Parses the `profile-formats` property into a list of [`ProfileFormat`].
     fn parse_profile_formats(value: &str) -> Vec<ProfileFormat> {
-        let mut profile_formats = Vec::new();
-        for format in value.split_ascii_whitespace() {
-            match ProfileFormat::try_from(format) {
-                Ok(format) if !profile_formats.contains(&format) => profile_formats.push(format),
-                Ok(_) => {}
+        let mut profile_formats = value
+            .split_ascii_whitespace()
+            .filter_map(|format| match ProfileFormat::try_from(format) {
+                Ok(format) => Some(format),
                 Err(format) => {
                     warn!("Unknown repository profile format: {format}");
+                    None
                 }
-            }
-        }
+            })
+            .unique()
+            .collect::<Vec<_>>();
         if profile_formats.is_empty() {
             profile_formats.push(ProfileFormat::Pms);
         }

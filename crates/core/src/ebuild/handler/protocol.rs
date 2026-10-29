@@ -19,6 +19,7 @@
 use std::fmt;
 use std::str::{FromStr, Utf8Error};
 
+use itertools::Itertools;
 use thiserror::Error;
 
 /// Field delimiter in messages from the ebuild process.
@@ -144,7 +145,7 @@ impl EbuildMessage {
                 let args = parts.collect::<Vec<&str>>();
                 Self::Call(FuncCall::from_raw(func, &args)?)
             }
-            Some("DATA") => Self::Data(parts.collect::<Vec<_>>().join(" ")),
+            Some("DATA") => Self::Data(parts.join(" ")),
             _ => return Err(ProtocolError::InvalidRequest(msg.to_owned())),
         };
         Ok(request)

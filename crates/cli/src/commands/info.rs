@@ -8,6 +8,7 @@ use germ_core::repository::RepoSet;
 use germ_core::vdb::Vdb;
 use germ_core::vdb::package::InstalledPackage;
 use germ_pms::{Atom, PackageView};
+use itertools::Itertools;
 
 /// Prints system- and package information for all packages matching the given `Atom`.
 pub fn info(atom: Option<&Atom>, sysconf: &Arc<SysConf>) -> anyhow::Result<()> {
@@ -20,12 +21,11 @@ pub fn info(atom: Option<&Atom>, sysconf: &Arc<SysConf>) -> anyhow::Result<()> {
     }
     println!();
 
-    let mut env = conf
+    let env = conf
         .makenv()
         .vars()
         .map(|(name, value)| (name.as_str(), value.as_str()))
-        .collect::<Vec<_>>();
-    env.sort();
+        .sorted();
     for (key, value) in env {
         println!("{key}=\"{value}\"");
     }
@@ -74,9 +74,6 @@ fn print_useflags(package: &InstalledPackage) -> anyhow::Result<()> {
         .iter()
         .map(|flag| format!("{}", format!("-{flag}").blue().bold()));
 
-    println!(
-        "USE=\"{}\"",
-        enabled.chain(disabled).collect::<Vec<_>>().join(" ")
-    );
+    println!("USE=\"{}\"", enabled.chain(disabled).join(" "));
     Ok(())
 }

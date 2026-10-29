@@ -3,6 +3,7 @@ use std::iter;
 use std::process::{Command, Output, Stdio};
 
 use anyhow::{Context, anyhow, bail};
+use itertools::Itertools;
 use log::{debug, info};
 
 use super::{SyncConfig, SyncHandler};
@@ -147,7 +148,6 @@ impl GitSyncHandler {
         iter::once(command.get_program())
             .chain(command.get_args())
             .map(|arg| arg.to_string_lossy())
-            .collect::<Vec<_>>()
             .join(" ")
     }
 

@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 /// Formats the given [`anyhow::Error`] including its causes
 /// into a human readable string.
 pub fn format_error(err: &anyhow::Error) -> String {
@@ -6,7 +8,6 @@ pub fn format_error(err: &anyhow::Error) -> String {
         .skip(1)
         .enumerate()
         .map(|(i, cause)| format!("   {i}: {cause}"))
-        .collect::<Vec<_>>()
         .join("\n");
     if error_cause.is_empty() {
         format!("{err}")

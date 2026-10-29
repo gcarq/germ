@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, anyhow};
+use itertools::Itertools;
 
 /// Information about a deprecated profile.
 /// Contains the recommended profile to upgrade to and an additional info that is shown to the user.
@@ -28,7 +29,7 @@ impl DeprecationInfo {
             .next()
             .ok_or_else(|| anyhow!("deprecated file is empty"))?
             .to_owned();
-        let info = lines.collect::<Vec<_>>().join("\n").trim().to_owned();
+        let info = lines.join("\n").trim().to_owned();
         Ok(Self {
             recommended_profile,
             info,

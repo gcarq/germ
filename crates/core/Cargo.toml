@@ -10,6 +10,7 @@ futures-util.workspace = true
 fxhash.workspace = true
 germ-pms.workspace = true
 indexmap.workspace = true
+itertools.workspace = true
 log.workspace = true
 md-5.workspace = true
 nix.workspace = true

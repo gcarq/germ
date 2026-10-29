@@ -1,4 +1,5 @@
 use germ_pms::{Keyword, PackageView};
+use itertools::Itertools;
 
 use super::index::AtomIndex;
 use crate::files::entry::Operation;
@@ -25,7 +26,7 @@ impl EffectiveKeywords {
         accept_keywords: Vec<KeywordSelector>,
         package_accept_keywords: PackageAcceptKeywords,
     ) -> Self {
-        let mut sorted = package_accept_keywords
+        let rules = package_accept_keywords
             .into_rules()
             .flat_map(|(atom, rule)| {
                 let prec = rule.precedence();
@@ -33,11 +34,7 @@ impl EffectiveKeywords {
                     .into_iter()
                     .map(move |action| (prec, atom.clone(), action))
             })
-            .collect::<Vec<_>>();
-        sorted.sort_by_key(|(precedence, _, _)| *precedence);
-
-        let rules = sorted
-            .into_iter()
+            .sorted_by_key(|(precedence, _, _)| *precedence)
             .map(|(_, atom, action)| (atom, action))
             .collect();
         Self {
@@ -159,10 +156,7 @@ mod tests {
     fn package<'a>(keywords: impl IntoIterator<Item = &'a str>) -> Package {
         pkg(
             "dev-lang/rust-1.0",
-            &[(
-                "KEYWORDS",
-                &keywords.into_iter().collect::<Vec<_>>().join(" "),
-            )],
+            &[("KEYWORDS", &keywords.into_iter().join(" "))],
         )
     }
 

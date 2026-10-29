@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::{fmt, iter};
 
 use anyhow::{Context, bail};
+use itertools::Itertools;
 use log::warn;
 pub use system::SystemPackages;
 
@@ -164,12 +165,7 @@ impl Profile {
         dfs: &mut DfsState<PathBuf>,
     ) -> anyhow::Result<()> {
         if let Err(cycle) = dfs.enter(&source.path) {
-            let path = cycle
-                .path
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(" -> ");
+            let path = cycle.path.iter().map(|p| p.display()).format(" -> ");
             bail!("profile parent cycle detected involving {path}");
         }
 

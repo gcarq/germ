@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::{fmt, hash};
 
 use anyhow::{anyhow, bail};
+use itertools::Itertools;
 use rkyv::{Archive, Deserialize, Serialize};
 
 use super::numeric::NumericComponent;
@@ -63,29 +64,10 @@ impl FromStr for VersionNumber {
 
 impl Ord for VersionNumber {
     fn cmp(&self, other: &Self) -> Ordering {
-        match self
-            .components
+        self.components
             .iter()
-            .zip(other.components.iter())
-            .map(|(a, b)| a.cmp(b))
-            .find(|o| *o != Ordering::Equal)
-            .unwrap_or(Ordering::Equal)
-        {
-            Ordering::Equal => {}
-            non_equal => return non_equal,
-        }
-
-        match self.components.len().cmp(&other.components.len()) {
-            Ordering::Equal => {}
-            non_equal => return non_equal,
-        }
-
-        match (self.letter, other.letter) {
-            (Some(a), Some(b)) => a.cmp(&b),
-            (Some(_), None) => Ordering::Greater,
-            (None, Some(_)) => Ordering::Less,
-            (None, None) => Ordering::Equal,
-        }
+            .cmp(other.components.iter())
+            .then_with(|| self.letter.cmp(&other.letter))
     }
 }
 
@@ -110,14 +92,7 @@ impl hash::Hash for VersionNumber {
 
 impl fmt::Display for VersionNumber {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut iter = self.components.iter();
-        if let Some(first) = iter.next() {
-            write!(f, "{first}")?;
-        }
-        for comp in iter {
-            f.write_char('.')?;
-            write!(f, "{comp}")?;
-        }
+        write!(f, "{}", self.components.iter().format("."))?;
         if let Some(letter) = self.letter {
             f.write_char(letter)?;
         }

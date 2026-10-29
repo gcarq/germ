@@ -77,11 +77,23 @@ impl<T> AtomIndex<T> {
             self.wildcard.as_ref(),
         ];
 
-        // TODO: get rid of the allocation
-        let mut positions = buckets.into_iter().flatten().copied().collect::<Vec<_>>();
-        positions.sort_unstable();
+        // Merge the four sorted buckets without allocating.
+        let mut cursors = [0usize; 4];
+        loop {
+            let mut next: Option<(usize, usize)> = None;
+            for (bucket, cursor) in cursors.iter().enumerate() {
+                if let Some(&pos) = buckets[bucket].get(*cursor)
+                    && next.is_none_or(|(best, _)| pos < best)
+                {
+                    next = Some((pos, bucket));
+                }
+            }
 
-        for pos in positions {
+            let Some((pos, bucket)) = next else {
+                break;
+            };
+            cursors[bucket] += 1;
+
             let (atom, value) = &self.entries[pos];
             if pkg.matches_atom(atom) {
                 visit(value);
