@@ -563,6 +563,145 @@ async fn test_resolve_any_of_prefers_selected() {
 }
 
 #[tokio::test]
+async fn test_resolve_any_of_prefers_installed() {
+    let atom = atom("app-editors/nano");
+    let root = pkg(
+        "app-editors/nano-2",
+        &[("DEPEND", "|| ( app-arch/gzip app-arch/bzip2 )")],
+    );
+    let first = pkg("app-arch/gzip-2", &[]);
+    let second = pkg("app-arch/bzip2-1", &[]);
+    let installed = installed("app-arch/bzip2-1", "0", &[], &[]);
+    let outcome = ResolverFixture::new([root.clone(), first, second.clone()])
+        .with_installed([installed.clone()])
+        .resolve([&atom])
+        .await;
+
+    assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
+    assert_eq!(
+        outcome.plan().unwrap().operations(),
+        &[
+            Replace(
+                EffectivePackage::new(second, EffectiveUse::default()),
+                installed
+            ),
+            Merge(EffectivePackage::new(root, EffectiveUse::default()))
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_any_of_installed_over_selected() {
+    let atom = atom("app-editors/nano");
+    let root = pkg(
+        "app-editors/nano-2",
+        &[(
+            "DEPEND",
+            "app-arch/bzip2 || ( app-arch/gzip app-arch/bzip2 )",
+        )],
+    );
+    let first = pkg("app-arch/gzip-2", &[]);
+    let second = pkg("app-arch/bzip2-1", &[]);
+    let installed = installed("app-arch/gzip-2", "0", &[], &[]);
+    let outcome = ResolverFixture::new([root.clone(), first.clone(), second.clone()])
+        .with_installed([installed.clone()])
+        .resolve([&atom])
+        .await;
+
+    assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
+    assert_eq!(
+        outcome.plan().unwrap().operations(),
+        &[
+            Merge(EffectivePackage::new(second, EffectiveUse::default())),
+            Replace(
+                EffectivePackage::new(first, EffectiveUse::default()),
+                installed
+            ),
+            Merge(EffectivePackage::new(root, EffectiveUse::default()))
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_any_of_nested_group_rest() {
+    let atom = atom("app-editors/nano");
+    let root = pkg(
+        "app-editors/nano-2",
+        &[("DEPEND", "|| ( ( app-arch/bzip2 ) app-arch/gzip )")],
+    );
+    let nested = pkg("app-arch/bzip2-1", &[]);
+    let plain = pkg("app-arch/gzip-2", &[]);
+    let nested_installed = installed("app-arch/bzip2-1", "0", &[], &[]);
+    let plain_installed = installed("app-arch/gzip-2", "0", &[], &[]);
+    let outcome = ResolverFixture::new([root.clone(), nested, plain.clone()])
+        .with_installed([nested_installed, plain_installed.clone()])
+        .resolve([&atom])
+        .await;
+
+    assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
+    assert_eq!(
+        outcome.plan().unwrap().operations(),
+        &[
+            Replace(
+                EffectivePackage::new(plain, EffectiveUse::default()),
+                plain_installed
+            ),
+            Merge(EffectivePackage::new(root, EffectiveUse::default()))
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_any_of_installed_use_mismatch() {
+    let atom = atom("app-editors/nano");
+    let root = pkg(
+        "app-editors/nano-2",
+        &[("DEPEND", "|| ( app-arch/bzip2 app-arch/gzip[foo] )")],
+    );
+    let first = pkg("app-arch/bzip2-1", &[]);
+    let second = pkg("app-arch/gzip-2", &[("IUSE", "foo")]);
+    let installed = installed("app-arch/gzip-2", "0", &["foo"], &[]);
+    let outcome = ResolverFixture::new([root.clone(), first.clone(), second])
+        .with_installed([installed])
+        .with_use(&["foo"])
+        .resolve([&atom])
+        .await;
+
+    assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
+    assert_eq!(
+        outcome.plan().unwrap().operations(),
+        &[
+            Merge(EffectivePackage::new(first, EffectiveUse::default())),
+            Merge(EffectivePackage::new(root, EffectiveUse::default()))
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_any_of_blocker_rest() {
+    let atom = atom("app-editors/nano");
+    let root = pkg(
+        "app-editors/nano-2",
+        &[("DEPEND", "|| ( dev-libs/libffi !sys-libs/zlib )")],
+    );
+    let libffi = pkg("dev-libs/libffi-1", &[]);
+    let installed = installed("sys-libs/zlib-1", "0", &[], &[]);
+    let outcome = ResolverFixture::new([root.clone(), libffi.clone()])
+        .with_installed([installed])
+        .resolve([&atom])
+        .await;
+
+    assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
+    assert_eq!(
+        outcome.plan().unwrap().operations(),
+        &[
+            Merge(EffectivePackage::new(libffi, EffectiveUse::default())),
+            Merge(EffectivePackage::new(root, EffectiveUse::default()))
+        ]
+    );
+}
+
+#[tokio::test]
 async fn test_resolve_any_of_failures() {
     let first = atom("app-arch/gzip");
     let second = atom("app-arch/bzip2");

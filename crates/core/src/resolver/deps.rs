@@ -67,23 +67,32 @@ impl<U: PackageLookup> Resolver<U> {
 
     /// Resolves alternatives in an any-of group until one succeeds.
     ///
-    /// Already satisfied dependencies are preferred.
+    /// Already satisfied atoms either by a local package, or the resolver state
+    /// are tried first.
     async fn resolve_group_any(
         &mut self,
         owner: &EffectivePackage,
         nodes: ExprNodes<'_, DepAtom>,
     ) -> anyhow::Result<Option<RequirementFailure>> {
-        for expr in nodes.clone() {
-            if let Expr::Item(atom) = expr {
+        let mut preferred = Vec::new();
+        let mut rest = Vec::new();
+        for expr in nodes {
+            if let Expr::Item(atom) = &expr
+                && atom.blocker().is_none()
+            {
                 let requirement = AtomRequirement::dependency(atom.inner(), &owner.effective_use);
-                if self.state.already_satisfied(&requirement)? {
-                    return Ok(None);
+                if self.state.already_satisfied(&requirement)?
+                    || self.installed_satisfies(&requirement).await?
+                {
+                    preferred.push(expr);
+                    continue;
                 }
             }
+            rest.push(expr);
         }
 
         let mut failures = Vec::new();
-        for expr in nodes {
+        for expr in preferred.into_iter().chain(rest) {
             let traversal = self.start_traversal();
             match self.resolve_expr(owner, expr).await {
                 Ok(None) => return Ok(None),
@@ -98,6 +107,19 @@ impl<U: PackageLookup> Resolver<U> {
             }
         }
         Ok(Some(RequirementFailure::AnyOf(failures)))
+    }
+
+    /// Returns whether an installed package satisfies `requirement`.
+    async fn installed_satisfies(
+        &mut self,
+        requirement: &AtomRequirement<'_>,
+    ) -> anyhow::Result<bool> {
+        for pkg in self.provider.vdb_match_by_atom(requirement.atom()).await? {
+            if requirement.satisfied_by(&pkg, pkg.effective_use())? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Resolves a dependency item and handles any blockers.
