@@ -282,16 +282,12 @@ mod tests {
 
     use super::*;
     use crate::files::test_support::origin;
-    use crate::resolver::test_support::installed;
-    use crate::useflag::EffectiveUse;
+    use crate::resolver::test_support::{effective_pkg, installed};
 
     fn selected_state(package: Package, replacement: Option<InstalledPackage>) -> ResolverState {
         let id = PackageId::new(&package);
         let mut state = ResolverState::default();
-        state.visit(
-            id.clone(),
-            &EffectivePackage::new(package, EffectiveUse::default()),
-        );
+        state.visit(id.clone(), &effective_pkg(package));
         state.select(id, replacement);
         state
     }
@@ -317,7 +313,7 @@ mod tests {
             let package = pkg(fqn, &[]);
             let previous = previous.map(|fqn| installed(fqn, "0", &[], &[]));
             let outcome = selected_state(package.clone(), previous.clone()).finalize(1, Vec::new());
-            let effective = EffectivePackage::new(package, EffectiveUse::default());
+            let effective = effective_pkg(package);
             let expected = match kind {
                 Kind::Merge => PackageOperation::Merge(effective),
                 Kind::Replace => PackageOperation::Replace(effective, previous.unwrap()),
@@ -335,21 +331,15 @@ mod tests {
         let glibc = pkg("sys-libs/glibc-1", &[]);
         let replaced = installed("sys-libs/pam-1", "0", &[], &[]);
         let removal = installed("sys-libs/db-1", "0", &[], &[]);
-        let effective = EffectivePackage::new(pam.clone(), EffectiveUse::default());
+        let effective = effective_pkg(pam.clone());
         let mut state = selected_state(pam, Some(replaced.clone()));
         let glibc_id = PackageId::new(&glibc);
         let zlib_id = PackageId::new(&zlib);
         state.reject(glibc_id.clone(), PolicyRejection::Masked(origin(1)));
         let checkpoint = state.checkpoint();
 
-        state.visit(
-            zlib_id.clone(),
-            &EffectivePackage::new(zlib, EffectiveUse::default()),
-        );
-        state.visit(
-            glibc_id.clone(),
-            &EffectivePackage::new(glibc, EffectiveUse::default()),
-        );
+        state.visit(zlib_id.clone(), &effective_pkg(zlib));
+        state.visit(glibc_id.clone(), &effective_pkg(glibc));
         state.select(zlib_id, None);
         assert!(
             state

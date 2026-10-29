@@ -1,9 +1,14 @@
+use germ_pms::deps::{Depend, ExprKind};
 use germ_pms::test_support::{cpv, pkg_metadata};
 use germ_pms::{Atom, Package, PackageView};
 
 use super::provider::PackageLookup;
-use super::{ResolutionOutcome, Resolver};
+use super::{
+    CandidateRejectionReason, EffectivePackage, PackageOperation, RejectedCandidate,
+    RequirementFailure, ResolutionOutcome, Resolver,
+};
 use crate::policy::test_support::PolicyFixture;
+use crate::useflag::EffectiveUse;
 use crate::useflag::test_support::effective;
 use crate::vdb::package::InstalledPackage;
 
@@ -22,6 +27,73 @@ pub fn installed(
     )
 }
 
+/// Returns an effective package for `pkg` with no USE flags.
+pub fn effective_pkg(pkg: Package) -> EffectivePackage {
+    EffectivePackage::new(pkg, EffectiveUse::default())
+}
+
+/// Creates a `Merge` operation for `pkg` with no USE flags.
+pub fn merge(pkg: Package) -> PackageOperation {
+    PackageOperation::Merge(effective_pkg(pkg))
+}
+
+/// Creates a `Merge` operation for `pkg` with the given effective USE state.
+pub fn merge_with(pkg: Package, effective_use: EffectiveUse) -> PackageOperation {
+    PackageOperation::Merge(EffectivePackage::new(pkg, effective_use))
+}
+
+/// Creates a `Replace` operation for `pkg` replacing `installed`.
+pub fn replace(pkg: Package, installed: InstalledPackage) -> PackageOperation {
+    PackageOperation::Replace(effective_pkg(pkg), installed)
+}
+
+/// Creates an `Upgrade` operation for `pkg` upgrading `installed`.
+pub fn upgrade(pkg: Package, installed: InstalledPackage) -> PackageOperation {
+    PackageOperation::Upgrade(effective_pkg(pkg), installed)
+}
+
+/// Creates an `Unmerge` operation for `installed`.
+pub fn unmerge(installed: InstalledPackage) -> PackageOperation {
+    PackageOperation::Unmerge(installed)
+}
+
+/// Creates a rejected candidate for `pkg` whose `Depend::VAR` dependency failed.
+pub fn dependency_rejection(pkg: Package, failure: RequirementFailure) -> RejectedCandidate {
+    RejectedCandidate::new(
+        pkg,
+        CandidateRejectionReason::Dependency(Depend::VAR, failure.into()),
+    )
+}
+
+/// Returns the exhausted root failure for `atom` in which `root` was rejected on a dependency.
+pub fn exhausted_root(
+    atom: Atom,
+    root: Package,
+    dep_failure: RequirementFailure,
+) -> RequirementFailure {
+    RequirementFailure::Exhausted(atom, vec![dependency_rejection(root, dep_failure)])
+}
+
+/// Asserts that `outcome` is complete and its plan is `operations`.
+#[track_caller]
+pub fn assert_complete_plan(outcome: &ResolutionOutcome, operations: &[PackageOperation]) {
+    assert!(
+        matches!(outcome, ResolutionOutcome::Complete { .. }),
+        "{outcome:#?}"
+    );
+    assert_eq!(outcome.plan().unwrap().operations(), operations);
+}
+
+/// Asserts that `outcome` is partial and its plan is `operations`.
+#[track_caller]
+pub fn assert_partial_plan(outcome: &ResolutionOutcome, operations: &[PackageOperation]) {
+    assert!(
+        matches!(outcome, ResolutionOutcome::Partial { .. }),
+        "{outcome:#?}"
+    );
+    assert_eq!(outcome.plan().unwrap().operations(), operations);
+}
+
 /// Holds resolver inputs for testing.
 pub struct ResolverFixture {
     packages: Vec<Package>,
@@ -30,18 +102,21 @@ pub struct ResolverFixture {
 }
 
 impl ResolverFixture {
-    /// Creates a fixture with `packages` and no installed packages.
-    pub fn new(packages: impl IntoIterator<Item = Package>) -> Self {
+    /// Creates a fixture from clones of `packages` and no installed packages.
+    pub fn new<'a>(packages: impl IntoIterator<Item = &'a Package>) -> Self {
         Self {
-            packages: packages.into_iter().collect(),
+            packages: packages.into_iter().cloned().collect(),
             installed: Vec::default(),
             policy: PolicyFixture::default(),
         }
     }
 
-    /// Sets the installed packages available to resolution.
-    pub fn with_installed(mut self, installed: impl IntoIterator<Item = InstalledPackage>) -> Self {
-        self.installed = installed.into_iter().collect();
+    /// Sets clones of `installed` as the installed packages available to resolution.
+    pub fn with_installed<'a>(
+        mut self,
+        pkgs: impl IntoIterator<Item = &'a InstalledPackage>,
+    ) -> Self {
+        self.installed = pkgs.into_iter().cloned().collect();
         self
     }
 
