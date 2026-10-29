@@ -702,6 +702,150 @@ async fn test_resolve_any_of_blocker_rest() {
 }
 
 #[tokio::test]
+async fn test_resolve_any_of_use_conditional() {
+    let atom = atom("app-editors/nano");
+    let root = pkg(
+        "app-editors/nano-2",
+        &[
+            ("IUSE", "foo"),
+            ("DEPEND", "|| ( foo? ( sys-libs/zlib ) dev-libs/libffi )"),
+        ],
+    );
+    let zlib = pkg("sys-libs/zlib-2", &[]);
+    let libffi = pkg("dev-libs/libffi-1", &[]);
+    let cases: [(&[&str], &Package); 2] = [(&["foo"], &zlib), (&[], &libffi)];
+
+    for (enabled, expected) in cases {
+        let outcome = ResolverFixture::new([root.clone(), zlib.clone(), libffi.clone()])
+            .with_use(enabled)
+            .resolve([&atom])
+            .await;
+        assert!(
+            matches!(outcome, ResolutionOutcome::Complete { .. }),
+            "{enabled:?}"
+        );
+        assert_eq!(
+            outcome.plan().unwrap().operations(),
+            &[
+                Merge(EffectivePackage::new(
+                    expected.clone(),
+                    EffectiveUse::default()
+                )),
+                Merge(EffectivePackage::new(
+                    root.clone(),
+                    effective(&["foo"], enabled)
+                ))
+            ],
+            "{enabled:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_resolve_any_of_empty() {
+    let atom = atom("app-editors/nano");
+    let root = pkg(
+        "app-editors/nano-2",
+        &[("IUSE", "foo"), ("DEPEND", "|| ( foo? ( sys-libs/zlib ) )")],
+    );
+    let zlib = pkg("sys-libs/zlib-2", &[]);
+    let outcome = ResolverFixture::new([root.clone(), zlib])
+        .resolve([&atom])
+        .await;
+    let expected = Exhausted(
+        atom,
+        vec![RejectedCandidate::new(
+            root,
+            Dependency(Depend::VAR, AnyOf(Vec::new()).into()),
+        )],
+    );
+
+    assert_eq!(outcome.failures(), &[expected]);
+}
+
+#[tokio::test]
+async fn test_resolve_any_of_blocker_installed() {
+    let atom = atom("app-editors/nano");
+    let root = pkg(
+        "app-editors/nano-2",
+        &[("DEPEND", "|| ( !sys-libs/zlib dev-libs/libffi )")],
+    );
+    let libffi = pkg("dev-libs/libffi-1", &[]);
+    let installed = installed("sys-libs/zlib-1", "0", &[], &[]);
+    let outcome = ResolverFixture::new([root.clone(), libffi.clone()])
+        .with_installed([installed])
+        .resolve([&atom])
+        .await;
+
+    assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
+    assert_eq!(
+        outcome.plan().unwrap().operations(),
+        &[
+            Merge(EffectivePackage::new(libffi, EffectiveUse::default())),
+            Merge(EffectivePackage::new(root, EffectiveUse::default()))
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_any_of_blocker_absent() {
+    let atom = atom("app-editors/nano");
+    let root = pkg(
+        "app-editors/nano-2",
+        &[("DEPEND", "|| ( !sys-libs/zlib dev-libs/libffi )")],
+    );
+    let libffi = pkg("dev-libs/libffi-1", &[]);
+    let outcome = ResolverFixture::new([root.clone(), libffi])
+        .resolve([&atom])
+        .await;
+
+    assert!(matches!(outcome, ResolutionOutcome::Complete { .. }));
+    assert_eq!(
+        outcome.plan().unwrap().operations(),
+        &[Merge(EffectivePackage::new(root, EffectiveUse::default()))]
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_any_of_blocker_active() {
+    let root_atom = atom("app-editors/nano");
+    let root = pkg(
+        "app-editors/nano-2",
+        &[(
+            "DEPEND",
+            "|| ( !sys-libs/zlib dev-libs/libffi ) sys-libs/zlib",
+        )],
+    );
+    let zlib_atom = atom("sys-libs/zlib");
+    let zlib = pkg("sys-libs/zlib-1", &[]);
+    let outcome = ResolverFixture::new([root.clone(), zlib.clone()])
+        .resolve([&root_atom])
+        .await;
+    let expected = Exhausted(
+        root_atom,
+        vec![RejectedCandidate::new(
+            root.clone(),
+            Dependency(
+                Depend::VAR,
+                Exhausted(
+                    zlib_atom.clone(),
+                    vec![RejectedCandidate::new(
+                        zlib,
+                        ActiveBlocker {
+                            atom: zlib_atom,
+                            owner: root.into(),
+                        },
+                    )],
+                )
+                .into(),
+            ),
+        )],
+    );
+
+    assert_eq!(outcome.failures(), &[expected]);
+}
+
+#[tokio::test]
 async fn test_resolve_any_of_failures() {
     let first = atom("app-arch/gzip");
     let second = atom("app-arch/bzip2");

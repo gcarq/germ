@@ -5,6 +5,7 @@ use germ_pms::{Atom, BlockerStrength, MetaVar, PackageView};
 use super::outcome::RequirementFailure;
 use super::provider::PackageLookup;
 use super::requirement::AtomRequirement;
+use super::state::BlockerMode;
 use super::{EffectivePackage, Resolver};
 
 impl<U: PackageLookup> Resolver<U> {
@@ -77,7 +78,15 @@ impl<U: PackageLookup> Resolver<U> {
         let mut preferred = Vec::new();
         let mut rest = Vec::new();
         for expr in nodes {
-            if let Expr::Item(atom) = &expr
+            // PMS 8.2.3: an inactive immediate USE conditional is not a member.
+            if let Expr::Use { flag, negated, .. } = expr
+                && owner.effective_use.is_enabled(flag)? == negated
+            {
+                continue;
+            }
+
+            // Prefer already satisfied atoms, either by an installed pkg or the resolver state.
+            if let Expr::Item(atom) = expr
                 && atom.blocker().is_none()
             {
                 let requirement = AtomRequirement::dependency(atom.inner(), &owner.effective_use);
@@ -90,11 +99,25 @@ impl<U: PackageLookup> Resolver<U> {
             }
             rest.push(expr);
         }
+        if preferred.is_empty() && rest.is_empty() {
+            // Starting with EAPI 7, any-of group without members are not matched.
+            return Ok(Some(RequirementFailure::AnyOf(Vec::default())));
+        }
 
         let mut failures = Vec::new();
         for expr in preferred.into_iter().chain(rest) {
             let traversal = self.start_traversal();
-            match self.resolve_expr(owner, expr).await {
+            let result = match expr {
+                Expr::Item(atom) => match atom.blocker() {
+                    Some(strength) => {
+                        self.handle_blocker(owner, atom.inner(), strength, BlockerMode::AnyOfMember)
+                            .await
+                    }
+                    None => self.resolve_expr(owner, Expr::Item(atom)).await,
+                },
+                expr => self.resolve_expr(owner, expr).await,
+            };
+            match result {
                 Ok(None) => return Ok(None),
                 Ok(Some(failure)) => {
                     traversal.rollback(self);
@@ -129,24 +152,26 @@ impl<U: PackageLookup> Resolver<U> {
         atom: &DepAtom,
     ) -> anyhow::Result<Option<RequirementFailure>> {
         if let Some(strength) = atom.blocker() {
-            self.handle_blocker(owner, atom.inner(), strength).await
+            self.handle_blocker(owner, atom.inner(), strength, BlockerMode::Requirement)
+                .await
         } else {
             let requirement = AtomRequirement::dependency(atom.inner(), &owner.effective_use);
             self.resolve_candidates(requirement).await
         }
     }
 
-    /// Handles the given `atom` with its `strength` and updates the state.
+    /// Handles the given `atom` with its `strength` in the given [`BlockerMode`].
     async fn handle_blocker(
         &mut self,
         owner: &EffectivePackage,
         atom: &Atom,
         strength: BlockerStrength,
+        mode: BlockerMode,
     ) -> anyhow::Result<Option<RequirementFailure>> {
         let installed = self.provider.vdb_match_by_atom(atom).await?;
         match self
             .state
-            .register_blocker(owner, atom, strength, installed)?
+            .register_blocker(owner, atom, strength, mode, installed)?
         {
             Some(conflict) => Ok(Some(RequirementFailure::Blocker {
                 strength,

@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use germ_pms::{Atom, BlockerStrength, Cpv, Package, PackageView, RepoName};
-use log::info;
+use log::debug;
 
 use super::outcome::{RequirementFailure, ResolutionOutcome};
 use super::requirement::AtomRequirement;
@@ -122,19 +122,24 @@ impl ResolverState {
     /// Registers a package blocker, or returns a package that conflicts with it.
     ///
     /// A blocker conflicts with a selected, visiting, or installed package that matches its
-    /// atom. A weak blocker excludes its own package and is resolved by removing each
-    /// matching installed package; a strong blocker in the same slot is handled automatically,
-    /// in any other case it needs to be resolved manually.
+    /// atom.
+    ///
+    /// In [`BlockerMode::Requirement`], a weak blocker excludes its own package and plans the
+    /// removal of the installed package. A strong blocker is enforced.
+    ///
+    /// In [`BlockerMode::AnyOfMember`], a installed package conflicts and plans no
+    /// removal. A blocker without a conflict is recorded as an active blocker.
     pub fn register_blocker(
         &mut self,
         owner: &EffectivePackage,
         atom: &Atom,
         strength: BlockerStrength,
+        mode: BlockerMode,
         installed: impl IntoIterator<Item = InstalledPackage>,
     ) -> anyhow::Result<Option<Package>> {
         let requirement = AtomRequirement::dependency(atom, &owner.effective_use);
         for candidate in self.candidates() {
-            if strength == BlockerStrength::Weak && candidate.pkg == owner.pkg {
+            if strength.is_weak() && candidate.pkg == owner.pkg {
                 continue;
             }
             if candidate.matches(&requirement)? {
@@ -148,16 +153,15 @@ impl ResolverState {
             if !requirement.satisfied_by(&pkg, pkg.effective_use())? {
                 continue;
             }
-            match strength {
-                BlockerStrength::Weak => {
-                    info!(
-                        "{}: planning removal of {pkg} for blocker !{atom}",
-                        owner.pkg
-                    );
-                    self.removals.insert(pkg);
-                }
-                BlockerStrength::Strong => return Ok(Some(pkg.into())),
+            if strength.is_weak() && mode == BlockerMode::Requirement {
+                debug!(
+                    "{}: planning removal of {pkg} for blocker !{atom}",
+                    owner.pkg
+                );
+                self.removals.insert(pkg);
+                continue;
             }
+            return Ok(Some(pkg.into()));
         }
         self.blockers.push(ActiveBlocker::new(owner, atom));
         Ok(None)
@@ -240,6 +244,15 @@ impl PackageId {
     pub fn new<P: PackageView>(pkg: &P) -> Self {
         Self((pkg.cpv().clone(), pkg.repo().clone()))
     }
+}
+
+/// Defines how a package blocker is handled.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlockerMode {
+    /// A weak blocker plans removal of matching installed packages.
+    Requirement,
+    /// A matching installed package makes the blocker unmatched.
+    AnyOfMember,
 }
 
 /// Defines an active package blocker in a dependency expression.
@@ -344,6 +357,7 @@ mod tests {
                     &effective,
                     &atom("sys-libs/db"),
                     BlockerStrength::Weak,
+                    BlockerMode::Requirement,
                     [removal],
                 )?
                 .is_none()
