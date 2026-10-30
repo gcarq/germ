@@ -82,8 +82,11 @@ impl EffectiveKeywords {
             .any(|selector| selector.matches(keyword, view));
 
         let mut forced = None;
-        self.rules
-            .visit_matches(pkg, |action| forced = action.apply(keyword, view));
+        self.rules.visit_matches(pkg, |action| {
+            if let Some(state) = action.apply(keyword, view) {
+                forced = Some(state);
+            }
+        });
         forced.unwrap_or(base)
     }
 }
@@ -188,6 +191,17 @@ mod tests {
             let pkg = package(keywords.split_whitespace());
             assert_eq!(policy.eval(&pkg), expected, "{keywords}");
         }
+    }
+
+    #[test]
+    fn test_nonmatching_keyword_rule_preserves_decision() {
+        let keywords = policy("", "*/* ~amd64\ndev-lang/rust ~arm64");
+        assert_eq!(
+            keywords.eval(&package(["~amd64"])),
+            KeywordEvalResult::Accepted {
+                stable_in_use: false
+            }
+        );
     }
 
     #[test]

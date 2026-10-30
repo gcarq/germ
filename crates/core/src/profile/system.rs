@@ -4,7 +4,7 @@ use std::path::Path;
 use germ_pms::Atom;
 use log::warn;
 
-use crate::files::entry::{LineOrigin, Precedence};
+use crate::files::entry::{Entry, LineOrigin, Precedence};
 use crate::files::{AtomEntries, parse_from_path};
 use crate::utils::Inherit;
 
@@ -26,7 +26,10 @@ impl SystemPackages {
 
     /// Consumes self and returns the atoms that remain set.
     pub fn finalize(self) -> impl Iterator<Item = Atom> {
-        self.0.finalize()
+        self.0
+            .into_entries()
+            .filter(|entry| entry.op.as_bool())
+            .map(Entry::into_inner)
     }
 
     /// Adds one `packages` entry.

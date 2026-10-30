@@ -4,6 +4,7 @@ use germ_pms::{IUseState, PackageView, UseFlag};
 
 use super::index::AtomIndex;
 use crate::files::UseEntries;
+use crate::files::entry::Entry;
 use crate::files::pkgfile::{MatchedUse, PackageUseRecords, UseFlags};
 use crate::profile::ProfileUseRecords;
 use crate::types::{FxHashMap, FxHashSet};
@@ -52,19 +53,9 @@ impl From<FxHashMap<UseFlag, bool>> for GlobalUseRules {
 pub struct UsePolicy {
     global_use: GlobalUseRules,
     iuse_implicit: FxHashSet<UseFlag>,
-
-    use_mask: Box<[UseFlag]>,
-    use_force: Box<[UseFlag]>,
-
-    use_stable_mask: Box<[UseFlag]>,
-    use_stable_force: Box<[UseFlag]>,
-
     package_use: PackageUse,
-    package_use_mask: PackageUse,
-    package_use_force: PackageUse,
-
-    package_use_stable_mask: PackageUse,
-    package_use_stable_force: PackageUse,
+    mask: UseRestriction,
+    force: UseRestriction,
     expand_config: UseExpandConfig,
 }
 
@@ -76,50 +67,53 @@ impl UsePolicy {
         profile: ProfileUseRecords,
         local: LocalUseRecords,
     ) -> anyhow::Result<Self> {
-        Ok(Self {
-            use_mask: local
-                .use_mask
-                .inherit(&profile.use_mask)?
-                .finalize()
-                .collect(),
-            use_force: profile.use_force.finalize().collect(),
-            use_stable_mask: profile.use_stable_mask.finalize().collect(),
-            use_stable_force: profile.use_stable_force.finalize().collect(),
-            package_use: PackageUse::new(
-                local.package_use.inherit(&profile.package_use)?,
-                &profile.expand_config,
-            )
-            .context("failed to resolve package.use")?,
-            package_use_mask: PackageUse::new(
+        let package_use = PackageUse::new(
+            local.package_use.inherit(&profile.package_use)?,
+            &profile.expand_config,
+        )
+        .context("failed to resolve package.use")?;
+        let mask = UseRestriction {
+            global: compile_global(local.use_mask.inherit(&profile.use_mask)?),
+            stable_global: compile_global(profile.use_stable_mask),
+            package: PackageUse::new(
                 local.package_use_mask.inherit(&profile.package_use_mask)?,
                 &profile.expand_config,
             )
             .context("failed to resolve package.use.mask")?,
-            package_use_force: PackageUse::new(
+            stable_package: PackageUse::new(
+                profile.package_use_stable_mask,
+                &profile.expand_config,
+            )
+            .context("failed to resolve package.use.stable.mask")?,
+        };
+        let force = UseRestriction {
+            global: compile_global(profile.use_force),
+            stable_global: compile_global(profile.use_stable_force),
+            package: PackageUse::new(
                 local
                     .package_use_force
                     .inherit(&profile.package_use_force)?,
                 &profile.expand_config,
             )
             .context("failed to resolve package.use.force")?,
-            package_use_stable_mask: PackageUse::new(
-                profile.package_use_stable_mask,
-                &profile.expand_config,
-            )
-            .context("failed to resolve package.use.stable.mask")?,
-            package_use_stable_force: PackageUse::new(
+            stable_package: PackageUse::new(
                 profile.package_use_stable_force,
                 &profile.expand_config,
             )
             .context("failed to resolve package.use.stable.force")?,
+        };
+
+        Ok(Self {
             global_use,
             iuse_implicit,
+            package_use,
+            mask,
+            force,
             expand_config: profile.expand_config,
         })
     }
 
-    /// Evaluates the required USE flags and returns a tuple containing its [`EffectiveUse`]
-    /// and whether the required USE flags are satisfied.
+    /// Evaluates the required USE flags and returns [`UseFlagEvalResult`].
     ///
     /// TODO: This currently only checks the required USE flags to satisfy the expression,
     ///       inactive branches can contain unreferenced USE flags which might not be PMS compatible.
@@ -128,12 +122,14 @@ impl UsePolicy {
         P: PackageView,
     {
         let effective_use = self.effective_for(pkg, stable_in_use);
-        let mut evaluator = ReqUseEval::new(&effective_use);
-        let result = match pkg.metadata().required_use().view().eval(&mut evaluator)? {
+        let mut evaluator = ReqUseEval {
+            state: &effective_use,
+        };
+        let satisfied = pkg.metadata().required_use().view().eval(&mut evaluator)?;
+        Ok(match satisfied {
             true => UseFlagEvalResult::Satisfied(effective_use),
             false => UseFlagEvalResult::Unsatisfied,
-        };
-        Ok(result)
+        })
     }
 
     /// Returns the effective USE state for the given [`PackageView`].
@@ -142,21 +138,21 @@ impl UsePolicy {
         P: PackageView,
     {
         let pkg_use = self.package_use.matched_for(pkg);
-        let masked = self.masked_for_pkg(pkg, stable_in_use);
-        let forced = self.forced_for_pkg(pkg, stable_in_use);
+        let masked = self.mask.matched_for(pkg, stable_in_use);
+        let forced = self.force.matched_for(pkg, stable_in_use);
 
         // Explicit IUSE entries overwrite implicit ones.
-        let iuse = self.iuse_implicit.iter().map(|flag| (flag, None)).chain(
-            pkg.metadata()
-                .iuse()
-                .iter()
-                .map(|entry| (entry.flag(), entry.state())),
-        );
+        let iuse = pkg.metadata().iuse().iter();
+        let iuse = self
+            .iuse_implicit
+            .iter()
+            .map(|flag| (flag, None))
+            .chain(iuse.map(|entry| (entry.flag(), entry.state())));
 
         let flags = iuse
             .map(|(flag, default)| {
-                let enabled = !masked.contains(flag)
-                    && (forced.contains(flag)
+                let enabled = !masked.state(flag).unwrap_or(false)
+                    && (forced.state(flag).unwrap_or(false)
                         || pkg_use
                             .state(flag, &self.expand_config)
                             .or_else(|| self.global_use.state(flag))
@@ -168,35 +164,85 @@ impl UsePolicy {
 
         EffectiveUse::new(flags)
     }
+}
 
-    /// Returns all USE flags that are masked for the given [`PackageView`].
-    fn masked_for_pkg<P: PackageView>(&self, pkg: &P, stable_in_use: bool) -> FxHashSet<&UseFlag> {
-        let iter = self
-            .use_mask
-            .iter()
-            .chain(self.package_use_mask.enabled_for(pkg));
-        match stable_in_use {
-            true => iter
-                .chain(self.use_stable_mask.iter())
-                .chain(self.package_use_stable_mask.enabled_for(pkg))
-                .collect(),
-            false => iter.collect(),
+/// Compiled USE mask or force rules from all sources.
+///
+/// Global rules are compiled once from the inherited records, retaining
+/// negative operations; package rules stay atom-scoped and are matched
+/// per package.
+struct UseRestriction {
+    global: FxHashMap<UseFlag, Entry<UseFlag>>,
+    stable_global: FxHashMap<UseFlag, Entry<UseFlag>>,
+    package: PackageUse,
+    stable_package: PackageUse,
+}
+
+impl UseRestriction {
+    /// Returns the restriction rules matched for the given `pkg`.
+    fn matched_for<'a, P: PackageView>(
+        &'a self,
+        pkg: &P,
+        stable_in_use: bool,
+    ) -> MatchedRestriction<'a> {
+        MatchedRestriction {
+            restriction: self,
+            package: self.package.matched_for(pkg),
+            stable_package: stable_in_use.then(|| self.stable_package.matched_for(pkg)),
         }
     }
+}
 
-    /// Returns all USE flags that are forced for the given [`PackageView`].
-    fn forced_for_pkg<P: PackageView>(&self, pkg: &P, stable_in_use: bool) -> FxHashSet<&UseFlag> {
-        let iter = self
-            .use_force
-            .iter()
-            .chain(self.package_use_force.enabled_for(pkg));
-        match stable_in_use {
-            true => iter
-                .chain(self.use_stable_force.iter())
-                .chain(self.package_use_stable_force.enabled_for(pkg))
-                .collect(),
-            false => iter.collect(),
-        }
+/// Compiles the inherited `entries` into global rules, retaining negative operations.
+fn compile_global(entries: UseEntries) -> FxHashMap<UseFlag, Entry<UseFlag>> {
+    entries
+        .into_entries()
+        .map(|entry| (entry.inner().clone(), entry))
+        .collect()
+}
+
+/// The source of a USE restriction rule.
+///
+/// At equal precedence, package rules beat global rules and stable rules
+/// beat base rules.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RuleSource {
+    Global,
+    GlobalStable,
+    Package,
+    PackageStable,
+}
+
+/// A [`UseRestriction`] matched for a single package.
+///
+/// `stable_package` being `None` means no stable rules are active,
+/// including stable global rules.
+struct MatchedRestriction<'a> {
+    restriction: &'a UseRestriction,
+    package: MatchedUse<'a>,
+    stable_package: Option<MatchedUse<'a>>,
+}
+
+impl MatchedRestriction<'_> {
+    /// Returns whether the winning rule sets the flag, if a rule applies.
+    ///
+    /// Candidates are ranked by precedence first, then by [`RuleSource`];
+    /// an explicit negative rule is a winning unset, not the absence of a rule.
+    fn state(&self, flag: &UseFlag) -> Option<bool> {
+        let stable = self.stable_package.as_ref();
+        let stable_global = stable.and_then(|_| self.restriction.stable_global.get(flag));
+        let stable_package = stable.and_then(|matched| matched.entry(flag));
+
+        [
+            (RuleSource::Global, self.restriction.global.get(flag)),
+            (RuleSource::GlobalStable, stable_global),
+            (RuleSource::Package, self.package.entry(flag)),
+            (RuleSource::PackageStable, stable_package),
+        ]
+        .into_iter()
+        .filter_map(|(source, entry)| entry.map(|entry| (source, entry)))
+        .max_by_key(|(source, entry)| (entry.prec, *source))
+        .map(|(_, entry)| entry.op.as_bool())
     }
 }
 
@@ -216,22 +262,11 @@ impl PackageUse {
         self.0.visit_matches(pkg, |flags| matched.absorb(flags));
         matched
     }
-
-    /// Returns all enabled USE flags that apply to the given `pkg`.
-    fn enabled_for<'a, P: PackageView>(&'a self, pkg: &P) -> impl Iterator<Item = &'a UseFlag> {
-        self.matched_for(pkg).into_enabled()
-    }
 }
 
 /// Evaluates `REQUIRED_USE` against the effective USE state of a given package.
 struct ReqUseEval<'a> {
     state: &'a EffectiveUse,
-}
-
-impl ReqUseEval<'_> {
-    const fn new(state: &EffectiveUse) -> ReqUseEval<'_> {
-        ReqUseEval { state }
-    }
 }
 
 impl ExprEval<RequiredUseFlag> for ReqUseEval<'_> {
@@ -249,9 +284,8 @@ impl ExprEval<RequiredUseFlag> for ReqUseEval<'_> {
 
 #[cfg(test)]
 mod tests {
-    use germ_pms::Package;
     use germ_pms::deps::{ParsedExpr, RequiredUse};
-    use germ_pms::test_support::{cpv, pkg_metadata};
+    use germ_pms::test_support::pkg;
 
     use super::*;
     use crate::files::entry::Precedence;
@@ -286,11 +320,7 @@ mod tests {
             .map(UseFlag::new)
             .collect::<anyhow::Result<_>>()?;
         let policy = UsePolicy::new(makenv_stack.global_use()?, implicit, profile, local)?;
-        let package = Package::new(
-            cpv("dev-lang/rust-1.0"),
-            "gentoo".parse()?,
-            pkg_metadata(&[("IUSE", iuse)]),
-        );
+        let package = pkg("dev-lang/rust-1.0", &[("IUSE", iuse)]);
         Ok(policy
             .effective_for(&package, false)
             .state(&UseFlag::new(flag)?))
@@ -316,7 +346,7 @@ mod tests {
                 (foo.clone(), foo_state),
                 (bar.clone(), bar_state),
             ]));
-            let mut evaluator = ReqUseEval::new(&state);
+            let mut evaluator = ReqUseEval { state: &state };
             let actual = expr.view().eval(&mut evaluator)?;
 
             assert_eq!(actual, expected, "{input}");
@@ -340,11 +370,7 @@ mod tests {
             profile,
             LocalUseRecords::default(),
         )?;
-        let package = Package::new(
-            cpv("sys-libs/pam-1.0"),
-            "gentoo".parse()?,
-            pkg_metadata(&[("IUSE", "elogind systemd forced")]),
-        );
+        let package = pkg("sys-libs/pam-1.0", &[("IUSE", "elogind systemd forced")]);
         let effective = policy.effective_for(&package, false);
 
         assert_eq!(effective.state(&elogind), Some(false));
@@ -367,10 +393,9 @@ mod tests {
             expand_config,
             ..Default::default()
         };
-        let package = Package::new(
-            cpv("llvm-core/clang-23.1.2"),
-            "gentoo".parse()?,
-            pkg_metadata(&[("IUSE", "llvm_targets_AArch64")]),
+        let package = pkg(
+            "llvm-core/clang-23.1.2",
+            &[("IUSE", "llvm_targets_AArch64")],
         );
         let forced = UsePolicy::new(
             use_rules.clone(),
@@ -378,10 +403,8 @@ mod tests {
             profile.clone(),
             LocalUseRecords::default(),
         )?;
-        assert_eq!(
-            forced.effective_for(&package, false).state(&flag),
-            Some(true)
-        );
+        let effective = forced.effective_for(&package, false).state(&flag);
+        assert_eq!(effective, Some(true));
 
         let local = LocalUseRecords {
             package_use_force: PackageUseRecords::from_lines(
@@ -391,10 +414,8 @@ mod tests {
             ..Default::default()
         };
         let unforced = UsePolicy::new(use_rules, FxHashSet::default(), profile, local)?;
-        assert_eq!(
-            unforced.effective_for(&package, false).state(&flag),
-            Some(false)
-        );
+        let effective = unforced.effective_for(&package, false).state(&flag);
+        assert_eq!(effective, Some(false));
         Ok(())
     }
 
@@ -413,16 +434,10 @@ mod tests {
             profile,
             LocalUseRecords::default(),
         )?;
-        let package = Package::new(
-            cpv("sys-libs/pam-1.0"),
-            "gentoo".parse()?,
-            pkg_metadata(&[("IUSE", "elogind")]),
-        );
+        let package = pkg("sys-libs/pam-1.0", &[("IUSE", "elogind")]);
 
-        assert_eq!(
-            policy.effective_for(&package, false).state(&elogind),
-            Some(true)
-        );
+        let effective = policy.effective_for(&package, false).state(&elogind);
+        assert_eq!(effective, Some(true));
         Ok(())
     }
 
@@ -445,11 +460,8 @@ mod tests {
         ];
 
         for (flag, expected) in cases {
-            assert_eq!(
-                use_state(makenv, "", "", package_use, iuse, "", flag)?,
-                Some(expected),
-                "{flag}"
-            );
+            let state = use_state(makenv, "", "", package_use, iuse, "", flag)?;
+            assert_eq!(state, Some(expected), "{flag}");
         }
         Ok(())
     }
@@ -483,17 +495,14 @@ mod tests {
         ];
 
         for (package_use, expected) in cases {
-            assert_eq!(
-                use_state("", "", "", package_use, "foo", "", "foo")?,
-                Some(expected),
-                "{package_use}"
-            );
+            let state = use_state("", "", "", package_use, "foo", "", "foo")?;
+            assert_eq!(state, Some(expected), "{package_use}");
         }
         Ok(())
     }
 
     #[test]
-    fn test_effective_use() {
+    fn test_effective_use() -> anyhow::Result<()> {
         // flag, makenv, make_conf, package_use, iuse, implicit, expected
         #[rustfmt::skip]
         let cases = [
@@ -513,8 +522,150 @@ mod tests {
         ];
 
         for (flag, makenv, make_conf, package_use, iuse, implicit, expected) in cases {
-            let result = use_state(makenv, make_conf, "", package_use, iuse, implicit, flag);
-            assert_eq!(result.unwrap(), expected);
+            let result = use_state(makenv, make_conf, "", package_use, iuse, implicit, flag)?;
+            assert_eq!(result, expected);
         }
+        Ok(())
+    }
+
+    fn restriction_policy(
+        global_mask: Option<(&str, Precedence)>,
+        global_force: Option<(&str, Precedence)>,
+        pkg_mask: Option<(&str, Precedence)>,
+        pkg_force: Option<(&str, Precedence)>,
+    ) -> anyhow::Result<UsePolicy> {
+        let entries = |line: Option<(&str, Precedence)>| match line {
+            Some((line, prec)) => UseEntries::from_lines([line], prec),
+            None => Ok(UseEntries::default()),
+        };
+        let records = |line: Option<(&str, Precedence)>| match line {
+            Some((line, prec)) => PackageUseRecords::from_lines([line], prec),
+            None => Ok(PackageUseRecords::default()),
+        };
+        let profile = ProfileUseRecords {
+            use_mask: entries(global_mask)?,
+            use_force: entries(global_force)?,
+            ..Default::default()
+        };
+        let local = LocalUseRecords {
+            package_use_mask: records(pkg_mask)?,
+            package_use_force: records(pkg_force)?,
+            ..Default::default()
+        };
+        UsePolicy::new(
+            FxHashMap::from_iter([(UseFlag::new("foo")?, true)]).into(),
+            FxHashSet::default(),
+            profile,
+            local,
+        )
+    }
+
+    #[test]
+    fn test_restriction_precedence() -> anyhow::Result<()> {
+        let flag = UseFlag::new("foo")?;
+        let package = pkg("dev-lang/rust-1.0", &[("IUSE", "foo")]);
+        let p0 = Precedence::Profile(0);
+        let p1 = Precedence::Profile(1);
+        let user = Precedence::User;
+
+        // global_mask, global_force, pkg_mask, pkg_force, mask, force, effective
+        #[rustfmt::skip]
+        let cases = [
+            // A higher-precedence package unset cancels the global mask.
+            (Some(("foo", p0)), None, Some(("dev-lang/rust -foo", user)), None, Some(false), None, Some(true)),
+            // A higher-precedence profile unset cancels a lower package set.
+            (Some(("-foo", p1)), None, Some(("dev-lang/rust foo", p0)), None, Some(false), None, Some(true)),
+            // A higher-precedence package unset cancels the global force.
+            (None, Some(("foo", p0)), None, Some(("dev-lang/rust -foo", user)), None, Some(false), Some(true)),
+            // At equal precedence the package rule wins over the global rule.
+            (Some(("foo", p0)), None, Some(("dev-lang/rust -foo", p0)), None, Some(false), None, Some(true)),
+            // Mask wins over force for effective USE.
+            (Some(("foo", p0)), Some(("foo", p0)), None, None, Some(true), Some(true), Some(false)),
+            // No restriction preserves the global USE fallback.
+            (None, None, None, None, None, None, Some(true)),
+        ];
+
+        for (
+            global_mask,
+            global_force,
+            pkg_mask,
+            pkg_force,
+            expected_mask,
+            expected_force,
+            expected_effective,
+        ) in cases
+        {
+            let policy = restriction_policy(global_mask, global_force, pkg_mask, pkg_force)?;
+            let mask = policy.mask.matched_for(&package, false).state(&flag);
+            let force = policy.force.matched_for(&package, false).state(&flag);
+            let effective = policy.effective_for(&package, false).state(&flag);
+            let expected = (expected_mask, expected_force, expected_effective);
+            assert_eq!((mask, force, effective), expected);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_restriction_stable_in_use() -> anyhow::Result<()> {
+        let flag = UseFlag::new("foo")?;
+        let profile = ProfileUseRecords {
+            use_mask: UseEntries::from_lines(["foo"], Precedence::Profile(0))?,
+            use_stable_mask: UseEntries::from_lines(["-foo"], Precedence::Profile(0))?,
+            use_force: UseEntries::from_lines(["foo"], Precedence::Profile(0))?,
+            use_stable_force: UseEntries::from_lines(["-foo"], Precedence::Profile(0))?,
+            ..Default::default()
+        };
+        let policy = UsePolicy::new(
+            FxHashMap::from_iter([(flag.clone(), true)]).into(),
+            FxHashSet::default(),
+            profile,
+            LocalUseRecords::default(),
+        )?;
+        let package = pkg("dev-lang/rust-1.0", &[("IUSE", "foo")]);
+        let mask = |stable| policy.mask.matched_for(&package, stable).state(&flag);
+        let force = |stable| policy.force.matched_for(&package, stable).state(&flag);
+
+        // Stable rules are inactive unless stable_in_use, then they win at equal precedence.
+        let cases = [(false, true, true, false), (true, false, false, true)];
+        for (stable, expected_mask, expected_force, expected_effective) in cases {
+            let effective = policy.effective_for(&package, stable).state(&flag);
+            assert_eq!(mask(stable), Some(expected_mask), "{stable}");
+            assert_eq!(force(stable), Some(expected_force), "{stable}");
+            assert_eq!(effective, Some(expected_effective), "{stable}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_restriction_reset_scope() -> anyhow::Result<()> {
+        let flag = UseFlag::new("foo")?;
+        let other = UseFlag::new("bar")?;
+        let profile = ProfileUseRecords {
+            use_mask: UseEntries::from_lines(["foo"], Precedence::Profile(0))?,
+            ..Default::default()
+        };
+        let local = LocalUseRecords {
+            package_use_mask: PackageUseRecords::from_lines(
+                ["dev-lang/rust bar -*", "dev-libs/openssl foo"],
+                Precedence::User,
+            )?,
+            ..Default::default()
+        };
+        let policy = UsePolicy::new(
+            FxHashMap::from_iter([(flag.clone(), true), (other.clone(), true)]).into(),
+            FxHashSet::default(),
+            profile,
+            local,
+        )?;
+        let rust = pkg("dev-lang/rust-1.0", &[("IUSE", "foo bar")]);
+        let openssl = pkg("dev-libs/openssl-1.0", &[("IUSE", "foo bar")]);
+        let masked = |package, flag| policy.mask.matched_for(package, false).state(flag);
+
+        // A same-file `-*` reset clears the record's earlier entries, but the
+        // global mask still applies to the atom and stays scoped to it.
+        assert_eq!(masked(&rust, &flag), Some(true), "rust foo");
+        assert_eq!(masked(&rust, &other), None, "rust bar");
+        assert_eq!(masked(&openssl, &flag), Some(true), "openssl foo");
+        Ok(())
     }
 }

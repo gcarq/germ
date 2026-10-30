@@ -33,15 +33,6 @@ impl<T: EntryValue> LineEntries<T> {
         Self::dedupe(self.0.into_iter().rev()).into_iter()
     }
 
-    /// Consumes self and returns an iterator of the inner `T` that remain set.
-    ///
-    /// Values reverted by a later `-<value>` or `-*` are omitted.
-    pub fn finalize(self) -> impl Iterator<Item = T> {
-        self.into_entries()
-            .filter(|entry| entry.op.as_bool())
-            .map(Entry::into_inner)
-    }
-
     /// Appends the parsed `line`, treating a bare `-*` as a reset.
     pub fn push(
         &mut self,

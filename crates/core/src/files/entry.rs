@@ -1,6 +1,5 @@
 use std::fmt;
 use std::hash::Hash;
-use std::ops::Deref;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -103,14 +102,6 @@ impl<T: EntryValue> Entry<T> {
 
     pub fn into_inner(self) -> T {
         self.inner
-    }
-}
-
-impl<T: EntryValue> Deref for Entry<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
     }
 }
 

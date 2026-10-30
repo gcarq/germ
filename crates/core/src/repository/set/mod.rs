@@ -424,9 +424,9 @@ mod tests {
             .next()
             .expect("repository unmask");
 
-        assert_eq!(mask.to_string(), "dev-lang/rust");
+        assert_eq!(mask.inner().to_string(), "dev-lang/rust");
         assert_eq!(mask.prec, Precedence::Repository);
-        assert_eq!(unmask.to_string(), "app-editors/vim");
+        assert_eq!(unmask.inner().to_string(), "app-editors/vim");
         assert_eq!(unmask.prec, Precedence::Repository);
         Ok(())
     }

@@ -195,12 +195,9 @@ impl<'a> MatchedUse<'a> {
         }
     }
 
-    /// Consumes self and returns the flags enabled by the matched entries.
-    pub fn into_enabled(self) -> impl Iterator<Item = &'a UseFlag> {
-        self.entries
-            .into_values()
-            .filter(|entry| entry.op.as_bool())
-            .map(Entry::inner)
+    /// Returns the original assignment for `flag`, including explicit unsets.
+    pub fn entry(&self, flag: &UseFlag) -> Option<&'a Entry<UseFlag>> {
+        self.entries.get(flag).copied()
     }
 }
 
@@ -276,7 +273,6 @@ impl UseReset {
 mod tests {
     use super::*;
     use crate::files::test_support::{entry, flags_for};
-    use crate::types::FxHashSet;
     use crate::useflag::test_support::expand_config;
 
     fn config() -> UseExpandConfig {
@@ -466,6 +462,7 @@ mod tests {
     }
 
     #[test]
+    #[rustfmt::skip]
     fn test_matched_use() -> anyhow::Result<()> {
         let config = config();
         let profile = PackageUseRecords::from_lines(
@@ -473,9 +470,11 @@ mod tests {
             Precedence::Profile(0),
         )?
         .expand(&config)?;
-        let user =
-            PackageUseRecords::from_lines("*/* LLVM_TARGETS: -* AMDGPU".lines(), Precedence::User)?
-                .expand(&config)?;
+        let user = PackageUseRecords::from_lines(
+            "*/* -debug LLVM_TARGETS: -* AMDGPU".lines(),
+            Precedence::User,
+        )?
+        .expand(&config)?;
         let mut matched = MatchedUse::default();
         for (_, flags) in profile.iter().chain(user.iter()) {
             matched.absorb(flags);
@@ -490,13 +489,15 @@ mod tests {
             assert_eq!(matched.state(&UseFlag::new(flag)?, &config), expected);
         }
 
-        assert_eq!(
-            matched.into_enabled().cloned().collect::<FxHashSet<_>>(),
-            FxHashSet::from_iter([
-                UseFlag::new("llvm_targets_NVPTX")?,
-                UseFlag::new("llvm_targets_AMDGPU")?,
-            ])
-        );
+        for (flag, expected) in [
+            ("llvm_targets_NVPTX", Some(entry("llvm_targets_NVPTX", Precedence::Profile(0), 1))),
+            ("llvm_targets_AMDGPU", Some(entry("llvm_targets_AMDGPU", Precedence::User, 1))),
+            ("debug", Some(entry("-debug", Precedence::User, 1))),
+            ("lto", None),
+        ] {
+            let flag = UseFlag::new(flag)?;
+            assert_eq!(matched.entry(&flag).cloned(), expected, "{flag}");
+        }
         Ok(())
     }
 }
