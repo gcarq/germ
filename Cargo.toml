@@ -19,7 +19,7 @@ indexmap = { version = "2.14.2", default-features = false, features = ["std"] }
 itertools = { version = "0.15.0", default-features = false, features = ["use_std"] }
 log = { version = "0.4.34", default-features = false }
 md-5 = { version = "0.11.0", default-features = false }
-nix = { version = "0.31.3", default-features = false, features = ["fs", "process", "signal"] }
+nix = { version = "0.32.0", default-features = false, features = ["fs", "process", "signal"] }
 once_cell = { version = "1.21.4", default-features = false, features = ["std"] }
 germ-core = { path = "crates/core" }
 germ-pms = { path = "crates/pms" }
